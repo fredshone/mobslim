@@ -1,7 +1,7 @@
 from networkx import Graph
 
 
-class Durations:
+class ExpectedLinkDurations:
     """A class to handle expected durations for edges in a graph."""
 
     def __init__(self, graph: Graph):
@@ -30,17 +30,20 @@ class Durations:
         raise NotImplementedError("This method is not implemented yet.")
 
 
-class SimpleDurations(Durations):
+class SimpleExpectedDurations(ExpectedLinkDurations):
     """A simple implementation of expected durations for edges in a graph."""
 
     def __init__(self, graph: Graph):
-        super().__init__(graph)
-        self.expected_durations = {edge: 1 for edge in graph.edges}
+        self.edge_durations = {edge: 1 for edge in graph.edges}
 
     def get(self, edge: tuple, time: int) -> float:
         """Get the expected duration for a given edge at a specific time."""
-        return self.expected_durations[edge]
+        return self.edge_durations[edge]
 
     def update(self, edge: tuple, time: int, duration: float):
         """Update the expected duration for a given edge at a specific time."""
-        self.expected_durations[edge] = duration
+        self.edge_durations[edge] = duration
+
+    def av_duration(self) -> float:
+        """Calculate the average expected duration across all edges."""
+        return sum(self.edge_durations.values()) / len(self.edge_durations)
