@@ -1,5 +1,8 @@
 from networkx import Graph
 
+from mobslim.network import Network
+from mobslim.processs_events import av_link_durations
+
 
 class ExpectedLinkDurations:
     """A class to handle expected durations for edges in a graph."""
@@ -7,7 +10,7 @@ class ExpectedLinkDurations:
     def __init__(self, graph: Graph):
         raise NotImplementedError("This class is not implemented yet.")
 
-    def get(edge: tuple, time: float) -> float:
+    def get(self, edge: tuple, time: float) -> float:
         """Get the expected duration for a given edge at a specific time.
 
         Args:
@@ -19,7 +22,10 @@ class ExpectedLinkDurations:
         """
         raise NotImplementedError("This method is not implemented yet.")
 
-    def update(edge: tuple, time: float, duration: float):
+    def update(self, plans: dict, network: Network, events: list):
+        raise NotImplementedError("This method is not implemented yet.")
+
+    def update_link(edge: tuple, time: float, duration: float):
         """Update the expected duration for a given edge at a specific time.
 
         Args:
@@ -34,15 +40,27 @@ class SimpleExpectedDurations(ExpectedLinkDurations):
     """A simple implementation of expected durations for edges in a graph."""
 
     def __init__(self, graph: Graph):
-        self.edge_durations = {edge: 1 for edge in graph.edges}
+        self.edge_durations = {
+            (u, v): data.get("freespeed", None) for u, v, data in graph.edges(data=True)
+        }
+        if None in self.edge_durations.values():
+            raise ValueError("All edges must have a 'freespeed' attribute.")
 
     def get(self, edge: tuple, time: int) -> float:
         """Get the expected duration for a given edge at a specific time."""
         return self.edge_durations[edge]
 
-    def update(self, edge: tuple, time: int, duration: float):
+    def update(self, plans: dict, network: Network, events: list, alpha: float = 1.0):
+        durations = av_link_durations(plans, network, events)
+        for edge, duration in durations.items():
+            if duration is not None:
+                self.update_link(edge, None, duration, alpha=alpha)
+
+    def update_link(self, edge: tuple, time: int, duration: float, alpha: float = 0.5):
         """Update the expected duration for a given edge at a specific time."""
-        self.edge_durations[edge] = duration
+        self.edge_durations[edge] = (1 - alpha) * self.edge_durations[
+            edge
+        ] + alpha * duration
 
     def av_duration(self) -> float:
         """Calculate the average expected duration across all edges."""

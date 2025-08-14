@@ -24,10 +24,6 @@ class Sim:
         self.network = network
         self.event_listener = listener
 
-        self.sim_links = {
-            edge: SimLink(attributes) for edge, attributes in network.G.edges.items()
-        }
-
     def reset(self, plans: Dict[Hashable, Plan]):
 
         self.instructions = {
@@ -36,6 +32,11 @@ class Sim:
         self.time = 0
         self.agent_state = {agent_id: 0 for agent_id in plans}
         self.previous_state = {agent_id: None for agent_id in plans}
+
+        self.sim_links = {
+            edge: SimLink(attributes)
+            for edge, attributes in self.network.G.edges.items()
+        }
         self.event_listener.reset()
 
     def end_simulation(self):
@@ -111,7 +112,7 @@ class SimLink:
 
         :param attributes: A dictionary containing the attributes of the link, including 'distance'.
         """
-        distance = attributes["distance"]  # Distance of the link
+        distance = attributes["length"]  # Distance of the link
         lanes = attributes["lanes"]  # Number of lanes on the link
         freespeed = attributes["freespeed"]  # Free speed on the link
         flow_capacity = attributes["flow_capacity"]  # Flow capacity of the link
@@ -120,6 +121,10 @@ class SimLink:
         self.flow_capacity = int(1 / (flow_capacity * lanes))  # seconds per vehicle
         self.min_duration = int(distance / freespeed)  # seconds
 
+        self.queue = []
+        self.earliest_next_exit = 0
+
+    def reset(self):
         self.queue = []
         self.earliest_next_exit = 0
 

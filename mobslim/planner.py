@@ -1,4 +1,5 @@
-from mobslim.agents import Plan, Trip, Instruction
+from random import random
+from mobslim.agents import Plan, Trip, Activity
 
 from networkx import shortest_path
 
@@ -27,7 +28,7 @@ class Router:
         """
         raise NotImplementedError("This method is not implemented yet.")
 
-    def update_from_events(self, events: list):
+    def update(self, events: list):
         """Update the router's expected durations based on simulation events.
         Args:
             events (list): A list of events from the simulation.
@@ -36,20 +37,34 @@ class Router:
 
 
 class Planner:
-    """Currently just a trip planner."""
+    """Currently just a trip planner.
+    Assumes start of day at 0 and end at 86400 (24 hours)
+    """
 
     def __init__(self):
         pass
 
-    def plan(self, plans: Dict[Hashable, Plan], router: Router):
+    def plan(self, plans: Dict[Hashable, Plan], router: Router, p: float = 0.5):
+        if p < 0 or p > 1:
+            raise ValueError("Probability p must be between 0 and 1.")
         for _, plan in plans.items():
+            if random() > p:
+                continue  # Skip planning for this agent
+            time = 0
             for _, component in enumerate(plan.components):
+
                 if isinstance(component, Trip):
-                    component.route = router.get_route(
-                        component.origin, component.destination, component.start_time
+                    component.route, component.duration = router.get_route(
+                        component.origin, component.destination, time
                     )
-                else:
-                    raise ValueError(f"Unknown component type: {type(component)}")
+                    time += component.duration
+
+                if isinstance(component, Activity):
+                    if component.duration is None:  # hopefully just end of day
+                        component.duration = 86400 - time
+                        if component.duration < 0:
+                            raise ValueError("Activity duration cannot be negative.")
+                    time += component.duration
 
 
 class StaticRouter(Router):
@@ -74,21 +89,20 @@ class StaticRouter(Router):
             source: The starting node.
             target: The destination node.
         Returns:
-            tuple: A list of edges representing the shortest path and exit times for each edge.
+            tuple: A list of edges representing the shortest path and expected duration.
         """
 
         path = shortest_path(
             self.G, source=source, target=target, weight="expected_duration"
         )
         link_ids = [(u, v) for u, v in zip(path[:-1], path[1:])]
-        return link_ids
+        expected_durations = [self.G[u][v]["expected_duration"] for u, v in link_ids]
 
-    def update_from_events(self, events: list):
-        enters = {}
-        for event, _, time, uv in events:
-            if event == Instruction.EnterLink:
-                enters[uv] = time
-            elif event == Instruction.ExitLink:
-                if uv in enters:
-                    duration = time - enters[uv]
-                    self.expectations.update(uv, time, duration)
+        return link_ids, sum(expected_durations)
+
+    def update(self, plans: dict, network: Network, events: list, alpha: float = 1.0):
+        self.expectations.update(plans, network, events, alpha=alpha)
+        for edge in self.G.edges:
+            self.G[edge[0]][edge[1]]["expected_duration"] = self.expectations.get(
+                edge, None
+            )

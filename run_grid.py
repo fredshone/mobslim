@@ -6,14 +6,15 @@ from mobslim.expected import SimpleExpectedDurations
 from mobslim.listener import EventListener
 from mobslim.optimizer import Optimizer
 
-AGENTS = 10
-SIZE = 3  # Size of the grid network
-MAX_RUNS = 3  # Maximum number of runs for the simulation
+AGENTS = 20
+SIZE = 5  # Size of the grid network
+MAX_RUNS = 20  # Maximum number of runs for the simulation
 
 # network setup
 network = Grid(size=SIZE)
-o = network.get_top_left()
-d = network.get_bottom_right()
+o = network.get_start()
+d = network.get_end()
+print(network)
 
 # agent setup
 plans = {}
