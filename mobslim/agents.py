@@ -4,11 +4,15 @@ import xml.etree.ElementTree as ET
 from typing import Optional
 
 
-class Instruction(Enum):
-    EnterLink = 1
-    ExitLink = 2
-    Activity = 3
-    End = 4
+# instruction will be composed of (InstructionType, asset_id, duration)
+
+class InstructionType(Enum):
+    Null = 0
+    EnterActivity = 1  # (ActivityType, facility_id, duration)
+    ExitActivity = 2  # (ActivityType, facility_id, duration)
+    EnterLink = 3  # (link_id)
+    ExitLink = 4  # (link_id)
+    End = 5  # ()
 
 
 class ActivityType(Enum):
@@ -30,22 +34,32 @@ class Plan:
         trip = Trip(origin, destination, start_time)
         self.components.append(trip)
 
+    def finish(self):
+        self.components.append(End())
+
     def get_instructions(self):
-        instructions = [list(c.get_instructions()) for c in self.components] + [
-            (
-                Instruction.End,
-                None,
-            )
-        ]
-        return [
-            item for sublist in instructions for item in sublist
-        ]  # Flatten the list
+        if len(self.components) == 0:
+            raise ValueError("Plan has no components.")
+        if self.components[-1] != End():
+            self.finish()
+        instructions = []
+        for component in self.components:
+            for instruction in component.get_instructions():
+                instructions.append(instruction)
+
+        # yield pairs from instructions
+        for i in range(0, len(instructions), 2):
+            yield (instructions[i], instructions[i + 1])
 
     def copy(self):
         new_plan = Plan()
         new_plan.components = [c.copy() for c in self.components]
         return new_plan
 
+
+class Null:
+    def get_instructions(self):
+        yield InstructionType.Null
 
 class Activity:
     def __init__(self, type: ActivityType, location, duration):
@@ -54,7 +68,8 @@ class Activity:
         self.duration = duration
 
     def get_instructions(self):
-        yield (Instruction.Activity, self.type, self.location, self.duration)
+        yield (InstructionType.StartActivity, self.type, self.location, self.duration)
+        yield (InstructionType.EndActivity, self.type, self.location, self.duration)
 
 
 class Trip:
@@ -71,11 +86,16 @@ class Trip:
         if len(self.route) == 0:
             return
         for edge in self.route:
-            yield (Instruction.EnterLink, edge)
-        yield (Instruction.ExitLink, edge)
+            yield ((InstructionType.EnterLink, edge))
+            yield ((InstructionType.ExitLink, edge))
 
     def __repr__(self):
         return f"Trip({self.origin}>{self.destination}, duration={self.duration}, route={self.route})"
+
+
+class End:
+    def get_instructions(self):
+        yield InstructionType.End
 
 
 def load_xml(path: str):
