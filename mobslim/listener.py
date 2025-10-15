@@ -9,8 +9,8 @@ class EventListener:
     def __init__(self):
         self.log = []
 
-    def add(self, event, idx, time, uv) -> None:
-        self.log.append((event, idx, time, uv))
+    def add(self, time, a, b) -> None:
+        self.log.append((time, a, b))
 
     def reset(self) -> None:
         """Reset the event listener state."""

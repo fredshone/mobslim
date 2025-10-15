@@ -1,6 +1,6 @@
-from mobslim.agents import Plan, Instruction
+import heapq
+from mobslim.agents import Plan, InstructionType
 from mobslim.network import Network
-from mobslim.planner import Plan
 from mobslim.listener import EventListener
 from typing import Dict, Hashable
 
@@ -29,9 +29,14 @@ class Sim:
         self.instructions = {
             agent_id: plan.get_instructions() for agent_id, plan in plans.items()
         }
+
+        self.queue = []
+        for agent_id, instruction_q in self.instructions.items():
+            instruction_a, instruction_b = next(instruction_q)
+            duration = instruction_a[3]
+            heapq.heappush(self.queue, (duration, agent_id, (instruction_a, instruction_b)))
+
         self.time = 0
-        self.agent_state = {agent_id: 0 for agent_id in plans}
-        self.previous_state = {agent_id: None for agent_id in plans}
 
         self.sim_links = {
             edge: SimLink(attributes)
@@ -39,70 +44,68 @@ class Sim:
         }
         self.event_listener.reset()
 
-    def end_simulation(self):
-        return all(
-            instruction == Instruction.End for instruction in self.agent_state.values()
-        )
+    # def end_simulation(self):
+    #     return all(
+    #         instruction == InstructionType.EOS for instruction in self.agent_state.values()
+    #     )
 
     def run(self, steps: int = 86400):
-        for _ in range(steps):
-            self.step()
-            if self.end_simulation():
-                break
+        while self.queue and self.time < steps:
+            self.step_instruction()
         return self.event_listener.log
+    
+    def can_exit(self, agent_id, instruction_a):
+        if instruction_a[0] == InstructionType.ExitLink:
+            _, _, uv, _ = instruction_a
+            if self.sim_links[uv].can_exit(self.time):
+                self.sim_links[uv].exit(agent_id, self.time)
+                return True
+            return False
+        return True
+    
+    def can_enter(self, agent_id, instruction_b):
+        if instruction_b[0] == InstructionType.EnterLink:
+            _, _, uv, _ = instruction_b
+            if self.sim_links[uv].can_enter(VEH_SIZE, self.time):
+                self.sim_links[uv].enter(agent_id, VEH_SIZE, self.time)
+                return True
+            return False
+        return True
 
-    def step(self):
+    def step_instruction(self):
 
-        # stage 1: Process all agents
+        self.time, agent_id, (instruction_a, instruction_b) = heapq.heappop(self.queue)
 
-        for agent_id, state in self.agent_state.items():
-            instruction, uv = self.instructions[agent_id][state]
-            if instruction == Instruction.EnterLink:
-                previous_state = self.previous_state[agent_id]
+        if not self.can_exit(agent_id, instruction_a):
+            # cannot exit, requeue with a small delay
+            heapq.heappush(self.queue, (self.time + 1, agent_id, (instruction_a, instruction_b)))
+            return
+        
+        if not self.can_enter(agent_id, instruction_b):
+            # cannot enter, requeue with a small delay
+            heapq.heappush(self.queue, (self.time + 1, agent_id, (instruction_a, instruction_b)))
+            return
+        
+        if instruction_b[0] == InstructionType.EOS:
+            # end of simulation for this agent
+            self.event_listener.add(
+                self.time, agent_id,instruction_a
+            )
+            return
+        
+        # both exit and enter successful, queue next instruction and log events
+        # schedule next instruction after activity duration
+        _, _, _, duration = instruction_b
+        next_instruction = next(self.instructions[agent_id])
+        heapq.heappush(self.queue, (self.time + duration, agent_id, next_instruction))
 
-                if previous_state is None:
-                    # Check if the agent can enter the link
-                    if self.sim_links[uv].can_enter(VEH_SIZE, self.time):
-                        self.sim_links[uv].enter(agent_id, VEH_SIZE, self.time)
-                        self.agent_state[agent_id] = state + 1
-                        self.previous_state[agent_id] = state
-                        self.event_listener.add(
-                            Instruction.EnterLink, agent_id, self.time, uv
-                        )
-                    else:
-                        # Agent cannot enter the link, stay in the same state
-                        continue
-
-                else:
-                    instruction, puv = self.instructions[agent_id][previous_state]
-                    if self.sim_links[puv].can_exit(self.time) and self.sim_links[
-                        uv
-                    ].can_enter(VEH_SIZE, self.time):
-                        self.sim_links[puv].exit(agent_id, self.time)
-                        self.sim_links[uv].enter(agent_id, VEH_SIZE, self.time)
-                        self.agent_state[agent_id] = state + 1
-                        self.previous_state[agent_id] = state
-                        self.event_listener.add(
-                            Instruction.EnterLink, agent_id, self.time, uv
-                        )
-                    else:
-                        # Agent cannot enter the link, stay in the same state
-                        continue
-
-            elif instruction == Instruction.ExitLink:
-                if self.sim_links[uv].can_exit(self.time):
-                    self.sim_links[uv].exit(agent_id, self.time)
-                    self.agent_state[agent_id] = state + 1
-                    self.previous_state[agent_id] = state
-                    self.event_listener.add(
-                        Instruction.ExitLink, agent_id, self.time, uv
-                    )
-                else:
-                    # Agent cannot exit the link, stay in the same state
-                    continue
-
-        # stage 2: Update the simulation time
-        self.time += 1
+        self.event_listener.add(
+            self.time, agent_id, instruction_a
+        )
+        self.event_listener.add(
+            self.time, agent_id, instruction_b
+        )
+        return
 
 
 class SimLink:
