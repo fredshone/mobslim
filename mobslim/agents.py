@@ -6,6 +6,7 @@ from typing import Optional
 
 # instruction will be composed of (InstructionType, asset_id, duration)
 
+
 class InstructionType(Enum):
     SOS = 0
     EnterActivity = 1  # (ActivityType, facility_id, duration)
@@ -48,7 +49,7 @@ class Plan:
                 instructions.append(instruction)
 
         # yield pairs from instructions
-        for i in range(0, len(instructions)-1, 2):
+        for i in range(0, len(instructions) - 1, 2):
             yield (instructions[i], instructions[i + 1])
 
     def copy(self):
@@ -56,10 +57,17 @@ class Plan:
         new_plan.components = [c.copy() for c in self.components]
         return new_plan
 
+    def __repr__(self):
+        return f"Plan({self.components})"
+
 
 class SOS:
     def get_instructions(self):
         yield (InstructionType.SOS, None, None, 0)
+
+    def __repr__(self):
+        return "SOS()"
+
 
 class Activity:
     def __init__(self, type: ActivityType, location, duration):
@@ -70,15 +78,19 @@ class Activity:
     def get_instructions(self):
         for instruction in [
             (InstructionType.EnterActivity, self.type, self.location, self.duration),
-            (InstructionType.ExitActivity, self.type, self.location, self.duration)
+            (InstructionType.ExitActivity, self.type, self.location, self.duration),
         ]:
             yield instruction
+
+    def __repr__(self):
+        return f"Act({self.type}, loc={self.location}, dur={self.duration})"
+
 
 class Trip:
     def __init__(self, origin, destination, duration: Optional[int] = None):
         self.origin = origin
         self.destination = destination
-        self.duration = duration
+        self.expected_duration = duration
         self.route = None
 
     def get_instructions(self):
@@ -87,20 +99,23 @@ class Trip:
             raise ValueError("Route has not been planned yet.")
         if len(self.route) == 0:
             return
-        for edge in self.route:
+        for edge, expected_duration, minimum_duration in self.route:
             for instruction in [
-                (InstructionType.EnterLink, None, edge, self.duration),
-                (InstructionType.ExitLink, None, edge, self.duration)
+                (InstructionType.EnterLink, None, edge, minimum_duration),
+                (InstructionType.ExitLink, None, edge, minimum_duration),
             ]:
                 yield instruction
 
     def __repr__(self):
-        return f"Trip({self.origin}>{self.destination}, duration={self.duration}, route={self.route})"
+        return f"Trip({self.origin}>{self.destination}, duration={self.expected_duration}, route={self.route})"
 
 
 class EOS:
     def get_instructions(self):
         yield (InstructionType.EOS, None, None, 0)
+
+    def __repr__(self):
+        return "EOS()"
 
 
 def load_xml(path: str):

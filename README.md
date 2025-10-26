@@ -1,5 +1,12 @@
 # Python implementation of MATSim
 
+## Plan
+
+Python interfaces for experimenting with MATSim flavoured simulations.
+
+- Parallel sims
+- AI planning
+
 ## WIP
 
 - API for (i) planners and (ii) simulations.
@@ -33,5 +40,5 @@
 ## Simulation
 
 - Stay Instruction -> Wait(t)
-- Move Instruction -> Check capacity
+- Move Instruction -> Check capacity() & Wait()
 

@@ -40,11 +40,14 @@ class SimpleExpectedDurations(ExpectedLinkDurations):
     """A simple implementation of expected durations for edges in a graph."""
 
     def __init__(self, graph: Graph):
-        self.edge_durations = {
-            (u, v): data.get("freespeed", None) for u, v, data in graph.edges(data=True)
-        }
+        self.edge_durations = {}
+        for u, v, data in graph.edges(data=True):
+            length = data.get("length", 0)
+            freespeed = data.get("freespeed", 1)
+            duration = length / freespeed if freespeed > 0 else 0
+            self.edge_durations[(u, v)] = duration
         if None in self.edge_durations.values():
-            raise ValueError("All edges must have a 'freespeed' attribute.")
+            raise ValueError("All edges must have a duration attribute.")
 
     def get(self, edge: tuple, time: int) -> float:
         """Get the expected duration for a given edge at a specific time."""

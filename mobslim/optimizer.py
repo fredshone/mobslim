@@ -2,7 +2,6 @@ from mobslim.sim import Sim
 from mobslim.planner import Planner, Router
 from mobslim.agents import Plan
 from mobslim.processs_events import (
-    agent_routes,
     trip_durations,
     av_link_speeds,
     trip_lengths,
@@ -20,11 +19,10 @@ class Optimizer:
         self.replanner = replanner
 
     def run(self, max_runs: int = 100):
-        # init plans
-        self.replanner.plan(self.plans, self.router, p=1.0)
+        print("--- Starting optimization ---")
         for i in range(max_runs):
 
-            self.sim.reset(plans=self.plans)
+            self.sim.set(plans=self.plans)
             events = self.sim.run()
 
             # update expected durations based on events
@@ -50,3 +48,5 @@ class Optimizer:
                 f"Run {i}: Av. trip duration: {avg_trip_duration}, Av. trip length: {avg_trip_length}, Av. link speed: {avg_link_speed}"
             )
             print()
+        print("--- Optimization complete ---")
+        return events

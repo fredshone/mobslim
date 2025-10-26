@@ -184,3 +184,9 @@ class Linear(Network):
             int: The end node.
         """
         return self.size
+
+    def __repr__(self):
+        string = "X"
+        for r in range(self.size):
+            string += "---X"
+        return string

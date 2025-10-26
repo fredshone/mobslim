@@ -54,10 +54,10 @@ class Planner:
             for _, component in enumerate(plan.components):
 
                 if isinstance(component, Trip):
-                    component.route, component.duration = router.get_route(
+                    component.route, component.expected_duration = router.get_route(
                         component.origin, component.destination, time
                     )
-                    time += component.duration
+                    time += component.expected_duration
 
                 if isinstance(component, Activity):
                     if component.duration is None:  # hopefully just end of day
@@ -79,6 +79,12 @@ class StaticRouter(Router):
             link_durations (Durations): The expected durations for the links in the network.
         """
         self.G = network.G.copy()
+        # calc minimum durations based on length and freespeed
+        for edge in self.G.edges:
+            length = self.G[edge[0]][edge[1]]["length"]
+            freespeed = self.G[edge[0]][edge[1]]["freespeed"]
+            minduration = length / freespeed if freespeed > 0 else 0
+            self.G[edge[0]][edge[1]]["minimum_duration"] = minduration
         self.expectations = expectations
         for edge in self.G.edges:
             self.G[edge[0]][edge[1]]["expected_duration"] = expectations.get(edge, None)
@@ -97,8 +103,11 @@ class StaticRouter(Router):
         )
         link_ids = [(u, v) for u, v in zip(path[:-1], path[1:])]
         expected_durations = [self.G[u][v]["expected_duration"] for u, v in link_ids]
+        minimum_durations = [self.G[u][v]["minimum_duration"] for u, v in link_ids]
 
-        return link_ids, sum(expected_durations)
+        return list(zip(link_ids, expected_durations, minimum_durations)), sum(
+            expected_durations
+        )
 
     def update(self, plans: dict, network: Network, events: list, alpha: float = 1.0):
         self.expectations.update(plans, network, events, alpha=alpha)
