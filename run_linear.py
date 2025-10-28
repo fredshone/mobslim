@@ -1,5 +1,5 @@
 from mobslim.sim import Sim
-from mobslim.planner import Planner, StaticRouter
+from mobslim.planners.greedy_trip_planner import TripPlanner, StaticRouter
 from mobslim.network import Linear
 from mobslim.agents import Plan
 from mobslim.expected import SimpleExpectedDurations
@@ -34,7 +34,7 @@ sim = Sim(
 # replanner setup
 expected_link_durations = SimpleExpectedDurations(network.G)
 router = StaticRouter(network=network, expectations=expected_link_durations)
-replanner = Planner()
+replanner = TripPlanner()
 
 # optimizer setup
 optimizer = Optimizer(sim=sim, plans=plans, router=router, replanner=replanner)

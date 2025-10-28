@@ -6,7 +6,6 @@ from typing import Optional
 
 # instruction will be composed of (InstructionType, asset_id, duration)
 
-
 class InstructionType(Enum):
     SOS = 0
     EnterActivity = 1  # (ActivityType, facility_id, duration)
@@ -24,6 +23,9 @@ class ActivityType(Enum):
 class Plan:
     def __init__(self):
         self.components = [SOS()]
+
+    def add(self, component):
+        self.components.append(component)
 
     def add_activity(self, type: ActivityType, location, duration):
         """Add an activity to the agent's plan."""

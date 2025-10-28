@@ -1,5 +1,51 @@
 from typing import Hashable
-from mobslim.agents import InstructionType
+from mobslim.agents import InstructionType, Plan, Activity, Trip
+
+
+def events_to_plans(events: list) -> dict:
+    """Parse events into agent plans"""
+    plans = {}
+    states = {}
+    trip_starts = {}
+    routes = {}  # edge, expected, minimum
+
+    for time, idx, instruction in events:
+        event = instruction[0]
+        if event == InstructionType.SOS:
+            plans[idx] = Plan()
+            trip_starts[idx] = None
+
+        elif event == InstructionType.EnterActivity:
+            states[idx] = time
+            # check for trip end
+            if trip_starts[idx]:
+                _, act, d, _ = instruction
+                u, start_time = trip_starts[idx]
+                trip = Trip(u, d, time-start_time)
+                trip.route = routes[idx]
+                del trip_starts[idx]
+                del routes[idx]
+
+        elif event == InstructionType.ExitActivity:
+            _, act, location, _ = instruction
+            duration = time - states[idx]
+            plans[idx].add(Activity(act, location, duration))
+            # start a trip
+            trip_starts[idx] = location, time
+            # start route
+            routes[idx] = []
+
+        elif event == InstructionType.EnterLink:
+            _, _, uv, minimum_duration = instruction    
+            states[idx] = time
+
+        elif event == InstructionType.ExitLink:
+            _, _, uv, minimum_duration = instruction
+            duration = time - states[idx]
+            routes[idx].append((uv, duration, minimum_duration))
+            
+        elif event == InstructionType.EOS:
+            plans[idx].finish()
 
 
 def trip_durations(events: list) -> list:

@@ -1,5 +1,5 @@
 from mobslim.sim import Sim
-from mobslim.planner import Planner, Router
+from mobslim.planners.core import BasePlanner
 from mobslim.agents import Plan
 from mobslim.processs_events import (
     trip_durations,
@@ -11,25 +11,23 @@ from typing import Dict, Hashable
 
 class Optimizer:
     def __init__(
-        self, sim: Sim, plans: Dict[Hashable, Plan], router: Router, replanner: Planner
+        self, sim: Sim, plans: Dict[Hashable, Plan], planner: BasePlanner
     ):
         self.sim = sim
         self.plans = plans
-        self.router = router
-        self.replanner = replanner
+        self.planner = planner
 
-    def run(self, max_runs: int = 100):
+    def run(self, max_runs: int = 100, p: float = 0.5, verbose: bool = False):
         print("--- Starting optimization ---")
         for i in range(max_runs):
-
+            
+            # sim
             self.sim.set(plans=self.plans)
             events = self.sim.run()
 
-            # update expected durations based on events
-            self.router.update(self.plans, self.sim.network, events)
-
             # replan
-            self.replanner.plan(self.plans, self.router, p=0.5)
+            self.planner.update(events)
+            self.planner.replan(p=p)
 
             # calculate trip lengths and link speeds
             durations = trip_durations(events)
@@ -47,6 +45,5 @@ class Optimizer:
             print(
                 f"Run {i}: Av. trip duration: {avg_trip_duration}, Av. trip length: {avg_trip_length}, Av. link speed: {avg_link_speed}"
             )
-            print()
         print("--- Optimization complete ---")
         return events
