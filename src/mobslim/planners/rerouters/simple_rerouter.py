@@ -1,10 +1,9 @@
 from networkx import shortest_path
 
-from mobslim.network import Network
 from mobslim.expected import ExpectedLinkDurations
+from mobslim.network import Network
 from mobslim.planners.rerouters.core import BaseRouter
 
-    
 
 class StaticRouter(BaseRouter):
     def __init__(
@@ -22,11 +21,18 @@ class StaticRouter(BaseRouter):
         for edge in self.G.edges:
             length = self.G[edge[0]][edge[1]]["length"]
             freespeed = self.G[edge[0]][edge[1]]["freespeed"]
-            minduration = length / freespeed if freespeed > 0 else 0
+            minduration = length / freespeed
             self.G[edge[0]][edge[1]]["minimum_duration"] = minduration
         self.expectations = expectations
         for edge in self.G.edges:
             self.G[edge[0]][edge[1]]["expected_duration"] = expectations.get(edge, None)
+
+    def update(self, plans: dict, network: Network, events: list, alpha: float = 1.0):
+        self.expectations.update(plans, network, events, alpha=alpha)
+        for edge in self.G.edges:
+            self.G[edge[0]][edge[1]]["expected_duration"] = self.expectations.get(
+                edge, None
+            )
 
     def get_route(self, source, target, time):
         """Find the shortest path between source and target nodes.
@@ -47,10 +53,3 @@ class StaticRouter(BaseRouter):
         return list(zip(link_ids, expected_durations, minimum_durations)), sum(
             expected_durations
         )
-
-    def update(self, plans: dict, network: Network, events: list, alpha: float = 1.0):
-        self.expectations.update(plans, network, events, alpha=alpha)
-        for edge in self.G.edges:
-            self.G[edge[0]][edge[1]]["expected_duration"] = self.expectations.get(
-                edge, None
-            )

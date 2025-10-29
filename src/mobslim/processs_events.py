@@ -1,5 +1,6 @@
 from typing import Hashable
-from mobslim.agents import InstructionType, Plan, Activity, Trip
+
+from mobslim.agents import Activity, InstructionType, Plan, Trip
 
 
 def events_to_plans(events: list) -> dict:
@@ -23,6 +24,7 @@ def events_to_plans(events: list) -> dict:
                 u, start_time = trip_starts[idx]
                 trip = Trip(u, d, time-start_time)
                 trip.route = routes[idx]
+                plans[idx].add(trip)
                 del trip_starts[idx]
                 del routes[idx]
 
@@ -46,6 +48,8 @@ def events_to_plans(events: list) -> dict:
             
         elif event == InstructionType.EOS:
             plans[idx].finish()
+            
+    return plans
 
 
 def trip_durations(events: list) -> list:
@@ -99,6 +103,31 @@ def av_link_durations(plans, network, events: list) -> dict:
         for link, durations in link_durations.items()
     }
     return avg_durations
+
+def expected_link_durations(plans, network, events: list) -> dict:
+    """Calculate the expected link durations based on events."""
+    idx_monitor = {idx: None for idx in plans.keys()}
+    link_durations = {link: [] for link in network.G.edges}
+    for time, idx, instruction in events:
+        event, _, uv, _ = instruction
+
+        if event == InstructionType.EnterLink:
+            idx_monitor[idx] = (time, uv)
+        elif event == InstructionType.ExitLink:
+            prev, link = idx_monitor[idx]
+            duration = time - prev
+            link_durations[link].append(duration)
+
+    # get minimyum durations per link
+    min_durations = network.minimum_durations()
+
+    # Calculate expected durations
+    expected_durations = {
+        link: sum(durations) / len(durations) if durations else min_durations[link]
+        for link, durations in link_durations.items()
+    }
+
+    return expected_durations
 
 
 def av_link_speeds(plans, network, events: list) -> dict:

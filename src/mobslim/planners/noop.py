@@ -1,5 +1,6 @@
 from mobslim.planners.core import BasePlanner
 
+
 class NoopPlanner(BasePlanner):
     def __init__(self, plans: dict, agents: dict):
         self.plans = plans

@@ -1,8 +1,6 @@
-from enum import Enum
 import xml.etree.ElementTree as ET
-
+from enum import Enum
 from typing import Optional
-
 
 # instruction will be composed of (InstructionType, asset_id, duration)
 
@@ -120,7 +118,7 @@ class EOS:
         return "EOS()"
 
 
-def load_xml(path: str):
+def load_from_xml(path: str):
     """Load a plans file into a dictionary of Plan objects.
     Input file is MATSim formatted XML:
     <?xml version="1.0" ?>

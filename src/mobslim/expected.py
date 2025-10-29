@@ -1,7 +1,7 @@
 from networkx import Graph
 
 from mobslim.network import Network
-from mobslim.processs_events import av_link_durations
+from mobslim.processs_events import expected_link_durations
 
 
 class ExpectedLinkDurations:
@@ -39,13 +39,8 @@ class ExpectedLinkDurations:
 class SimpleExpectedDurations(ExpectedLinkDurations):
     """A simple implementation of expected durations for edges in a graph."""
 
-    def __init__(self, graph: Graph):
-        self.edge_durations = {}
-        for u, v, data in graph.edges(data=True):
-            length = data.get("length", 0)
-            freespeed = data.get("freespeed", 1)
-            duration = length / freespeed if freespeed > 0 else 0
-            self.edge_durations[(u, v)] = duration
+    def __init__(self, network: Network):
+        self.edge_durations = network.minimum_durations()
         if None in self.edge_durations.values():
             raise ValueError("All edges must have a duration attribute.")
 
@@ -54,7 +49,7 @@ class SimpleExpectedDurations(ExpectedLinkDurations):
         return self.edge_durations[edge]
 
     def update(self, plans: dict, network: Network, events: list, alpha: float = 1.0):
-        durations = av_link_durations(plans, network, events)
+        durations = expected_link_durations(plans, network, events)
         for edge, duration in durations.items():
             if duration is not None:
                 self.update_link(edge, None, duration, alpha=alpha)

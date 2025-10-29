@@ -5,12 +5,13 @@
 Python interfaces for experimenting with MATSim flavoured simulations.
 
 - Parallel sims
-- AI planning
+- Parallelised sims
+- ML planning
 
 ## WIP
 
 - API for (i) planners and (ii) simulations.
-- Data design for (i) simulation instructions, and (ii) simulaion events.
+- Data design for (i) simulation instructions, and (ii) simulation events.
 - Tooling for (i) initialisation e.g. loading scenarios, and (ii) reporting e.g. progress and utilization.
 - Planner is responsible for making instructions:
     - Initial case
@@ -37,8 +38,20 @@ Python interfaces for experimenting with MATSim flavoured simulations.
     - link speeds
     - (utility)
 
-## Simulation
+## Installation
 
-- Stay Instruction -> Wait(t)
-- Move Instruction -> Check capacity() & Wait()
+Currently using [uv](https://docs.astral.sh/uv/).
+
+So to run a demo notebook:
+
+```
+git clone git@github.com:fredshone/mobslim.git
+cd mobslim
+
+# then take a look at the demos
+
+# if you need, spin up a notebook as follows:
+uv run --with jupyter jupyter lab
+
+```
 

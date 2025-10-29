@@ -1,6 +1,9 @@
 [project]
 name = "mobslim"
 version = "0.1.0"
+authors = [
+    { name = "Fred Shone", email = "26383933+fredshone@users.noreply.github.com" },
+]
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -10,3 +13,68 @@ dependencies = [
     "networkx>=3.5",
     "pandas>=2.3.1",
 ]
+
+[project.scripts]
+mobslim = "mobslim:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+# minversion = "6.0"
+addopts = "-rav --strict-markers --nbmake --nbmake-kernel=mobslim --cov --cov-report=html --cov-config=pyproject.toml -m 'not high_mem' -p no:memray"
+testpaths = ["tests", "demos"]
+filterwarnings = [
+    # https://github.com/pytest-dev/pytest-xdist/issues/825
+    "ignore:The --rsyncdir command line argument and rsyncdirs config variable are deprecated.:DeprecationWarning",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+
+[tool.coverage.report]
+fail_under = 5
+
+[tool.coverage.html]
+directory = "reports/coverage"
+
+[tool.black]
+line-length = 80
+skip_magic_trailing_comma = true
+
+[tool.ruff]
+line-length = 80
+lint.select = ["E", "F", "I", "Q"]
+lint.ignore = [
+    "E501", # line too long: Black will handle this.
+    "D1",   # Ignore missing docstrings in public functions/modules. There are just too many of them missing...
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+# Unlike Flake8, default to a complexity level of 10.
+max-complexity = 10
+
+# Ignore `E402` (import violations) and `F401` (unused imports) in all `__init__.py` files
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401"]
+"*.ipynb" = ["E402"]
+
+# Ignore `E402` for all notebooks
+[tool.nbqa.addopts]
+ruff = ["--extend-ignore=E402"]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.1.0",
+    "nbmake>=1.5.5",
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
+]
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
