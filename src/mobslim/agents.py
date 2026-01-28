@@ -2,7 +2,8 @@ import xml.etree.ElementTree as ET
 from enum import Enum
 from typing import Optional
 
-# instruction will be composed of (InstructionType, asset_id, duration)
+# instruction will be composed of (InstructionType, info, asset_id, duration)
+
 
 class InstructionType(Enum):
     SOS = 0
@@ -27,12 +28,14 @@ class Plan:
 
     def add_activity(self, type: ActivityType, location, duration):
         """Add an activity to the agent's plan."""
-        activity = Activity(type, location, duration)
+        activity = Activity(type=type, location=location, duration=duration)
         self.components.append(activity)
 
-    def add_trip(self, origin, destination, start_time):
+    def add_trip(self, origin, destination, start_time, network_mode: str):
         """Add a trip to the agent's plan."""
-        trip = Trip(origin, destination, start_time)
+        trip = Trip(
+            origin=origin, destination=destination, network_mode=network_mode
+        )
         self.components.append(trip)
 
     def finish(self):
@@ -77,8 +80,18 @@ class Activity:
 
     def get_instructions(self):
         for instruction in [
-            (InstructionType.EnterActivity, self.type, self.location, self.duration),
-            (InstructionType.ExitActivity, self.type, self.location, self.duration),
+            (
+                InstructionType.EnterActivity,
+                self.type,
+                self.location,
+                self.duration,
+            ),
+            (
+                InstructionType.ExitActivity,
+                self.type,
+                self.location,
+                self.duration,
+            ),
         ]:
             yield instruction
 
@@ -87,9 +100,16 @@ class Activity:
 
 
 class Trip:
-    def __init__(self, origin, destination, duration: Optional[int] = None):
+    def __init__(
+        self,
+        origin,
+        destination,
+        network_mode: str,
+        duration: Optional[int] = None,
+    ):
         self.origin = origin
         self.destination = destination
+        self.network_mode = network_mode
         self.expected_duration = duration
         self.route = None
 
@@ -101,13 +121,23 @@ class Trip:
             return
         for edge, expected_duration, minimum_duration in self.route:
             for instruction in [
-                (InstructionType.EnterLink, None, edge, minimum_duration),
-                (InstructionType.ExitLink, None, edge, minimum_duration),
+                (
+                    InstructionType.EnterLink,
+                    self.network_mode,
+                    edge,
+                    minimum_duration,
+                ),
+                (
+                    InstructionType.ExitLink,
+                    self.network_mode,
+                    edge,
+                    minimum_duration,
+                ),
             ]:
                 yield instruction
 
     def __repr__(self):
-        return f"Trip({self.origin}>{self.destination}, duration={self.expected_duration}, route={self.route})"
+        return f"Trip({self.network_mode}, {self.origin}>{self.destination}, duration={self.expected_duration}, route={self.route})"
 
 
 class EOS:

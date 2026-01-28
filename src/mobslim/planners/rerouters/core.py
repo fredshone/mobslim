@@ -1,9 +1,11 @@
 from mobslim.expected import ExpectedLinkDurations
-from mobslim.network import Network
+from mobslim.network import Networks
 
 
 class BaseRouter:
-    def __init__(self, network: Network, link_durations: ExpectedLinkDurations):
+    def __init__(
+        self, network: Networks, link_durations: ExpectedLinkDurations
+    ):
         """Router for the network.
         Args:
             network (Network): The network to route through.

@@ -1,29 +1,14 @@
 import xml.etree.ElementTree as ET
+from typing import Optional
 
 from networkx import DiGraph, Graph
 
 
-class Network:
+class Networks:
 
     def __init__(self):
-        self.G = DiGraph()
-        self.node_positions = {}
-
-    def nodes(self):
-        """Get the nodes of the grid graph.
-
-        Returns:
-            list: A list of nodes in the grid graph.
-        """
-        return self.G.nodes
-
-    def edges(self):
-        """Get the edges of the grid graph.
-
-        Returns:
-            list: A list of edges in the grid graph.
-        """
-        return self.G.edges
+        self._networks = {}
+        self.node_locations = {}
 
     def load_xml(self, path: str):
         """Load a network from an XML file.
@@ -40,36 +25,68 @@ class Network:
             node_id = int(node.get("id"))
             x = float(node.get("x"))
             y = float(node.get("y"))
-            self.G.add_node(node_id)
-            self.node_positions[node_id] = (x, y)
+            self.node_locations[node_id] = (x, y)
 
         # Load links
         for link in root.find("links"):
+            modes = unpack(link.get("modes", "road"))
             link_id = int(link.get("id"))
             from_node = int(link.get("from"))
             to_node = int(link.get("to"))
             length = float(link.get("length"))
-            capacity = float(link.get("capacity"))
+            capacity = float(link.get("capacity")) / 3600
             freespeed = float(link.get("freespeed"))
             permlanes = int(link.get("permlanes"))
-            self.G.add_edge(
-                from_node,
-                to_node,
-                id=link_id,
-                length=length,
-                flow_capacity=capacity / 3600,
-                freespeed=freespeed,
-                lanes=permlanes,
-            )
+            for mode in modes:
+                mode_graph = self._network.get(mode, DiGraph)
+                mode_graph.add_edge(
+                    from_node,
+                    to_node,
+                    id=link_id,
+                    length=length,
+                    flow_capacity=capacity,
+                    freespeed=freespeed,
+                    lanes=permlanes,
+                )
 
-    def minimum_durations(self) -> dict:
-        """Get the minimum durations for all edges in the network.
+    def __getitem__(self, mode: str) -> DiGraph:
+        return self._networks[mode]
+
+    def __setitem__(self, mode: str, graph: DiGraph):
+        self._networks[mode] = graph
+
+    def items(self):
+        for k, v in self._networks.items():
+            yield k, v
+
+    def nodes(self, mode: str):
+        """Get the nodes of the grid graph.
+
+        Args:
+            mode (str): mode.
+
+        Returns:
+            list: A list of nodes in the graph/s.
+        """
+        return self._networks[mode].nodes
+
+    def edges(self, mode: str):
+        """Get the edges of the grid graph.
+
+        Returns:
+            list: A list of edges in the graph/s.
+        """
+        return self._networks[mode].edges
+
+    def minimum_durations(self, network_mode: str) -> dict:
+        """Get the minimum durations for all edges in the network for given mode.
 
         Returns:
             dict: A dictionary with edges as keys and minimum durations as values.
         """
         min_durations = {}
-        for u, v, data in self.G.edges(data=True):
+        edges = self.edges(mode=network_mode)
+        for u, v, data in edges(data=True):
             length = data.get("length", 0)
             freespeed = data.get("freespeed", 1)
             duration = length / freespeed
@@ -77,16 +94,16 @@ class Network:
         return min_durations
 
 
-class Grid(Network):
-    """A grid graph with nodes arranged in a 10x10 grid.
+class RoadGrid(Networks):
+    """A grid graph with nodes arranged in a size x size grid.
     Node ids are tuples (i, j) where i and j are the row and column indices.
     """
 
-    def __init__(
-        self,
-        **kwargs: dict,
-    ):
-        self.G, self.node_positions = self.build_grid_graph(**kwargs if kwargs else {})
+    def __init__(self, **kwargs: dict):
+        super().__init__()
+        self["road"], self.node_locations = self.build_grid_graph(
+            **kwargs if kwargs else {}
+        )
 
     def build_grid_graph(
         self,
@@ -101,11 +118,11 @@ class Grid(Network):
             Graph: A grid graph with 100 nodes.
         """
         self.size = size
-        G = Graph()
+        G = DiGraph()
         node_positions = {}
         for i in range(size + 1):
             for j in range(size + 1):
-                G.add_node((i, j))
+                # G.add_node((i, j))
                 node_positions[(i, j)] = (j * length, i * length)
                 if i > 0:
                     G.add_edge(
@@ -116,10 +133,26 @@ class Grid(Network):
                         freespeed=freespeed,
                         flow_capacity=flow_capacity,
                     )
+                    G.add_edge(
+                        (i - 1, j),
+                        (i, j),
+                        length=length,
+                        lanes=lanes,
+                        freespeed=freespeed,
+                        flow_capacity=flow_capacity,
+                    )
                 if j > 0:
                     G.add_edge(
                         (i, j),
                         (i, j - 1),
+                        length=length,
+                        lanes=lanes,
+                        freespeed=freespeed,
+                        flow_capacity=flow_capacity,
+                    )
+                    G.add_edge(
+                        (i, j - 1),
+                        (i, j),
                         length=length,
                         lanes=lanes,
                         freespeed=freespeed,
@@ -144,7 +177,7 @@ class Grid(Network):
         return (self.size, self.size)
 
     def __repr__(self):
-        
+
         o_row = "O" + "---X" * self.size + "\n"
         row = "X---" * self.size + "X\n"
         d_row = "X---" * self.size + "D\n"
@@ -158,12 +191,12 @@ class Grid(Network):
         return string
 
 
-class Linear(Network):
-    def __init__(
-        self,
-        **kwargs: dict,
-    ):
-        self.G, self.node_positions= self.build_linear_graph(**kwargs if kwargs else {})
+class Linear(Networks):
+    def __init__(self, **kwargs: dict):
+        super().__init__()
+        self._networks["road"], self.node_positions = self.build_linear_graph(
+            **kwargs if kwargs else {}
+        )
 
     def build_linear_graph(
         self,
@@ -193,7 +226,7 @@ class Linear(Network):
                     flow_capacity=flow_capacity,
                 )
         return G, node_positions
-    
+
     def get_start(self):
         """Get the start node of the linear graph.
 
@@ -215,3 +248,7 @@ class Linear(Network):
         for r in range(self.size):
             string += "---X"
         return string
+
+
+def unpack(modes: Optional[str]):
+    return modes.split(",")

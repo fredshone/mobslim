@@ -27,28 +27,30 @@ class Optimizer:
 
         print("--- Starting optimization ---")
         for i in range(1, max_runs):
-            
+
             self.planner.update(events)
             self.planner.replan()
 
             self.sim.set(plans=self.planner.plans)
             events = self.sim.run()
 
-            self.report(i ,events)
+            self.report(i, events)
 
         print("--- Optimization complete ---")
         return events
-    
+
     def report(self, i, events):
         durations = trip_durations(events)
         avg_trip_duration = sum(durations) / len(durations)
 
         # calculate average trip distances
-        distances = trip_lengths(self.sim.network, events)
+        distances = trip_lengths(self.sim.networks, events)
         avg_trip_length = sum(distances) / len(distances)
 
         # calculate average link durations
-        link_durations = expected_link_durations(self.plans, self.sim.network, events)
+        link_durations = expected_link_durations(
+            self.plans, self.sim.networks, events
+        )
         avg_link_duration = sum(link_durations.values()) / len(link_durations)
 
         print(

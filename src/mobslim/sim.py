@@ -3,17 +3,13 @@ from typing import Dict, Hashable
 
 from mobslim.agents import InstructionType, Plan
 from mobslim.listener import EventListener
-from mobslim.network import Network
+from mobslim.network import Networks
 
 VEH_SIZE = 4  # Size of the vehicle in meters
 
 
 class Sim:
-    def __init__(
-        self,
-        network: Network,
-        listener: EventListener,
-    ):
+    def __init__(self, networks: Networks, listener: EventListener):
         """
         Initialize the simulation with a network and expected link durations.
 
@@ -21,13 +17,14 @@ class Sim:
         :param plans: A dictionary of plans for each agent.
         :param listener: An event listener to handle events during the simulation.
         """
-        self.network = network
+        self.networks = networks
         self.event_listener = listener
 
     def set(self, plans: Dict[Hashable, Plan]):
 
         self.instructions = {
-            agent_id: plan.get_instructions() for agent_id, plan in plans.items()
+            agent_id: plan.get_instructions()
+            for agent_id, plan in plans.items()
         }
 
         self.queue = []
@@ -35,15 +32,22 @@ class Sim:
             instruction_a, instruction_b = next(instruction_q)
             min_duration = instruction_a[3]
             heapq.heappush(
-                self.queue, (min_duration, agent_id, (instruction_a, instruction_b))
+                self.queue,
+                (min_duration, agent_id, (instruction_a, instruction_b)),
             )
 
         self.time = 0
 
-        self.sim_links = {
-            edge: SimLink(attributes)
-            for edge, attributes in self.network.G.edges.items()
-        }
+        self.sim_links = {}
+        for network_mode, graph in self.networks.items():
+
+            self.sim_links.update(
+                {
+                    (network_mode, u, v): SimLink(attributes)
+                    for u, v, attributes in graph.edges(data=True)
+                }
+            )
+
         self.event_listener.reset()
 
     def run(self, steps: int = 86400):
@@ -53,46 +57,49 @@ class Sim:
 
     def can_exit(self, agent_id, instruction_a):
         if instruction_a[0] == InstructionType.ExitLink:
-            _, _, uv, _ = instruction_a
-            if self.sim_links[uv].can_exit(self.time):
+            _, nw_mode, (u, v), _ = instruction_a
+            if self.sim_links[(nw_mode, u, v)].can_exit(self.time):
                 return True
             return False
         return True
 
     def can_enter(self, agent_id, instruction_b):
         if instruction_b[0] == InstructionType.EnterLink:
-            _, _, uv, _ = instruction_b
-            if self.sim_links[uv].can_enter(VEH_SIZE, self.time):
+            _, nw_mode, (u, v), _ = instruction_b
+            if self.sim_links[(nw_mode, u, v)].can_enter(VEH_SIZE, self.time):
                 return True
             return False
         return True
 
     def step_instruction(self):
-
-        self.time, agent_id, (instruction_a, instruction_b) = heapq.heappop(self.queue)
+        self.time, agent_id, (instruction_a, instruction_b) = heapq.heappop(
+            self.queue
+        )
 
         if not self.can_exit(agent_id, instruction_a):
             # cannot exit, requeue with a small delay
             heapq.heappush(
-                self.queue, (self.time + 1, agent_id, (instruction_a, instruction_b))
+                self.queue,
+                (self.time + 1, agent_id, (instruction_a, instruction_b)),
             )
             return
 
         if not self.can_enter(agent_id, instruction_b):
             # cannot enter, requeue with a small delay
             heapq.heappush(
-                self.queue, (self.time + 1, agent_id, (instruction_a, instruction_b))
+                self.queue,
+                (self.time + 1, agent_id, (instruction_a, instruction_b)),
             )
             return
 
         # do link exit and entry
         if instruction_a[0] == InstructionType.ExitLink:
-            _, _, uv, _ = instruction_a
-            self.sim_links[uv].exit(agent_id, self.time)
+            _, nw_mode, (u, v), _ = instruction_a
+            self.sim_links[(nw_mode, u, v)].exit(agent_id, self.time)
 
         if instruction_b[0] == InstructionType.EnterLink:
-            _, _, uv, _ = instruction_b
-            self.sim_links[uv].enter(agent_id, VEH_SIZE, self.time)
+            _, nw_mode, (u, v), _ = instruction_b
+            self.sim_links[(nw_mode, u, v)].enter(agent_id, VEH_SIZE, self.time)
 
         self.event_listener.add(self.time, agent_id, instruction_a)
         self.event_listener.add(self.time, agent_id, instruction_b)
@@ -124,7 +131,9 @@ class SimLink:
         flow_capacity = attributes["flow_capacity"]  # Flow capacity of the link
 
         self.storage_capacity = length * lanes  # meters
-        self.flow_capacity = int(1 / (flow_capacity * lanes))  # seconds per vehicle
+        self.flow_capacity = int(
+            1 / (flow_capacity * lanes)
+        )  # seconds per vehicle
         self.min_duration = int(length / freespeed)  # seconds
 
         self.queue = []

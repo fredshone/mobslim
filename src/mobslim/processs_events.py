@@ -1,6 +1,7 @@
 from typing import Hashable
 
 from mobslim.agents import Activity, InstructionType, Plan, Trip
+from mobslim.network import Networks
 
 
 def events_to_plans(events: list) -> dict:
@@ -8,6 +9,7 @@ def events_to_plans(events: list) -> dict:
     plans = {}
     states = {}
     trip_starts = {}
+    last_trip_mode = {}
     routes = {}  # edge, expected, minimum
 
     for time, idx, instruction in events:
@@ -22,7 +24,8 @@ def events_to_plans(events: list) -> dict:
             if trip_starts[idx]:
                 _, act, d, _ = instruction
                 u, start_time = trip_starts[idx]
-                trip = Trip(u, d, time-start_time)
+                nw_mode = last_trip_mode[idx]
+                trip = Trip(u, d, network_mode=nw_mode)
                 trip.route = routes[idx]
                 plans[idx].add(trip)
                 del trip_starts[idx]
@@ -38,17 +41,18 @@ def events_to_plans(events: list) -> dict:
             routes[idx] = []
 
         elif event == InstructionType.EnterLink:
-            _, _, uv, minimum_duration = instruction    
+            _, nw_mode, uv, minimum_duration = instruction
             states[idx] = time
 
         elif event == InstructionType.ExitLink:
             _, _, uv, minimum_duration = instruction
             duration = time - states[idx]
             routes[idx].append((uv, duration, minimum_duration))
-            
+            last_trip_mode[idx] = nw_mode
+
         elif event == InstructionType.EOS:
             plans[idx].finish()
-            
+
     return plans
 
 
@@ -67,8 +71,13 @@ def trip_durations(events: list) -> list:
     return durations
 
 
-def trip_lengths(network, events: list) -> list:
-    link_distances = {(u, v): network.G[u][v]["length"] for (u, v) in network.G.edges}
+def trip_lengths(
+    networks: Networks, events: list, network_mode: str = "road"
+) -> list:
+    G = networks[network_mode]
+    link_distances = {
+        (u, v): data["length"] for (u, v, data) in G.edges(data=True)
+    }
     trip_lengths = []
     trip_monitor = {}
     for _, idx, instruction in events:
@@ -83,10 +92,13 @@ def trip_lengths(network, events: list) -> list:
     return trip_lengths
 
 
-def av_link_durations(plans, network, events: list) -> dict:
+def av_link_durations(
+    plans, networks: Networks, events: list, network_mode: str = "car"
+) -> dict:
     """Calculate the average link durations based on events."""
+    G = networks[network_mode]
     idx_monitor = {idx: None for idx in plans.keys()}
-    link_durations = {link: [] for link in network.G.edges}
+    link_durations = {link: [] for link in G.edges}
     for time, idx, instruction in events:
         event, _, uv, _ = instruction
 
@@ -104,10 +116,14 @@ def av_link_durations(plans, network, events: list) -> dict:
     }
     return avg_durations
 
-def expected_link_durations(plans, network, events: list) -> dict:
+
+def expected_link_durations(
+    plans, networks: Networks, events: list, network_mode: str = "road"
+) -> dict:
     """Calculate the expected link durations based on events."""
+    G = networks[network_mode]
     idx_monitor = {idx: None for idx in plans.keys()}
-    link_durations = {link: [] for link in network.G.edges}
+    link_durations = {link: [] for link in G.edges}
     for time, idx, instruction in events:
         event, _, uv, _ = instruction
 
@@ -119,22 +135,28 @@ def expected_link_durations(plans, network, events: list) -> dict:
             link_durations[link].append(duration)
 
     # get minimyum durations per link
-    min_durations = network.minimum_durations()
+    min_durations = networks.minimum_durations(network_mode=network_mode)
 
     # Calculate expected durations
     expected_durations = {
-        link: sum(durations) / len(durations) if durations else min_durations[link]
+        link: (
+            sum(durations) / len(durations)
+            if durations
+            else min_durations[link]
+        )
         for link, durations in link_durations.items()
     }
 
     return expected_durations
 
 
-def av_link_speeds(plans, network, events: list) -> dict:
+def av_link_speeds(
+    plans, networks: Networks, events: list, network_mode: str = "car"
+) -> dict:
     """Calculate the average link speeds based on events."""
     idx_monitor = {idx: None for idx in plans.keys()}
-    link_ids = network.G.edges
-    link_distances = {(u, v): network.G[u][v]["length"] for (u, v) in link_ids}
+    link_ids = networks[network_mode].edges
+    link_distances = {(u, v): networks.G[u][v]["length"] for (u, v) in link_ids}
     link_traverses = {link_id: [] for link_id in link_ids}
     for time, idx, instruction in events:
         event, _, uv, _ = instruction

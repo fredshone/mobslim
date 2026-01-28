@@ -1,6 +1,6 @@
 from networkx import Graph
 
-from mobslim.network import Network
+from mobslim.network import Networks
 from mobslim.processs_events import expected_link_durations
 
 
@@ -22,7 +22,7 @@ class ExpectedLinkDurations:
         """
         raise NotImplementedError("This method is not implemented yet.")
 
-    def update(self, plans: dict, network: Network, events: list):
+    def update(self, plans: dict, network: Networks, events: list):
         raise NotImplementedError("This method is not implemented yet.")
 
     def update_link(edge: tuple, time: float, duration: float):
@@ -39,8 +39,8 @@ class ExpectedLinkDurations:
 class SimpleExpectedDurations(ExpectedLinkDurations):
     """A simple implementation of expected durations for edges in a graph."""
 
-    def __init__(self, network: Network):
-        self.edge_durations = network.minimum_durations()
+    def __init__(self, network: Networks, mode: str):
+        self.edge_durations = network.minimum_durations(network_mode=mode)
         if None in self.edge_durations.values():
             raise ValueError("All edges must have a duration attribute.")
 
@@ -48,13 +48,17 @@ class SimpleExpectedDurations(ExpectedLinkDurations):
         """Get the expected duration for a given edge at a specific time."""
         return self.edge_durations[edge]
 
-    def update(self, plans: dict, network: Network, events: list, alpha: float = 1.0):
+    def update(
+        self, plans: dict, network: Networks, events: list, alpha: float = 1.0
+    ):
         durations = expected_link_durations(plans, network, events)
         for edge, duration in durations.items():
             if duration is not None:
                 self.update_link(edge, None, duration, alpha=alpha)
 
-    def update_link(self, edge: tuple, time: int, duration: float, alpha: float = 0.5):
+    def update_link(
+        self, edge: tuple, time: int, duration: float, alpha: float = 0.5
+    ):
         """Update the expected duration for a given edge at a specific time."""
         self.edge_durations[edge] = (1 - alpha) * self.edge_durations[
             edge

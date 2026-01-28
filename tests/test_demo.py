@@ -1,8 +1,8 @@
-from mobslim.network import Grid
+from mobslim.network import RoadGrid
 
 
 def test_grid_network():
-    network = Grid(
+    network = RoadGrid(
         size=3,
         length=50,  # meters
         lanes=1,
