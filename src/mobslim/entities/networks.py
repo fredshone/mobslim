@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 from typing import Optional
 
+from fastquadtree import QuadTreeObjects
 from networkx import DiGraph, Graph
 
 
@@ -22,7 +23,7 @@ class Networks:
 
         # Load nodes
         for node in root.find("nodes"):
-            node_id = int(node.get("id"))
+            node_id = node.get("id")
             x = float(node.get("x"))
             y = float(node.get("y"))
             self.node_locations[node_id] = (x, y)
@@ -30,16 +31,20 @@ class Networks:
         # Load links
         for link in root.find("links"):
             modes = unpack(link.get("modes", "road"))
-            link_id = int(link.get("id"))
-            from_node = int(link.get("from"))
-            to_node = int(link.get("to"))
+            link_id = link.get("id")
+            from_node = link.get("from")
+            to_node = link.get("to")
             length = float(link.get("length"))
             capacity = float(link.get("capacity")) / 3600
             freespeed = float(link.get("freespeed"))
             permlanes = int(link.get("permlanes"))
             for mode in modes:
-                mode_graph = self._network.get(mode, DiGraph)
-                mode_graph.add_edge(
+                nw = self._networks.get(mode)
+                if nw is None:
+                    nw = DiGraph()
+                    self._networks[mode] = nw
+
+                nw.add_edge(
                     from_node,
                     to_node,
                     id=link_id,
@@ -69,6 +74,20 @@ class Networks:
             list: A list of nodes in the graph/s.
         """
         return self._networks[mode].nodes
+
+    def node_quad_tree(self) -> QuadTreeObjects:
+        """Get a quad tree of the node locations.
+
+        Returns:
+            QuadTree: A quad tree of the node locations.
+        """
+        xs, ys = zip(*self.node_locations.values())
+        bb = (min(xs) - 1, min(ys) - 1, max(xs) + 1, max(ys) + 1)
+        qt = QuadTreeObjects(bb, capacity=len(xs))
+        locs = list(self.node_locations.values())
+        ids = list(self.node_locations.keys())
+        qt.insert_many(locs, ids)
+        return qt
 
     def edges(self, mode: str):
         """Get the edges of the grid graph.

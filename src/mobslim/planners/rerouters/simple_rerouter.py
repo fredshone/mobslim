@@ -1,21 +1,24 @@
 from networkx import shortest_path
 
+from mobslim.entities.networks import Networks
 from mobslim.expected import ExpectedLinkDurations
-from mobslim.network import Networks
 from mobslim.planners.rerouters.core import BaseRouter
 
 
 class StaticRouter(BaseRouter):
     def __init__(
-        self, network: Networks, mode: str, expectations: ExpectedLinkDurations
+        self,
+        network: Networks,
+        network_mode: str,
+        expectations: ExpectedLinkDurations,
     ):
         """Static because it does not consider time of day.
         Args:
             network (Network): The network to route through.
-            mode (str): the network mode.
+            network_mode (str): the network mode.
             link_durations (Durations): The expected durations for the links in the network.
         """
-        self.G = network[mode].copy()
+        self.G = network[network_mode].copy()
         # calc minimum durations based on length and freespeed
         for edge in self.G.edges:
             length = self.G[edge[0]][edge[1]]["length"]
@@ -49,6 +52,8 @@ class StaticRouter(BaseRouter):
         path = shortest_path(
             self.G, source=source, target=target, weight="expected_duration"
         )
+        path = list(path)
+        print(path)
         link_ids = [(u, v) for u, v in zip(path[:-1], path[1:])]
         expected_durations = [
             self.G[u][v]["expected_duration"] for u, v in link_ids

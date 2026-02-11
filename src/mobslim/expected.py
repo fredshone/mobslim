@@ -1,6 +1,6 @@
 from networkx import Graph
 
-from mobslim.network import Networks
+from mobslim.entities.networks import Networks
 from mobslim.processs_events import expected_link_durations
 
 
@@ -39,8 +39,10 @@ class ExpectedLinkDurations:
 class SimpleExpectedDurations(ExpectedLinkDurations):
     """A simple implementation of expected durations for edges in a graph."""
 
-    def __init__(self, network: Networks, mode: str):
-        self.edge_durations = network.minimum_durations(network_mode=mode)
+    def __init__(self, network: Networks, network_mode: str):
+        self.edge_durations = network.minimum_durations(
+            network_mode=network_mode
+        )
         if None in self.edge_durations.values():
             raise ValueError("All edges must have a duration attribute.")
 

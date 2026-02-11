@@ -1,9 +1,9 @@
 import heapq
 from typing import Dict, Hashable
 
-from mobslim.agents import InstructionType, Plan
+from mobslim.entities.agents import InstructionType, Plan
+from mobslim.entities.networks import Networks
 from mobslim.listener import EventListener
-from mobslim.network import Networks
 
 VEH_SIZE = 4  # Size of the vehicle in meters
 

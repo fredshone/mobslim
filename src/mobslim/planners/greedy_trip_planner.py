@@ -1,7 +1,7 @@
 from random import random
 
-from mobslim.agents import Activity, Trip
-from mobslim.network import Networks
+from mobslim.entities.agents import Activity, Trip
+from mobslim.entities.networks import Networks
 from mobslim.planners.core import BasePlanner
 from mobslim.planners.rerouters.simple_rerouter import BaseRouter
 from mobslim.processs_events import events_to_plans
@@ -47,6 +47,7 @@ class GreedyTripPlanner(BasePlanner):
                 self.replan_plan(plan)
 
     def replan_plan(self, plan):
+        print(plan)
         time = 0
         for component in plan.components:
 

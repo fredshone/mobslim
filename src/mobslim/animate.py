@@ -1,8 +1,9 @@
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 
-from mobslim.agents import InstructionType
-from mobslim.network import Networks
+from mobslim.entities.networks import Networks
+
+from .entities.agents import InstructionType
 
 
 def build_traces(events, node_locations, step=1, start=0, limit=None):
@@ -23,7 +24,7 @@ def build_traces(events, node_locations, step=1, start=0, limit=None):
         if time < start:
             continue
 
-        elif instruction[0] == InstructionType.EnterActivity:
+        elif instruction[0] == InstructionType.EnterFacility:
             loc = node_locations[instruction[2]]
             agent_traces[agent_id].append((time, loc))
         elif instruction[0] == InstructionType.EnterLink:

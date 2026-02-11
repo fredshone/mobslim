@@ -2,13 +2,16 @@ import xml.etree.ElementTree as ET
 from enum import Enum
 from typing import Optional
 
+from mobslim.entities.networks import Networks
+from mobslim.utils import string_to_seconds
+
 # instruction will be composed of (InstructionType, info, asset_id, duration)
 
 
 class InstructionType(Enum):
     SOS = 0
-    EnterActivity = 1  # (ActivityType, facility_id, duration)
-    ExitActivity = 2  # (ActivityType, facility_id, duration)
+    EnterFacility = 1  # (ActivityType, facility_id, duration)
+    ExitFacility = 2  # (ActivityType, facility_id, duration)
     EnterLink = 3  # (link_id)
     ExitLink = 4  # (link_id)
     EOS = 5  # ()
@@ -31,12 +34,17 @@ class Plan:
         activity = Activity(type=type, location=location, duration=duration)
         self.components.append(activity)
 
-    def add_trip(self, origin, destination, start_time, network_mode: str):
+    def add_trip(self, origin, destination, network_mode: str):
         """Add a trip to the agent's plan."""
         trip = Trip(
             origin=origin, destination=destination, network_mode=network_mode
         )
         self.components.append(trip)
+
+    def set_network_mode(self, mode: str):
+        for component in self.components:
+            if isinstance(component, Trip):
+                component.network_mode = mode
 
     def finish(self):
         self.components.append(EOS())
@@ -81,13 +89,13 @@ class Activity:
     def get_instructions(self):
         for instruction in [
             (
-                InstructionType.EnterActivity,
+                InstructionType.EnterFacility,
                 self.type,
                 self.location,
                 self.duration,
             ),
             (
-                InstructionType.ExitActivity,
+                InstructionType.ExitFacility,
                 self.type,
                 self.location,
                 self.duration,
@@ -148,7 +156,7 @@ class EOS:
         return "EOS()"
 
 
-def load_from_xml(path: str):
+def load_plans_from_xml(path: str, networks: Networks) -> dict:
     """Load a plans file into a dictionary of Plan objects.
     Input file is MATSim formatted XML:
     <?xml version="1.0" ?>
@@ -172,6 +180,8 @@ def load_from_xml(path: str):
             </plan>
         </person>
     """
+    node_quad_tree = networks.node_quad_tree()
+
     plans = {}
     tree = ET.parse(path)
     root = tree.getroot()
@@ -181,9 +191,13 @@ def load_from_xml(path: str):
         plan = Plan()
         # loop through acts and legs in xml plan
         for component in xml_plan:
-            if component.tag == "act":
+            if component.tag == "act" or component.tag == "activity":
                 act_type = component.get("type")
-                node = int(component.get("node"))
+                node = component.get("node")
+                if node is None:
+                    x = float(component.get("x"))
+                    y = float(component.get("y"))
+                    node = node_quad_tree.nearest_neighbor((x, y)).obj
 
                 if component.get("end_time"):
                     duration = string_to_seconds(component.get("end_time"))
@@ -192,19 +206,21 @@ def load_from_xml(path: str):
                 else:
                     duration = None
 
-                if act_type == "h":
+                if act_type == "h" or act_type == "home":
                     plan.add_activity(ActivityType.HOME, node, duration)
-                elif act_type == "w":
+                elif act_type == "w" or act_type == "work":
                     plan.add_activity(ActivityType.WORK, node, duration)
+                else:
+                    raise UserWarning(f"Unknown activiy type: {act_type}.")
 
             if component.tag == "leg":
                 plan.add_trip(None, None, None)
-        fixup_ods(plan)  # Ensure origin and destination are set
+        ensure_trip_ods(plan)  # Ensure origin and destination are set
         plans[person_id] = plan
     return plans
 
 
-def fixup_ods(plan: Plan):
+def ensure_trip_ods(plan: Plan):
     trip_idxs = []
     for i, component in enumerate(plan.components):
         if isinstance(component, Trip) and (
@@ -215,12 +231,3 @@ def fixup_ods(plan: Plan):
         plan.components[i].origin = plan.components[i - 1].location
         plan.components[i].destination = plan.components[i + 1].location
     return plan
-
-
-def string_to_seconds(string: str) -> int:
-    hms = string.split(":")
-    if len(hms) == 2:
-        return int(hms[0]) * 3600 + int(hms[1]) * 60
-    elif len(hms) == 3:
-        return int(hms[0]) * 3600 + int(hms[1]) * 60 + int(hms[2])
-    raise ValueError(f"Invalid time format: {string}")

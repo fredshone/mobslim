@@ -1,5 +1,5 @@
+from mobslim.entities.networks import Networks
 from mobslim.expected import ExpectedLinkDurations
-from mobslim.network import Networks
 
 
 class BaseRouter:
