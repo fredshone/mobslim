@@ -248,10 +248,18 @@ the QSim's queue model and its wake-on-space handling of blocked vehicles
   appends `(time, kind, person, ref, ref)` for each event type some handler
   wants, and the event objects are built after the run, in that order.
 
-On the 40×40 grid sweep, the Rust kernel takes about 0.25–0.3 s for
-1.4 M link traversals (about 180 ns each, against 6.5 µs for the QSim),
-whatever the congestion. Encoding the plans (`PlanBatch.from_plans`) then
-costs about as much as the simulation.
+On the 40×40 grid sweep, the Rust kernel takes about 0.2 s for 1.4 M link
+traversals (about 140–160 ns each, against 6.5 µs for the QSim), whatever
+the congestion; a whole `HermesSim.run` takes about 0.26 s, 80% of it in
+the kernel (gathering the plans with `selected_batch` takes 3 ms).
+
+The kernel is bound by memory latency, not compute: the cost per traversal
+grows with the scenario (about 100 ns on a 20×20 grid, 200 ns on 80×80) as
+its state outgrows the caches. Its layout keeps a vehicle move to a few
+cache lines: each link's hot state is one 64-byte `LinkHot`, link queues
+are lists threaded through the vehicles' `VehHot` records, and a queue
+entry carries the vehicle's next link, read when it entered the link,
+while that part of its route was in cache.
 
 Compared with Hermes itself, HermesSim does not poll blocked links every
 second, keeps stuck time per vehicle (Hermes's is per link), and does not

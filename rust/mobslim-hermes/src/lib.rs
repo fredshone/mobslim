@@ -70,6 +70,8 @@ const CLOSED: u8 = 4;
 
 // waiter tokens: links have the top bit set
 const LINK_TOKEN: u64 = 1 << 63;
+const END: u32 = u32::MAX; // queue entry: the link is the vehicle's last
+const NIL: u32 = u32::MAX; // no vehicle
 
 #[inline]
 fn ceil_step(t: f64) -> i64 {
@@ -146,7 +148,40 @@ struct Outputs {
     stop_dep: Vec<f64>,
 }
 
+/// A link's state and parameters that a vehicle move reads or writes, packed
+/// into one cache line: the kernel is bound by memory latency, not compute.
+#[derive(Clone, Copy)]
+#[repr(C, align(64))]
+struct LinkHot {
+    occ: f64,     // storage in use (PCE)
+    nft: f64,     // next free flow slot (unrounded)
+    headway: f64, // seconds per PCE
+    storage: f64,
+    blocked: i64, // since when the head is blocked downstream, or NONE
+    pending: i64, // the time of the live TRY_LEAVE wake-up, or NONE
+    waiting: i32, // the downstream link the head waits for, or -1
+    free: i32,    // free-speed time in whole seconds
+    nwait: u32,   // tokens in `l_waiters` (checked without touching the deque)
+    head: u32,    // first vehicle in the queue, or NIL
+}
+
+/// A vehicle's route position, current link and PCE, packed together.
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct VehHot {
+    rpos: usize, // position in `route_links` of its current link
+    rend: usize, // end of its route in `route_links`
+    link: i64,   // current link, or -1
+    pce: f64,
+    // its entry in its link's queue (a vehicle is in at most one)
+    qnext: u32,     // the vehicle behind it, or NIL
+    qnx: u32,       // its next link, or END
+    qearliest: i64, // its earliest exit
+}
+
 struct Sim<'a> {
+    lk: Vec<LinkHot>,
+    vh: Vec<VehHot>,
     inp: &'a Inputs,
     out: Outputs,
     rec: [bool; N_EVENT_KINDS],
@@ -170,20 +205,12 @@ struct Sim<'a> {
     a_ride: Vec<usize>,
     a_ride_end: Vec<usize>,
     // vehicles (persons, then trips)
-    a_rpos: Vec<usize>,
-    a_rend: Vec<usize>,
-    a_link: Vec<i64>,
     a_blocked: Vec<i64>,
     a_waiting: Vec<i64>,
     // links
-    l_queue: Vec<VecDeque<(u32, i64)>>,
-    l_occ: Vec<f64>,
-    l_nft: Vec<f64>,
+    l_tail: Vec<u32>, // last vehicle in each link's queue (the head is in `lk`)
     l_waiters: Vec<VecDeque<u64>>,
     l_departing: Vec<VecDeque<usize>>, // vehicles blocked departing onto the link, FIFO
-    l_blocked: Vec<i64>,
-    l_waiting: Vec<i64>,
-    l_pending: Vec<i64>,
     // rides
     waiting: Vec<VecDeque<u32>>,
     at_stop: Vec<Vec<u32>>,
@@ -229,6 +256,21 @@ impl<'a> Sim<'a> {
             vec![0; n_trips]
         };
         Sim {
+            lk: (0..n_links)
+                .map(|l| LinkHot {
+                    occ: 0.0,
+                    nft: 0.0,
+                    headway: inp.headway[l],
+                    storage: inp.storage[l],
+                    blocked: NONE,
+                    pending: NONE,
+                    waiting: -1,
+                    free: inp.free_steps[l] as i32,
+                    nwait: 0,
+                    head: NIL,
+                })
+                .collect(),
+            vh: (0..n_veh).map(|v| VehHot { rpos: 0, rend: 0, link: -1, pce: inp.v_pce[v], qnext: NIL, qnx: END, qearliest: 0 }).collect(),
             inp,
             out: Outputs {
                 act_start: vec![nan; n_acts],
@@ -265,19 +307,11 @@ impl<'a> Sim<'a> {
             a_done: vec![false; n_plans],
             a_ride: vec![0; n_plans],
             a_ride_end: vec![0; n_plans],
-            a_rpos: vec![0; n_veh],
-            a_rend: vec![0; n_veh],
-            a_link: vec![-1; n_veh],
             a_blocked: vec![NONE; n_veh],
             a_waiting: vec![-1; n_veh],
-            l_queue: (0..n_links).map(|_| VecDeque::new()).collect(),
-            l_occ: vec![0.0; n_links],
-            l_nft: vec![0.0; n_links],
+            l_tail: vec![NIL; n_links],
             l_waiters: (0..n_links).map(|_| VecDeque::new()).collect(),
             l_departing: (0..n_links).map(|_| VecDeque::new()).collect(),
-            l_blocked: vec![NONE; n_links],
-            l_waiting: vec![-1; n_links],
-            l_pending: vec![NONE; n_links],
             waiting: (0..n_rs).map(|_| VecDeque::new()).collect(),
             at_stop: (0..n_rs).map(|_| Vec::new()).collect(),
             tr_rstart,
@@ -428,8 +462,8 @@ impl<'a> Sim<'a> {
                 self.arrive(p);
                 return;
             }
-            self.a_rpos[p] = r0;
-            self.a_rend[p] = r1;
+            self.vh[p].rpos = r0;
+            self.vh[p].rend = r1;
             self.try_depart(p, false);
         } else if self.inp.leg_transit[leg] != 0 {
             self.pt_depart(p);
@@ -484,7 +518,7 @@ impl<'a> Sim<'a> {
     }
 
     fn try_depart(&mut self, v: usize, force: bool) {
-        let link = self.inp.route_links[self.a_rpos[v]] as usize;
+        let link = self.inp.route_links[self.vh[v].rpos] as usize;
         // others are waiting to depart here (MATSim's waiting list): queue behind
         if let Some(&front) = self.l_departing[link].front() {
             if front != v {
@@ -492,7 +526,7 @@ impl<'a> Sim<'a> {
                 return;
             }
         }
-        if force || self.l_occ[link] < self.inp.storage[link] {
+        if force || self.lk[link].occ < self.lk[link].storage {
             self.a_blocked[v] = NONE;
             self.a_waiting[v] = -1;
             let was_front = self.l_departing[link].pop_front().is_some();
@@ -520,32 +554,85 @@ impl<'a> Sim<'a> {
             let token = v as u64;
             if was_blocked {
                 self.l_waiters[link].push_front(token);
+                self.lk[link].nwait += 1;
             } else {
                 self.l_waiters[link].push_back(token);
+                self.lk[link].nwait += 1;
             }
         }
     }
 
     // -- links --------------------------------------------------------------
+    /// Append vehicle `v` to `link`'s queue; true if it is now the head.
+    #[inline]
+    fn q_push_back(&mut self, link: usize, v: usize, nx: u32, earliest: i64) -> bool {
+        let vh = &mut self.vh[v];
+        vh.qnext = NIL;
+        vh.qnx = nx;
+        vh.qearliest = earliest;
+        let tail = self.l_tail[link];
+        self.l_tail[link] = v as u32;
+        if tail == NIL {
+            self.lk[link].head = v as u32;
+            true
+        } else {
+            self.vh[tail as usize].qnext = v as u32;
+            false
+        }
+    }
+
+    /// Put vehicle `v` at the head of `link`'s queue.
+    fn q_push_front(&mut self, link: usize, v: usize, nx: u32, earliest: i64) {
+        let head = self.lk[link].head;
+        let vh = &mut self.vh[v];
+        vh.qnext = head;
+        vh.qnx = nx;
+        vh.qearliest = earliest;
+        self.lk[link].head = v as u32;
+        if head == NIL {
+            self.l_tail[link] = v as u32;
+        }
+    }
+
+    /// Remove and return the head of `link`'s (non-empty) queue.
+    #[inline]
+    fn q_pop_front(&mut self, link: usize) -> usize {
+        let v = self.lk[link].head as usize;
+        let next = self.vh[v].qnext;
+        self.lk[link].head = next;
+        if next == NIL {
+            self.l_tail[link] = NIL;
+        }
+        v
+    }
+
+    /// The link after vehicle `v`'s current one, or END. Read when the vehicle
+    /// enters a link, while that part of the route is in cache, and kept in
+    /// its queue entry for `try_leave`.
+    #[inline]
+    fn next_of(&self, v: usize) -> u32 {
+        let r = self.vh[v].rpos + 1;
+        if r < self.vh[v].rend { self.inp.route_links[r] } else { END }
+    }
+
     fn enter_link(&mut self, v: usize, link: usize) {
-        let rpos = self.a_rpos[v];
+        let rpos = self.vh[v].rpos;
         self.out.enter[rpos] = self.now as f64;
         let earliest = if v < self.n_plans {
             if self.rec[EV_LINK_ENTER as usize] {
                 self.record(EV_LINK_ENTER, v, link);
             }
-            self.now + self.inp.free_steps[link]
+            self.now + (self.lk[link].free as i64)
         } else {
             if self.rec[EV_VEH_LINK_ENTER as usize] {
                 self.record(EV_VEH_LINK_ENTER, v - self.n_plans, link);
             }
             self.now + self.inp.trip_link_steps[rpos - self.inp.n_plan_links]
         };
-        self.a_link[v] = link as i64;
-        self.l_occ[link] += self.inp.v_pce[v];
-        let q = &mut self.l_queue[link];
-        q.push_back((v as u32, earliest));
-        if q.len() == 1 {
+        self.vh[v].link = link as i64;
+        self.lk[link].occ += self.vh[v].pce;
+        let nx = self.next_of(v);
+        if self.q_push_back(link, v, nx, earliest) {
             let t = self.head_time(link);
             self.schedule_link(link, t);
         }
@@ -554,54 +641,55 @@ impl<'a> Sim<'a> {
     /// When the head may act: its earliest exit, and also the next flow slot
     /// unless it is a trip about to serve a stop.
     fn head_time(&self, link: usize) -> i64 {
-        let (v, earliest) = self.l_queue[link][0];
-        let v = v as usize;
+        let v = self.lk[link].head as usize;
+        let earliest = self.vh[v].qearliest;
         if v >= self.n_plans && self.has_stop_here(v - self.n_plans) {
             return earliest.max(self.now); // it may have queued past its earliest exit
         }
-        earliest.max(ceil_step(self.l_nft[link]))
+        earliest.max(ceil_step(self.lk[link].nft))
     }
 
     #[inline]
     fn schedule_link(&mut self, link: usize, t: i64) {
-        let pending = self.l_pending[link];
+        let pending = self.lk[link].pending;
         if pending != NONE && pending <= t {
             return;
         }
-        self.l_pending[link] = t;
+        self.lk[link].pending = t;
         self.schedule(t, TRY_LEAVE, link);
     }
 
     fn try_leave_event(&mut self, link: usize) {
-        if self.l_pending[link] != self.now {
+        if self.lk[link].pending != self.now {
             return; // superseded by an earlier wake-up
         }
-        self.l_pending[link] = NONE;
+        self.lk[link].pending = NONE;
         self.try_leave(link, false);
     }
 
     fn force_leave(&mut self, link: usize) {
-        let since = self.l_blocked[link];
+        let since = self.lk[link].blocked;
         if since != NONE && self.now >= ceil_step(since as f64 + self.inp.stuck_time) {
             self.try_leave(link, true);
         }
     }
 
     fn try_leave(&mut self, link: usize, force: bool) {
-        let (v, earliest) = match self.l_queue[link].front() {
-            Some(&(v, e)) => (v as usize, e),
-            None => return,
-        };
+        let v = self.lk[link].head;
+        if v == NIL {
+            return;
+        }
+        let v = v as usize;
+        let (nx, earliest) = (self.vh[v].qnx, self.vh[v].qearliest);
         if v >= self.n_plans && self.at_link_end(v - self.n_plans, link, earliest) {
             return;
         }
-        let ready = earliest.max(ceil_step(self.l_nft[link]));
+        let ready = earliest.max(ceil_step(self.lk[link].nft));
         if self.now < ready {
             self.schedule_link(link, ready);
             return;
         }
-        let next_pos = self.a_rpos[v] + 1;
-        if next_pos == self.a_rend[v] {
+        if nx == END {
             // leaving the last link: arrive
             self.pop_head(link, ready);
             if v < self.n_plans {
@@ -609,36 +697,38 @@ impl<'a> Sim<'a> {
             }
             return;
         }
-        let nxt = self.inp.route_links[next_pos] as usize;
-        if force || self.l_occ[nxt] < self.inp.storage[nxt] {
+        let nxt = nx as usize;
+        if force || self.lk[nxt].occ < self.lk[nxt].storage {
             self.pop_head(link, ready);
-            self.a_rpos[v] = next_pos;
+            self.vh[v].rpos += 1;
             self.enter_link(v, nxt);
             return;
         }
         // blocked by downstream storage: wait for space (or stuck time)
-        let was_blocked = self.l_blocked[link] != NONE;
+        let was_blocked = self.lk[link].blocked != NONE;
         if !was_blocked {
-            self.l_blocked[link] = self.now;
+            self.lk[link].blocked = self.now;
             if self.finite_stuck {
                 let t = ceil_step(self.now as f64 + self.inp.stuck_time);
                 self.schedule(t, FORCE_LEAVE, link);
             }
         }
-        if self.l_waiting[link] != nxt as i64 {
-            self.l_waiting[link] = nxt as i64;
+        if self.lk[link].waiting != nxt as i32 {
+            self.lk[link].waiting = nxt as i32;
             let token = LINK_TOKEN | link as u64;
             if was_blocked {
                 self.l_waiters[nxt].push_front(token);
+                self.lk[nxt].nwait += 1;
             } else {
                 self.l_waiters[nxt].push_back(token);
+                self.lk[nxt].nwait += 1;
             }
         }
     }
 
     fn pop_head(&mut self, link: usize, ready: i64) {
-        let (v, earliest) = self.l_queue[link].pop_front().expect("non-empty queue");
-        let v = v as usize;
+        let v = self.q_pop_front(link);
+        let earliest = self.vh[v].qearliest;
         if v < self.n_plans {
             if self.rec[EV_LINK_LEAVE as usize] {
                 self.record(EV_LINK_LEAVE, v, link);
@@ -646,34 +736,36 @@ impl<'a> Sim<'a> {
         } else if self.rec[EV_VEH_LINK_LEAVE as usize] {
             self.record(EV_VEH_LINK_LEAVE, v - self.n_plans, link);
         }
-        self.a_link[v] = -1;
-        let pce = self.inp.v_pce[v];
-        self.l_occ[link] -= pce;
+        self.vh[v].link = -1;
+        let pce = self.vh[v].pce;
+        self.lk[link].occ -= pce;
         // left at its first possible second: count the next slot from the
         // unrounded time (no drift); held up: from now
-        let nft = self.l_nft[link];
+        let nft = self.lk[link].nft;
         let base = if self.now == ready {
             let e = earliest as f64;
             if e > nft { e } else { nft }
         } else {
             self.now as f64
         };
-        let nft = base + self.inp.headway[link] * pce;
-        self.l_nft[link] = nft;
-        self.l_blocked[link] = NONE;
-        self.l_waiting[link] = -1;
-        if !self.l_queue[link].is_empty() {
+        let nft = base + self.lk[link].headway * pce;
+        self.lk[link].nft = nft;
+        self.lk[link].blocked = NONE;
+        self.lk[link].waiting = -1;
+        if self.lk[link].head != NIL {
             let t = self.head_time(link);
             self.schedule_link(link, t);
         }
         // a slot was freed: wake the first valid waiter
-        while let Some(token) = self.l_waiters[link].pop_front() {
+        while self.lk[link].nwait > 0 {
+            self.lk[link].nwait -= 1;
+            let token = self.l_waiters[link].pop_front().expect("counted waiter");
             if token & LINK_TOKEN != 0 {
                 let up = (token & !LINK_TOKEN) as usize;
-                if self.l_waiting[up] != link as i64 {
+                if self.lk[up].waiting != link as i32 {
                     continue; // stale token
                 }
-                self.l_waiting[up] = -1;
+                self.lk[up].waiting = -1;
                 let now = self.now;
                 self.schedule_link(up, now);
             } else {
@@ -786,8 +878,8 @@ impl<'a> Sim<'a> {
         if self.inp.network_vehicles {
             let v = self.n_plans + d;
             let n = (self.inp.trip_link_offsets[d + 1] - self.inp.trip_link_offsets[d]) as usize;
-            self.a_rpos[v] = self.tr_rstart[d];
-            self.a_rend[v] = self.tr_rstart[d] + n;
+            self.vh[v].rpos = self.tr_rstart[d];
+            self.vh[v].rend = self.tr_rstart[d] + n;
             self.try_depart(v, false);
         } else {
             let j = self.inp.trip_stop_offsets[d] as usize;
@@ -838,16 +930,17 @@ impl<'a> Sim<'a> {
             return;
         }
         let v = self.n_plans + d;
-        let link = self.inp.route_links[self.a_rpos[v]] as usize;
+        let link = self.inp.route_links[self.vh[v].rpos] as usize;
         if self.tr_pulled[d] {
             // back from the stop into the lane, as its head
             self.tr_pulled[d] = false;
             let e = self.tr_pulled_earliest[d];
-            self.l_queue[link].push_front((v as u32, e));
-            self.l_blocked[link] = NONE;
-            self.l_waiting[link] = -1;
+            let nx = self.next_of(v);
+            self.q_push_front(link, v, nx, e);
+            self.lk[link].blocked = NONE;
+            self.lk[link].waiting = -1;
         }
-        let t = self.now.max(ceil_step(self.l_nft[link]));
+        let t = self.now.max(ceil_step(self.lk[link].nft));
         self.schedule_link(link, t);
     }
 
@@ -873,7 +966,7 @@ impl<'a> Sim<'a> {
         let k = self.tr_next[d];
         (k as i64) < self.inp.trip_k1[d]
             && self.inp.rs_link_pos[k]
-                == (self.a_rpos[self.n_plans + d] - self.tr_rstart[d]) as i64
+                == (self.vh[self.n_plans + d].rpos - self.tr_rstart[d]) as i64
     }
 
     /// `try_leave` hook for trip `d` at the head of `link`: true if it is
@@ -891,10 +984,10 @@ impl<'a> Sim<'a> {
         }
         let stop = self.inp.rs_stop[self.tr_next[d]] as usize;
         if self.inp.stop_blocking[stop] == 0 {
-            self.l_queue[link].pop_front(); // into the stop: off the lane, still in storage
+            self.q_pop_front(link); // into the stop: off the lane, still in storage
             self.tr_pulled[d] = true;
             self.tr_pulled_earliest[d] = earliest;
-            if !self.l_queue[link].is_empty() {
+            if self.lk[link].head != NIL {
                 let t = self.head_time(link);
                 self.schedule_link(link, t);
             }
@@ -1091,7 +1184,7 @@ impl<'a> Sim<'a> {
             if !self.a_done[p] {
                 self.out.stuck[p] = true;
                 self.out.stuck_leg.push(self.a_leg[p]);
-                self.out.stuck_link.push(self.a_link[p]);
+                self.out.stuck_link.push(self.vh[p].link);
             }
         }
         self.out.last_time = now;
@@ -1175,8 +1268,12 @@ fn run<'py>(
     }
     let n_plans = act_offsets.len() - 1;
     let n_trips = trip_k0.as_array().len();
-    if n_plans + n_trips > u32::MAX as usize || n_links > u32::MAX as usize {
+    // vehicle ids must stay below NIL; link ids fit `LinkHot::waiting` (i32)
+    if n_plans + n_trips >= u32::MAX as usize || n_links > i32::MAX as usize {
         return Err(err("too many persons, trips or links"));
+    }
+    if free_steps.as_array().iter().any(|&s| s < 0 || s > i32::MAX as i64) {
+        return Err(err("free-speed times must be between 0 and 2^31 - 1 seconds"));
     }
     let n_rs = rs_stop.as_array().len();
     let n_rides = ride_board.as_array().len();
