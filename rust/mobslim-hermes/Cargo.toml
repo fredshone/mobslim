@@ -1,0 +1,18 @@
+[package]
+name = "mobslim-hermes"
+version = "0.1.0"
+edition = "2021"
+description = "Compiled kernel for mobslim's HermesSim (whole-second queue mobsim)"
+publish = false
+
+[lib]
+name = "mobslim_hermes"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
+numpy = "0.23"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

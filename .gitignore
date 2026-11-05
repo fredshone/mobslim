@@ -10,3 +10,13 @@ wheels/
 # Virtual environments
 .venv
 
+
+# Benchmark results are machine-specific
+benchmarks/results/
+
+# Rust build output
+rust/*/target/
+
+# Verification: raw MATSim/mobslim outputs and the Java build
+verification/output/
+verification/java/target/

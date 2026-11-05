@@ -1,98 +1,75 @@
-import matplotlib.animation as animation
-import matplotlib.pyplot as plt
+"""Matplotlib animation of agents moving through the network (for notebooks)."""
 
-from mobslim.entities.networks import Networks
+from typing import Iterable, Optional
 
-from .entities.agents import InstructionType
+from mobslim.events import (
+    ActivityEnd,
+    ActivityStart,
+    Event,
+    LinkEnter,
+    LinkLeave,
+)
+from mobslim.network import Network
 
 
-def build_traces(events, node_locations, step=1, start=0, limit=None):
-    agent_traces = {}
-    start_link_traverse = {}
-
-    print("Building traces...")
-
-    for time, agent_id, instruction in events:
-        time = int(time)
-
-        if limit is not None and time > limit:
+def build_traces(network: Network, events: Iterable[Event], step: float = 1,
+                 start: float = 0, limit: Optional[float] = None):
+    """Per-person lists of ``(time, (x, y))`` positions, sampled every ``step`` s."""
+    xy = network.node_xy
+    traces: dict[int, list] = {}
+    entered: dict[int, float] = {}
+    last = start
+    for e in events:
+        if limit is not None and e.time > limit:
             break
-
-        if instruction[0] == InstructionType.SOS:
-            agent_traces[agent_id] = []
-
-        if time < start:
-            continue
-
-        elif instruction[0] == InstructionType.EnterFacility:
-            loc = node_locations[instruction[2]]
-            agent_traces[agent_id].append((time, loc))
-        elif instruction[0] == InstructionType.EnterLink:
-            start_link_traverse[agent_id] = time
-        elif instruction[0] == InstructionType.ExitLink:
-            u, v = instruction[2]
-            start_time = start_link_traverse[agent_id]
-            duration = time - start_time
-            x0, y0 = node_locations[u]
-            x1, y1 = node_locations[v]
-            dx, dy = x1 - x0, y1 - y0
-            for t in range(0, duration, step):
-                p = t / duration
-                x = x0 + p * dx
-                y = y0 + p * dy
-                agent_traces[agent_id].append((start_time + t, (x, y)))
-
-    return agent_traces, time
+        last = e.time
+        trace = traces.setdefault(e.person, [])
+        if isinstance(e, (ActivityStart, ActivityEnd)):
+            if e.time >= start:
+                trace.append((e.time, tuple(xy[e.node])))
+        elif isinstance(e, LinkEnter):
+            entered[e.person] = e.time
+        elif isinstance(e, LinkLeave):
+            t0 = entered.pop(e.person)
+            (x0, y0) = xy[network.from_node[e.link]]
+            (x1, y1) = xy[network.to_node[e.link]]
+            duration = max(e.time - t0, 1e-9)
+            t = t0
+            while t < e.time:
+                if t >= start:
+                    p = (t - t0) / duration
+                    trace.append((t, (x0 + p * (x1 - x0), y0 + p * (y1 - y0))))
+                t += step
+    return {k: v for k, v in traces.items() if v}, last
 
 
-def plot_network(networks: Networks, ax, network_mode: str = "road"):
-    G = networks[network_mode]
-    locs = [
-        (networks.node_locations[u], networks.node_locations[v])
-        for (u, v) in G.edges()
-    ]
-    return [
-        ax.plot([u[0], v[0]], [u[1], v[1]], color="grey") for (u, v) in locs
-    ]
+def animate_events(network: Network, events: Iterable[Event], step: float = 1,
+                   start: float = 0, limit: Optional[float] = None, mode: Optional[str] = None):
+    """Return a ``FuncAnimation`` of the given events (render with ``ani`` in Jupyter)."""
+    import matplotlib.animation as animation
+    import matplotlib.pyplot as plt
 
-
-def animate_traces(network, agent_traces, frames, network_mode: str = "road"):
-
-    print("Animating traces...")
-
+    traces, finish = build_traces(network, events, step, start, limit)
     plt.rcParams["animation.html"] = "jshtml"
     plt.ioff()
-
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.set_axis_off()
+    xy = network.node_xy
+    for link in range(network.n_links):
+        if mode is not None and mode not in network.link_modes[link]:
+            continue
+        u, v = network.from_node[link], network.to_node[link]
+        ax.plot([xy[u, 0], xy[v, 0]], [xy[u, 1], xy[v, 1]], color="grey", lw=0.8)
 
-    _ = plot_network(network, ax, network_mode=network_mode)
-    starts = {idx: trace.pop(0)[1] for idx, trace in agent_traces.items()}
-    scatters = {
-        idx: ax.scatter(loc[0], loc[1], color="red")
-        for idx, loc in starts.items()
-    }
+    queues = {p: list(trace) for p, trace in traces.items()}
+    dots = {p: ax.scatter(*trace[0][1], color="red", s=12) for p, trace in queues.items()}
 
-    def animate(frame):
-        current_time = frame
-        for idx, locations in agent_traces.items():
-            if not locations:
-                continue
-            time, pos = locations[0]
-            if time <= current_time:
-                _, pos = locations.pop(0)
-                scatters[idx].set_offsets(pos)
+    def update(now):
+        for p, trace in queues.items():
+            while trace and trace[0][0] <= now:
+                _, pos = trace.pop(0)
+                dots[p].set_offsets(pos)
+        return list(dots.values())
 
-        return scatters.values()
-
-    ani = animation.FuncAnimation(fig, animate, frames=frames, blit=True)
-    return ani
-
-
-def animate_events(networks: Networks, events, step=1, start=0, limit=None):
-    agent_traces, finish_time = build_traces(
-        events, networks.node_locations, step=step, start=start, limit=limit
-    )
-    frames = range(start, finish_time + 1, step)
-    ani = animate_traces(networks, agent_traces, frames=frames)
-    return ani
+    frames = [start + i * step for i in range(int((finish - start) // step) + 1)]
+    return animation.FuncAnimation(fig, update, frames=frames, blit=True)

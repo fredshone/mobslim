@@ -1,0 +1,18 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "mobslim-router"
+version = "0.1.0"
+description = "Compiled routers for mobslim (time-dependent Dijkstra and ALT)"
+requires-python = ">=3.12"
+dependencies = ["numpy>=2.0"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "mobslim_router._kernel"
+
+[tool.uv]
+# rebuild when the Rust sources change
+cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "src/**/*.rs" }]

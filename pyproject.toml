@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = [
     { name = "Fred Shone", email = "26383933+fredshone@users.noreply.github.com" },
 ]
-description = "Add your description here"
+description = "A modular, MATSim-inspired agent-based transport simulation for experiments."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -12,11 +12,15 @@ dependencies = [
     "ipython>=9.4.0",
     "matplotlib>=3.10.7",
     "networkx>=3.5",
+    "numpy>=2.0",
     "pandas>=2.3.1",
+    "pyyaml>=6.0.3",
 ]
 
-[project.scripts]
-mobslim = "mobslim:main"
+[project.optional-dependencies]
+parquet = [
+    "pyarrow>=17",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -73,9 +77,20 @@ ruff = ["--extend-ignore=E402"]
 dev = [
     "ipykernel>=7.1.0",
     "nbmake>=1.5.5",
+    "pyarrow>=17",
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
 ]
+# the compiled HermesSim kernel and router; need cargo. `uv sync --no-group
+# rust` skips them (HermesSim and routing then fall back to Python)
+rust = ["mobslim-hermes", "mobslim-router"]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
+
+[tool.uv]
+default-groups = ["dev", "rust"]
+
+[tool.uv.sources]
+mobslim-hermes = { path = "rust/mobslim-hermes" }
+mobslim-router = { path = "rust/mobslim-router" }

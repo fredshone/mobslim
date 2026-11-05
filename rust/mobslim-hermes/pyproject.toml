@@ -1,0 +1,18 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "mobslim-hermes"
+version = "0.1.0"
+description = "Compiled kernel for mobslim's HermesSim (whole-second queue mobsim)"
+requires-python = ">=3.12"
+dependencies = ["numpy>=2.0"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "mobslim_hermes._kernel"
+
+[tool.uv]
+# rebuild when the Rust sources change
+cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "src/**/*.rs" }]

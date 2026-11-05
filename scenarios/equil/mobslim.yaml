@@ -1,0 +1,47 @@
+# A mobslim config for MATSim's equil scenario.
+#   python -m mobslim.config check scenarios/equil/mobslim.yaml
+#   python -m mobslim.config resolved scenarios/equil/mobslim.yaml   # with every default
+# In Python: Controller.from_mobslim_config("scenarios/equil/mobslim.yaml").run()
+run:
+  iterations: 10
+  output_dir: ../../output/equil      # relative to this file
+inputs:
+  network: network.xml
+  plans: plans100.xml
+mobsim:
+  type: hermes
+scoring:
+  activities:
+    h: {typical_duration: "12:00:00", minimal_duration: "08:00:00"}
+    w:
+      typical_duration: "08:00:00"
+      opening_time: "07:00:00"
+      closing_time: "18:00:00"
+      latest_start_time: "09:00:00"
+replanning:
+  strategy_sets:
+    default:
+      - {name: change_exp_beta, weight: 0.8}
+      - {name: reroute, weight: 0.1}
+      - {name: time_allocation_mutator, weight: 0.1, mutation_range: "00:30:00"}
+
+# Per-person values need person attributes (equil's plans have none). With
+# an `age` and a `subpopulation` attribute you could write, for example:
+#
+# scoring:
+#   modes:
+#     walk:
+#       marginal_utility_of_traveling:
+#         default: -10
+#         rules:
+#           - {when: age > 50, set: -15}
+#           - {when: age > 70, set: -30}      # the last matching rule wins
+# modes:
+#   walk:
+#     max_speed: {default: 1.2, rules: [{when: age > 70, set: 0.8}]}
+# replanning:
+#   strategy_set:
+#     default: default
+#     rules: [{when: subpopulation == "freight", set: freight}]
+#   strategy_sets:
+#     freight: [{name: best_score, weight: 0.9}, {name: reroute, weight: 0.1}]
