@@ -13,14 +13,13 @@ from mobslim.formats import (  # noqa: E402
     write_population,
 )
 from mobslim.formats.__main__ import main as cli  # noqa: E402
-from mobslim.formats.matsim import format_matsim_time  # noqa: E402
+from mobslim.formats.matsim_plans import format_matsim_time, read_population_xml  # noqa: E402
 from mobslim.population import (  # noqa: E402
     Activity,
     Leg,
     Person,
     Plan,
     Population,
-    read_population_xml,
 )
 from tests.conftest import FIXTURES  # noqa: E402
 from tests.test_transit_scenarios import load  # noqa: E402

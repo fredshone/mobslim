@@ -21,7 +21,7 @@ and the walks of pt trips start and end there, as in MATSim, while the network
 sees the node.
 A route's link indices are stored packed as int32 bytes (see :class:`Route`),
 so routes stay compact and a mobsim's input is assembled by joining buffers,
-not by iterating Python ints. A pt leg's route is a :class:`PtRoute`: its
+not by iterating Python ints. A pt leg's route is a :class:`TransitPassengerRoute`: its
 rides, packed the same way.
 
 Activity timing follows MATSim's ``tryEndTimeThenDuration``: an activity with
@@ -30,9 +30,7 @@ late); otherwise it lasts ``duration`` seconds. The last activity of a plan has
 neither and lasts until the end of the simulation.
 """
 
-import gzip
 import math
-import xml.etree.ElementTree as ET
 from dataclasses import FrozenInstanceError, dataclass
 from typing import (
     Callable,
@@ -49,14 +47,11 @@ import numpy as np
 
 from mobslim.attributes import (
     PersonAttributes,
-    read_attributes_element,
-    read_person_attributes_xml,
 )
 from mobslim.ids import IdMap
 from mobslim.network import Network
-from mobslim.planbatch import PlanBatch, PlanBatchBuilder
+from mobslim.planbatch import PlanBatch
 from mobslim.planstore import PlanStore
-from mobslim.timeutils import parse_time
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,10 +179,10 @@ class Route:
         return f"Route(links={self.links!r}, travel_time={self.travel_time!r}, distance={self.distance!r})"
 
 
-class PtRoute:
+class TransitPassengerRoute:
     """A transit route: the rides of one pt trip, plus the router's expectations.
 
-    ``PtRoute(rides, travel_time, distance)``. Each ride is a pair
+    ``TransitPassengerRoute(rides, travel_time, distance)``. Each ride is a pair
     ``(board_route_stop, alight_route_stop)`` of global route-stop indices
     into the scenario's :class:`~mobslim.transit.TransitSchedule`. A route
     stop names a transit route, so a ride says which line and route to take,
@@ -212,25 +207,25 @@ class PtRoute:
     def __init__(self, rides, travel_time: float, distance: float):
         if isinstance(rides, bytes):
             if len(rides) % 8:
-                raise ValueError("PtRoute: packed rides must be a multiple of 8 bytes (int32 pairs).")
+                raise ValueError("TransitPassengerRoute: packed rides must be a multiple of 8 bytes (int32 pairs).")
             data = rides
         else:
             a = rides if isinstance(rides, np.ndarray) else np.array(list(rides), dtype=np.int64)
             if a.size == 0:
                 a = a.reshape(0, 2)
             if a.ndim != 2 or a.shape[1] != 2:
-                raise ValueError("PtRoute: rides must be (board, alight) pairs.")
+                raise ValueError("TransitPassengerRoute: rides must be (board, alight) pairs.")
             if a.size and not np.issubdtype(a.dtype, np.integer):
-                raise TypeError("PtRoute: route stops must be integers.")
+                raise TypeError("TransitPassengerRoute: route stops must be integers.")
             if a.size and (a.min() < 0 or a.max() > np.iinfo(np.int32).max):
-                raise ValueError("PtRoute: route-stop indices must fit in int32 and be >= 0.")
+                raise ValueError("TransitPassengerRoute: route-stop indices must fit in int32 and be >= 0.")
             data = a.astype(_I32, copy=False).tobytes()
         object.__setattr__(self, "data", data)
         object.__setattr__(self, "travel_time", travel_time)
         object.__setattr__(self, "distance", distance)
 
     @classmethod
-    def packed(cls, data: bytes, travel_time: float, distance: float) -> "PtRoute":
+    def packed(cls, data: bytes, travel_time: float, distance: float) -> "TransitPassengerRoute":
         """Fast constructor from packed int32 ``bytes`` (no checks)."""
         route = object.__new__(cls)
         object.__setattr__(route, "data", data)
@@ -257,26 +252,26 @@ class PtRoute:
         raise FrozenInstanceError(f"cannot delete field {name!r}")
 
     def __eq__(self, other):
-        if other.__class__ is not PtRoute:
+        if other.__class__ is not TransitPassengerRoute:
             return NotImplemented
         return (self.data == other.data and self.travel_time == other.travel_time
                 and self.distance == other.distance)
 
     def __hash__(self):
-        return hash((PtRoute, self.data, self.travel_time, self.distance))
+        return hash((TransitPassengerRoute, self.data, self.travel_time, self.distance))
 
     def __reduce__(self):
-        return (PtRoute.packed, (self.data, self.travel_time, self.distance))
+        return (TransitPassengerRoute.packed, (self.data, self.travel_time, self.distance))
 
     def __repr__(self):
-        return (f"PtRoute(rides={self.rides!r}, travel_time={self.travel_time!r}, "
+        return (f"TransitPassengerRoute(rides={self.rides!r}, travel_time={self.travel_time!r}, "
                 f"distance={self.distance!r})")
 
 
 @dataclass(frozen=True, slots=True)
 class Leg:
     mode: str
-    route: Optional[Union[Route, PtRoute]] = None
+    route: Optional[Union[Route, TransitPassengerRoute]] = None
     travel_time: Optional[float] = None  # fixed time for teleported legs
 
 
@@ -435,7 +430,7 @@ class PlanBuilder:
         self._elements.append(Activity(type, node, end_time, duration, x, y, link))
         return self
 
-    def leg(self, mode: str, route: Optional[Union[Route, PtRoute]] = None,
+    def leg(self, mode: str, route: Optional[Union[Route, TransitPassengerRoute]] = None,
             travel_time=None) -> "PlanBuilder":
         self._elements.append(Leg(mode, route, travel_time))
         return self
@@ -535,13 +530,13 @@ class Person:
 class Population:
     """All persons, stored as tables. Plans are referenced, not nested.
 
-    ========  ==============================  ======================================
-    plans     :class:`PlanStore`              every stored plan, as columns
-    plan_ids  ``int32[n_persons, n_slots]``   row in ``plans``; ``-1`` = empty
-    scores    ``float64[n_persons, n_slots]`` ``NaN`` = unscored (or empty slot)
-    selected  ``int32[n_persons]``            selected slot
-    n_plans   ``int32[n_persons]``            used slots per person
-    ========  ==============================  ======================================
+    ========  ===============================  ==================================
+    plans     :class:`PlanStore`               every stored plan, as columns
+    plan_ids  ``int32[n_persons, n_slots]``    row in ``plans``; ``-1`` = empty
+    scores    ``float64[n_persons, n_slots]``  ``NaN`` = unscored (or empty slot)
+    selected  ``int32[n_persons]``             selected slot
+    n_plans   ``int32[n_persons]``             used slots per person
+    ========  ===============================  ==================================
 
     Row ``i`` is the person with *person index* ``i`` (``ids.id(i)``), used by
     the mobsim and in events. Scoring and selection-wide statistics work on
@@ -852,266 +847,3 @@ def locate_activities(plan: Plan, network: Network) -> Plan:
             x, y = xy[act.node].tolist()
             out[i] = Activity(act.type, act.node, act.end_time, act.duration, x, y, act.link)
     return Plan(tuple(out))
-
-
-def _open_xml(path):
-    path = str(path)
-    return gzip.open(path, "rb") if path.endswith(".gz") else open(path, "rb")
-
-
-def is_stage_activity(act_type: str) -> bool:
-    """MATSim's stage activities (``"pt interaction"``, ``"car interaction"``, ...)."""
-    return act_type.endswith(" interaction")
-
-
-# walk modes MATSim uses for the access, egress and transfer legs of a trip
-_TRIP_WALKS = ("walk", "non_network_walk", "transit_walk", "access_walk", "egress_walk")
-
-
-# plans_v4 person fields -> (attribute name, as MATSim's PersonUtils names
-# them, and conversion)
-_V4_PERSON_ATTRS = {
-    "sex": ("sex", str),
-    "age": ("age", int),
-    "license": ("hasLicense", str),
-    "car_avail": ("carAvail", str),
-    "employed": ("employed", lambda v: v.strip().lower() in ("yes", "true")),
-}
-
-
-def _person_attributes(xml_person) -> dict:
-    out = {name: conv(xml_person.get(k)) for k, (name, conv) in _V4_PERSON_ATTRS.items()
-           if xml_person.get(k) is not None}
-    attrs = xml_person.find("attributes")
-    if attrs is not None:
-        out.update(read_attributes_element(attrs))
-    return out
-
-
-def read_population_xml(path: str, network: Network, *, keep_routes: bool = False,
-                        attributes_file: Optional[str] = None) -> Population:
-    """Read a MATSim ``plans_v4``/``population_v6`` XML file (``.gz`` allowed).
-
-    Person attributes are kept in ``population.attributes``: a
-    ``population_v6`` person's ``<attributes>`` (typed by their ``class``),
-    a ``plans_v4`` person's ``sex``/``age``/``license``/``car_avail``/
-    ``employed`` (named ``sex``, ``age``, ``hasLicense``, ``carAvail``,
-    ``employed`` as MATSim's ``PersonUtils`` does), and, if given, those of a MATSim ``objectAttributes``
-    ``attributes_file`` (``plans.inputPersonAttributesFile``), which win
-    where both name a value.
-
-    Activity location is taken from (in order) a ``node`` attribute, the
-    to-node of a ``link`` attribute (the link is kept as ``Activity.link``),
-    or the node nearest to ``x``/``y``.
-    Coordinates in the file are kept (``Activity.x, y``). All plans of a
-    person are loaded; ``selected="yes"`` is honoured.
-
-    Routes in the file are ignored (legs are routed before the first
-    iteration) unless ``keep_routes``: then single-leg network trips keep
-    their ``type="links"`` route (as in MATSim's output plans), or their
-    ``plans_v4`` node route (the links between the nodes). MATSim's
-    route starts on the departure link, which the vehicle does not
-    traverse, so it is dropped: MobSlim's route runs from the departure
-    link's to-node and includes the arrival link, the same links MATSim
-    traverses. Its travel time and distance are the free-speed sums over
-    those links. Transit trips are always re-routed.
-
-    Plans that already contain MATSim stage activities (``pt interaction``,
-    as in MATSim's output plans) are collapsed into one leg per trip, whose
-    mode is the trip's ``routingMode`` attribute (or its main mode).
-    """
-    records = {}
-    with _open_xml(path) as f:
-        root = ET.parse(f).getroot()
-    b = PlanBatchBuilder()
-    ids, rows, scores, selected = [], [], [], []
-    nan = math.nan
-    for xml_person in root.findall("person"):
-        pid = xml_person.get("id")
-        ids.append(pid)
-        if attrs := _person_attributes(xml_person):
-            records[pid] = attrs
-        person_rows, person_scores, sel = [], [], 0
-        for p, xml_plan in enumerate(xml_person.findall("plan")):
-            if xml_plan.get("selected") == "yes":
-                sel = p
-            acts, legs = [], []
-            trip: list = []  # legs (and stage activities) of the current trip
-            last_act = None
-            for el in xml_plan:
-                if el.tag in ("act", "activity"):
-                    if is_stage_activity(el.get("type", "")):
-                        trip.append(None)
-                        continue
-                    if trip:
-                        leg = _trip_leg(trip)
-                        if isinstance(leg, _FileLeg):  # the activity links, for v4 node routes
-                            leg = _FileLeg(leg.mode, leg.travel_time, leg.xml,
-                                           last_act.get("link"), el.get("link"))
-                        legs.append(leg)
-                        trip = []
-                    elif acts:
-                        raise ValueError(f"Person {pid!r}: two activities without a leg between.")
-                    acts.append(_read_activity(el, network))
-                    last_act = el
-                elif el.tag == "leg":
-                    if not acts:
-                        raise ValueError(f"Person {pid!r}: a plan must start with an activity.")
-                    trip.append(el)
-            if not acts:
-                raise ValueError(f"Person {pid!r}: a plan needs at least one activity.")
-            b.act(*acts[0])
-            for leg, act in zip(legs, acts[1:]):
-                if isinstance(leg, _FileLeg):
-                    b.leg(*(_file_route(leg, network) if keep_routes else (leg.mode, leg.travel_time)))
-                else:
-                    b.leg(leg, nan)
-                b.act(*act)
-            b.end_plan()
-            person_rows.append(b.n_plans - 1)
-            score = xml_plan.get("score")
-            person_scores.append(float(score) if score else nan)
-        if not person_rows:
-            raise ValueError(f"Person {pid!r} has no plans.")
-        rows.append(person_rows)
-        scores.append(person_scores)
-        selected.append(sel)
-    if attributes_file is not None:
-        for pid, attrs in read_person_attributes_xml(attributes_file).items():
-            records[pid] = {**records.get(pid, {}), **attrs}
-    batch = b.build()
-    validate_batch(batch)
-    width = max(map(len, rows), default=1)
-    plan_ids = np.full((len(ids), width), -1, dtype=np.int32)
-    score_table = np.full((len(ids), width), nan)
-    for i, (r, sc) in enumerate(zip(rows, scores)):
-        plan_ids[i, :len(r)] = r
-        score_table[i, :len(sc)] = sc
-    return Population.from_tables(ids, PlanStore.from_batch(batch), plan_ids, score_table,
-                                  selected, records)
-
-
-@dataclass(frozen=True)
-class _FileLeg:
-    """A single-leg trip as read, before deciding whether to keep its route."""
-
-    mode: str
-    travel_time: float  # NaN: none
-    xml: ET.Element
-    start_link: Optional[str] = None  # link ids of the activities around it
-    end_link: Optional[str] = None
-
-
-def _file_route(fl: _FileLeg, network: Network) -> tuple:
-    """``PlanBatchBuilder.leg`` arguments for a leg with its file route kept."""
-    el = fl.xml.find("route")
-    plain = (fl.mode, fl.travel_time)
-    if el is None:
-        return plain
-    if el.get("start_link") is None and el.get("type") is None:
-        links = _node_route_links(el.text or "", fl, network)  # plans_v4: nodes
-        if links is None:
-            return plain
-    elif el.get("type", "links") != "links" or el.get("start_link") is None:
-        return plain  # a generic/pt route: route it
-    else:
-        ids = (el.text or "").split()
-        if not ids or ids[0] != el.get("start_link") or ids[-1] != el.get("end_link"):
-            raise ValueError(f"Route {ids} does not run from start_link {el.get('start_link')!r} "
-                             f"to end_link {el.get('end_link')!r}.")
-        links = np.array([network.link_index(i) for i in ids[1:]], dtype=np.int64)
-    data = links.astype(np.int32).tobytes()
-    if links.size == 0:
-        return fl.mode, fl.travel_time, data, False, 0.0, 0.0
-    travel_time = float(network.free_speed_travel_times()[links].sum())
-    distance = float(network.length[links].sum())
-    return fl.mode, fl.travel_time, data, False, travel_time, distance
-
-
-def _node_route_links(text: str, fl: _FileLeg, network: Network) -> Optional[np.ndarray]:
-    """A ``plans_v4`` route (the nodes between the departure link's to-node and
-    the arrival link's from-node) as MobSlim links: the links between those
-    nodes, then the arrival link. ``None`` if the activities have no links."""
-    if fl.start_link is None or fl.end_link is None:
-        return None
-    start, end = network.link_index(fl.start_link), network.link_index(fl.end_link)
-    if start == end and not text.split():
-        return np.zeros(0, dtype=np.int64)
-    nodes = [network.node_index(n) for n in text.split()]
-    if not nodes:  # adjacent links
-        nodes = [int(network.to_node[start])]
-    if nodes[0] != int(network.to_node[start]) or nodes[-1] != int(network.from_node[end]):
-        raise ValueError(f"Node route {text.split()} does not run from link {fl.start_link!r} "
-                         f"to link {fl.end_link!r}.")
-    offsets, out = network.out_links(fl.mode)
-    links = []
-    for u, v in zip(nodes, nodes[1:]):
-        hit = [k for k in out[offsets[u]:offsets[u + 1]] if int(network.to_node[k]) == v]
-        if not hit:
-            raise ValueError(f"No {fl.mode!r} link from node {network.node_ids.id(u)!r} "
-                             f"to {network.node_ids.id(v)!r}.")
-        links.append(hit[0])
-    links.append(end)
-    return np.array(links, dtype=np.int64)
-
-
-def _routing_mode(el) -> Optional[str]:
-    """A leg's ``routingMode`` attribute (the mode of its trip), if any."""
-    attrs = el.find("attributes")
-    if attrs is not None:
-        for a in attrs:
-            if a.get("name") == "routingMode" and a.text:
-                return a.text.strip()
-    return None
-
-
-def _trip_leg(trip: list):
-    """One leg for a trip read as ``leg (stage leg)*``: its mode (a leg to
-    route) or a :class:`_FileLeg` (a single leg, whose route may be kept).
-
-    A single leg whose ``routingMode`` names another mode is a trip of that
-    mode the router made of one leg, e.g. a ``pt`` trip MATSim walks
-    entirely: it is read as an unrouted leg of the routing mode.
-    """
-    legs = [el for el in trip if el is not None]
-    if len(legs) == 1 and legs[0].get("mode") != "transit_walk":
-        routing = _routing_mode(legs[0])
-        if routing is not None and routing != legs[0].get("mode"):
-            return routing
-        tt = legs[0].get("trav_time")
-        return _FileLeg(legs[0].get("mode"), parse_time(tt) if tt else math.nan, legs[0])
-    mode = None
-    for el in legs:
-        mode = _routing_mode(el)
-        if mode is not None:
-            break
-    if mode is None:
-        main = [el.get("mode") for el in legs if el.get("mode") not in _TRIP_WALKS]
-        if main:
-            mode = main[0]
-        elif any(el.get("mode") == "transit_walk" for el in legs):
-            mode = "pt"  # legacy files: a pt trip the router made walk-only
-        else:
-            mode = legs[0].get("mode")
-    return mode
-
-
-def _read_activity(el, network: Network) -> tuple:
-    """``PlanBatchBuilder.act`` arguments for an ``<act>``/``<activity>``."""
-    nan = math.nan
-    x, y = el.get("x"), el.get("y")
-    x, y = (float(x), float(y)) if x is not None and y is not None else (nan, nan)
-    link = -1
-    if el.get("node") is not None:
-        node = network.node_index(el.get("node"))
-    elif el.get("link") is not None:
-        link = network.link_index(el.get("link"))
-        node = int(network.to_node[link])
-    else:
-        if x != x:
-            raise ValueError(f"Activity {el.get('type')!r} has no node, link or coordinates.")
-        node = network.nearest_node(x, y)
-    end_time = el.get("end_time")
-    duration = el.get("dur") or el.get("max_dur")
-    return (el.get("type"), node, parse_time(end_time) if end_time else nan,
-            parse_time(duration) if duration else nan, x, y, link)

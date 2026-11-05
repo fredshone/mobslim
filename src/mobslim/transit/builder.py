@@ -11,7 +11,7 @@
     b.departures("L", "r", times=[...], vehicle_type="bus")      # one vehicle per departure
     b.departures("L", "r", times=[...], vehicles=["v1", ...])    # or explicit vehicles
     b.headway("L", "r", start=6 * H, end=10 * H, every=600, vehicle_type="bus")
-    transit = b.build(TransitConfig(...))
+    transit = b.build(TransitParams(...))
 """
 
 from typing import Hashable, Optional, Sequence
@@ -19,7 +19,7 @@ from typing import Hashable, Optional, Sequence
 import numpy as np
 
 from mobslim.network import Network
-from mobslim.transit.core import Transit, TransitConfig
+from mobslim.transit.core import Transit, TransitParams
 from mobslim.transit.schedule import build_schedule
 from mobslim.transit.vehicles import build_vehicles
 
@@ -150,8 +150,8 @@ class TransitBuilder:
         self.route(line, route, mode=mode, links=[net.link_ids.id(k) for k in links], stops=stops)
         return [s[0] for s in stops]
 
-    def build(self, config: TransitConfig = TransitConfig()) -> Transit:
+    def build(self, params: TransitParams = TransitParams()) -> Transit:
         schedule = build_schedule(self.network, list(self._stops.values()),
                                   list(self._routes.values()), self._transfers)
         vehicles = build_vehicles(list(self._types.values()), list(self._vehicles.items()))
-        return Transit(schedule, vehicles, config)
+        return Transit(schedule, vehicles, params)

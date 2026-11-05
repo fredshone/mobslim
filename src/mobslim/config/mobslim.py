@@ -449,7 +449,7 @@ class MobslimConfig:
         """Read network, plans, attributes and transit into a ``Scenario``
         (no derived person columns yet)."""
         from mobslim.formats import read_population
-        from mobslim.network import read_network_xml
+        from mobslim.formats.matsim_network import read_network_xml
         from mobslim.routing.teleport import TeleportedModeParams
         from mobslim.scenario import Scenario
 
@@ -460,10 +460,10 @@ class MobslimConfig:
         transit = None
         t = v["transit"]
         if t["schedule"] is not None:
-            from mobslim.transit import TransitConfig, read_transit
+            from mobslim.transit import TransitParams, read_transit
 
             transit = read_transit(t["schedule"], t["vehicles"], network,
-                                   TransitConfig(passenger_modes=tuple(t["passenger_modes"]),
+                                   TransitParams(passenger_modes=tuple(t["passenger_modes"]),
                                                  vehicles=t["vehicles_on"]))
         population = read_population(v["inputs"]["plans"], network, keep_routes=True,
                                      attributes_file=v["inputs"]["person_attributes"],
@@ -607,11 +607,11 @@ class MobslimConfig:
     def mobsim(self):
         from mobslim.mobsim import (
             AgentSim,
-            AgentSimConfig,
+            AgentSimParams,
             HermesSim,
-            HermesSimConfig,
+            HermesSimParams,
             QSim,
-            QSimConfig,
+            QSimParams,
         )
 
         m = self.values["mobsim"]
@@ -620,10 +620,10 @@ class MobslimConfig:
                       stuck_time=m["stuck_time"], end_time=m["end_time"],
                       effective_cell_size=m["effective_cell_size"])
         if m["type"] == "hermes":
-            return HermesSim(HermesSimConfig(**common, backend=m["hermes_backend"]))
+            return HermesSim(HermesSimParams(**common, backend=m["hermes_backend"]))
         if m["type"] == "agentsim":
-            return AgentSim(AgentSimConfig(**common, blocked=m["agentsim_blocked"]))
-        return QSim(QSimConfig(**common))
+            return AgentSim(AgentSimParams(**common, blocked=m["agentsim_blocked"]))
+        return QSim(QSimParams(**common))
 
     def strategies(self, attributes=None):
         """A ``StrategyManager``, or a ``PersonStrategyManager`` if persons
@@ -647,11 +647,11 @@ class MobslimConfig:
         codes = np.array([names.index(s) for s in sets.tolist()], dtype=np.int32)
         return PersonStrategyManager([managers[n] for n in names], codes, names)
 
-    def controller_config(self):
-        from mobslim.controller import ControllerConfig
+    def controller_params(self):
+        from mobslim.controller import ControllerParams
 
         run, tt = self.values["run"], self.values["travel_time"]
-        return ControllerConfig(
+        return ControllerParams(
             iterations=run["iterations"], seed=run["seed"],
             learning_rate=self.values["scoring"]["learning_rate"],
             travel_time_bin_size=tt["bin_size"], travel_time_horizon=tt["horizon"],
@@ -666,7 +666,7 @@ class MobslimConfig:
         if scenario.transit is None:
             return default_transit_router
         r = self.values["routing"]["transit"]
-        mode = scenario.transit.config.passenger_modes[0]
+        mode = scenario.transit.params.passenger_modes[0]
         return TransitRouterFactory.from_scoring(params, mode, **r)
 
     def controller_kwargs(self, scenario=None) -> dict:
@@ -678,7 +678,7 @@ class MobslimConfig:
         return dict(scenario=scenario, mobsim=self.mobsim(), scorer=scorer,
                     strategies=self.strategies(scenario.population.attributes),
                     transit_router_factory=self.transit_router_factory(scenario, scorer.params),
-                    config=self.controller_config(), listeners=[OutputConfigWriter(self)])
+                    params=self.controller_params(), listeners=[OutputConfigWriter(self)])
 
 
 _SELECTORS = {"change_exp_beta", "select_exp_beta", "best_score", "keep_selected", "select_random"}
@@ -690,10 +690,10 @@ def _strategy(s: dict):
         ChangeExpBetaSelector,
         ChangeTripMode,
         ExpBetaSelector,
-        KeepSelected,
+        KeepSelectedSelector,
         PlanStrategy,
-        RandomPlanSelector,
-        ReRoute,
+        RandomSelector,
+        Reroute,
         TimeAllocationMutator,
     )
 
@@ -705,17 +705,17 @@ def _strategy(s: dict):
     if name == "best_score":
         return PlanStrategy(BestScoreSelector())
     if name == "keep_selected":
-        return PlanStrategy(KeepSelected())
+        return PlanStrategy(KeepSelectedSelector())
     if name == "select_random":
-        return PlanStrategy(RandomPlanSelector())
+        return PlanStrategy(RandomSelector())
     if name == "reroute":
-        return PlanStrategy(RandomPlanSelector(), [ReRoute()])
+        return PlanStrategy(RandomSelector(), [Reroute()])
     if name == "time_allocation_mutator":
-        return PlanStrategy(RandomPlanSelector(), [TimeAllocationMutator(s["mutation_range"]), ReRoute()])
+        return PlanStrategy(RandomSelector(), [TimeAllocationMutator(s["mutation_range"]), Reroute()])
     if name == "change_trip_mode":
-        return PlanStrategy(RandomPlanSelector(), [
+        return PlanStrategy(RandomSelector(), [
             ChangeTripMode(s["modes"], s["ignore_car_availability"],
-                           availability_attribute=CAR_AVAILABILITY), ReRoute()])
+                           availability_attribute=CAR_AVAILABILITY), Reroute()])
     raise KeyError(name)  # pragma: no cover - the schema lists every name
 
 
@@ -752,7 +752,7 @@ class OutputConfigWriter(ControllerListener):
 
     def on_startup(self, controller) -> None:
         self.config.log_defaults()
-        out = controller.config.output_dir
+        out = controller.params.output_dir
         if out is not None:
             path = self.config.write_output_config(out)
             logger.info("wrote %s", path)

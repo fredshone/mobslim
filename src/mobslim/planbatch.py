@@ -10,7 +10,7 @@ arrays, located by offset arrays (CSR layout)::
     links of leg l         route_offsets[l] : route_offsets[l + 1]
     rides of leg l         ride_offsets[l] : ride_offsets[l + 1]  (pt legs)
 
-A pt leg's rides (its :class:`~mobslim.population.PtRoute`) are pairs of
+A pt leg's rides (its :class:`~mobslim.population.TransitPassengerRoute`) are pairs of
 global route stops, ``ride_board_stop[r]`` and ``ride_alight_stop[r]``.
 Network legs have link slices and no rides; pt legs have rides and no links.
 ``act_xy`` holds each activity's coordinates (``NaN`` where it has none and
@@ -54,7 +54,7 @@ class PlanBatch:
     act_types: tuple[str, ...]
     modes: tuple[str, ...]
     act_xy: np.ndarray = None  # float64 (n_acts, 2), NaN = none
-    leg_pt_route: np.ndarray = None  # bool (n_legs,): the route is a PtRoute
+    leg_pt_route: np.ndarray = None  # bool (n_legs,): the route is a TransitPassengerRoute
     ride_offsets: np.ndarray = None  # int64 (n_legs + 1,)
     ride_board_stop: np.ndarray = None  # int32 (n_rides,), global route stop
     ride_alight_stop: np.ndarray = None  # int32 (n_rides,), global route stop
@@ -163,12 +163,12 @@ class PlanBatch:
         """Encode plans in order. Activity types and modes get codes in order
         of first appearance. With ``network``, activities without coordinates
         get their node's in ``act_xy`` (else ``NaN``)."""
-        from mobslim.population import PtRoute
+        from mobslim.population import TransitPassengerRoute
 
         b = PlanBatchBuilder()
         nan = math.nan
         act, leg, end = b.act, b.leg, b.end_plan
-        pt_route = PtRoute
+        pt_route = TransitPassengerRoute
         for plan in plans:
             elements = plan.elements
             for i, e in enumerate(elements):
@@ -201,7 +201,7 @@ class PlanBatch:
         ``network_modes`` defaults to every link mode.
 
         With ``transit`` (a :class:`~mobslim.transit.Transit`), legs of its
-        passenger modes need a :class:`~mobslim.population.PtRoute` whose
+        passenger modes need a :class:`~mobslim.population.TransitPassengerRoute` whose
         rides board and alight on the same transit route, alight after they
         board, and name existing route stops. Vectorised over all legs.
         Teleported legs are not checked here.
@@ -210,7 +210,7 @@ class PlanBatch:
             network_modes = network.modes
         bad_pt = np.zeros(self.n_legs, dtype=bool)
         if transit is not None:
-            is_pt = self.mode_legs(transit.config.passenger_modes)
+            is_pt = self.mode_legs(transit.params.passenger_modes)
             bad_pt = is_pt & ~self.leg_pt_route
             bad_pt |= is_pt & (np.diff(self.route_offsets) > 0)
             if self.n_rides:

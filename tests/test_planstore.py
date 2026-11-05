@@ -11,8 +11,8 @@ from mobslim.population import (
     Person,
     Plan,
     Population,
-    PtRoute,
     Route,
+    TransitPassengerRoute,
     validate_batch,
 )
 
@@ -23,7 +23,7 @@ def sample_plans():
               Activity("work", 3, duration=50.0, link=2), Leg("walk", travel_time=60.0),
               Activity("home", 0))),
         Plan((Activity("home", 4),)),
-        Plan((Activity("school", 1, end_time=7.0), Leg("pt", PtRoute([(3, 5), (9, 11)], 99.0, 1000.0)),
+        Plan((Activity("school", 1, end_time=7.0), Leg("pt", TransitPassengerRoute([(3, 5), (9, 11)], 99.0, 1000.0)),
               Activity("home", 2, end_time=8.0, duration=1.0), Leg("car"),
               Activity("shop", 2))),
         Plan((Activity("home", 1, end_time=5.0), Leg("car", Route([], 0.0, 0.0)), Activity("home", 1))),

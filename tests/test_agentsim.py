@@ -8,12 +8,12 @@ import pytest
 
 from mobslim import (
     AgentSim,
-    AgentSimConfig,
+    AgentSimParams,
     NetworkBuilder,
     Plan,
     Population,
     QSim,
-    QSimConfig,
+    QSimParams,
     Scenario,
 )
 from mobslim.events import (
@@ -39,8 +39,8 @@ def _assert_same_trajectories(a, b):
 def test_matches_qsim_without_spillback(equil_scenario):
     """With storage never binding, polling never happens: same trajectories."""
     scenario = routed(equil_scenario)
-    q = QSim(QSimConfig(storage_capacity_factor=1e6)).run(scenario, EventsManager())
-    a = AgentSim(AgentSimConfig(storage_capacity_factor=1e6)).run(scenario, EventsManager())
+    q = QSim(QSimParams(storage_capacity_factor=1e6)).run(scenario, EventsManager())
+    a = AgentSim(AgentSimParams(storage_capacity_factor=1e6)).run(scenario, EventsManager())
     _assert_same_trajectories(q, a)
 
 
@@ -153,7 +153,7 @@ def _run_counting_retries(scenario, monkeypatch, **config):
     retry = agentsim._AgentSimRun.retry
     monkeypatch.setattr(agentsim._AgentSimRun, "retry", lambda self, a: (calls.append(a), retry(self, a)))
     log = EventLog()
-    trajectories = AgentSim(AgentSimConfig(**config)).run(scenario, EventsManager([log]))
+    trajectories = AgentSim(AgentSimParams(**config)).run(scenario, EventsManager([log]))
     return trajectories, log.events, len(calls)
 
 
@@ -214,10 +214,10 @@ def test_chain_mode_breaks_a_gridlock_at_the_stuck_deadline(monkeypatch):
 
 def test_blocked_must_be_poll_or_chain():
     with pytest.raises(ValueError, match="blocked"):
-        AgentSimConfig(blocked="wait")
+        AgentSimParams(blocked="wait")
 
 
 @pytest.mark.parametrize("retry", [0.0, -1.0, float("inf"), float("nan")])
 def test_retry_interval_must_be_positive_and_finite(retry):
     with pytest.raises(ValueError, match="retry_interval"):
-        AgentSimConfig(retry_interval=retry)
+        AgentSimParams(retry_interval=retry)

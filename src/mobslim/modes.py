@@ -8,9 +8,9 @@ use that same object, so the rules cannot drift apart.
 Every mode is of one *kind* (:meth:`Modes.kind`), in this order of precedence:
 
 * ``"transit"``: a passenger mode of the scenario's
-  :class:`~mobslim.transit.Transit` (``TransitConfig.passenger_modes``,
+  :class:`~mobslim.transit.Transit` (``TransitParams.passenger_modes``,
   ``("pt",)`` by default). Its legs ride scheduled vehicles and carry a
-  :class:`~mobslim.population.PtRoute`. It stays a transit mode even if some
+  :class:`~mobslim.population.TransitPassengerRoute`. It stays a transit mode even if some
   links list it (MATSim's pt-simple does).
 * ``"network"``: at least one link allows it. Its legs drive the network.
 * ``"teleported"``: listed in ``teleported``. Its legs travel at
@@ -95,7 +95,7 @@ class Modes:
     def transit_modes(self) -> frozenset[str]:
         if self.transit is None:
             return frozenset()
-        return frozenset(self.transit.config.passenger_modes)
+        return frozenset(self.transit.params.passenger_modes)
 
     @property
     def network_modes(self) -> frozenset[str]:

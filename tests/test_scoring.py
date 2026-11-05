@@ -10,7 +10,7 @@ from mobslim.experience import (
     ExperiencedPlan,
     ExperiencedPlanCollector,
 )
-from mobslim.mobsim import QSim, QSimConfig
+from mobslim.mobsim import QSim, QSimParams
 from mobslim.scoring import CharyparNagelScorer, Scorer
 from tests.conftest import chain_network, commuters, routed
 
@@ -76,7 +76,7 @@ def test_experienced_plans_from_mobsim():
     scenario = routed(Scenario(net, commuters(2, 0, 2, dep=50)))
     collector = ExperiencedPlanCollector(net, scenario.population)
     em = EventsManager([collector, EventLog()])
-    QSim(QSimConfig()).run(scenario, em)
+    QSim(QSimParams()).run(scenario, em)
     em.finish()
     plan = collector.plans()[0]
     home, leg, work = plan.elements

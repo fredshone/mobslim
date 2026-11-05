@@ -1,0 +1,27 @@
+"""Sphinx configuration: ``uv run --group docs sphinx-build docs docs/_build``."""
+
+project = "MobSlim"
+author = "Fred Shone"
+copyright = "2025-2026, Fred Shone"
+
+extensions = [
+    "myst_parser",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
+]
+source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
+exclude_patterns = ["_build"]
+myst_heading_anchors = 3
+myst_enable_extensions = ["colon_fence"]
+
+autodoc_member_order = "bysource"
+autodoc_default_options = {"members": True, "undoc-members": False, "show-inheritance": False}
+autodoc_typehints = "description"
+# optional extras: document the API even when they are not installed
+autodoc_mock_imports = ["pyarrow", "mobslim_router", "mobslim_hermes"]
+default_role = "code"
+suppress_warnings = ["myst.xref_missing"]
+
+html_theme = "furo"
+html_title = "MobSlim"

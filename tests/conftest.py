@@ -15,11 +15,11 @@ from mobslim import (
 from mobslim.events import EventLog, EventsManager
 from mobslim.mobsim import (
     AgentSim,
-    AgentSimConfig,
+    AgentSimParams,
     HermesSim,
-    HermesSimConfig,
+    HermesSimParams,
     QSim,
-    QSimConfig,
+    QSimParams,
 )
 from mobslim.mobsim.hermes import rust_available
 
@@ -54,13 +54,13 @@ def routed(scenario: Scenario) -> Scenario:
 
 
 MOBSIMS = {
-    "qsim": (QSim, QSimConfig),
-    "agentsim": (AgentSim, AgentSimConfig),
-    "agentsim_chain": (AgentSim, partial(AgentSimConfig, blocked="chain")),
-    "hermes_py": (HermesSim, partial(HermesSimConfig, backend="python")),
+    "qsim": (QSim, QSimParams),
+    "agentsim": (AgentSim, AgentSimParams),
+    "agentsim_chain": (AgentSim, partial(AgentSimParams, blocked="chain")),
+    "hermes_py": (HermesSim, partial(HermesSimParams, backend="python")),
 }
 if rust_available():  # the compiled kernel (rust/mobslim-hermes) is optional
-    MOBSIMS["hermes"] = (HermesSim, partial(HermesSimConfig, backend="rust"))
+    MOBSIMS["hermes"] = (HermesSim, partial(HermesSimParams, backend="rust"))
 DEFAULT_MOBSIM = "qsim"  # tests/test_qsim.py runs its spec against every entry of MOBSIMS
 # clock resolution [s] of mobsims that run in whole time steps (others: continuous)
 TIME_STEP = {"hermes_py": 1.0, "hermes": 1.0}

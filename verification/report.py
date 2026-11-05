@@ -56,7 +56,7 @@ Bands (🟢 🟡 🔴) are first guesses, set in `verification/compare.py::BANDS
 """
 
 KNOWN_DIFFERENCES = """\
-Known differences that affect these numbers (see `VERIFICATION_PLAN.md` §3):
+Known differences that affect these numbers (see also `docs/design.md` section 5):
 
 * **D4 departure buffer**: MATSim puts a departing car into the departure
   link's buffer, where it waits for that link's flow capacity; mobslim starts

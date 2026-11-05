@@ -25,13 +25,13 @@ from mobslim.population import Person
 from mobslim.replanning.context import ReplanningContext
 from mobslim.replanning.modules import (
     PlanInnovationModule,
-    ReRoute,
+    Reroute,
     TimeAllocationMutator,
 )
 from mobslim.replanning.selectors import (
     ChangeExpBetaSelector,
     PlanSelector,
-    RandomPlanSelector,
+    RandomSelector,
     WorstScoreSelector,
 )
 
@@ -109,12 +109,12 @@ class StrategyManager:
 
     @classmethod
     def default(cls, max_plans: int = 5, disable_innovation_at: Optional[int] = None) -> "StrategyManager":
-        """MATSim-like defaults: 80% ChangeExpBeta, 10% ReRoute, 10% TimeAllocationMutator."""
+        """MATSim-like defaults: 80% ChangeExpBeta, 10% Reroute, 10% TimeAllocationMutator."""
         return cls(
             [
                 (0.8, PlanStrategy(ChangeExpBetaSelector())),
-                (0.1, PlanStrategy(RandomPlanSelector(), [ReRoute()])),
-                (0.1, PlanStrategy(RandomPlanSelector(), [TimeAllocationMutator(), ReRoute()])),
+                (0.1, PlanStrategy(RandomSelector(), [Reroute()])),
+                (0.1, PlanStrategy(RandomSelector(), [TimeAllocationMutator(), Reroute()])),
             ],
             max_plans=max_plans,
             disable_innovation_at=disable_innovation_at,

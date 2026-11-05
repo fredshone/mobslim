@@ -102,11 +102,11 @@ def child(size: int, persons: int, capacity: float, variant: str) -> dict:
 
     from mobslim import (
         AgentSim,
-        AgentSimConfig,
+        AgentSimParams,
         HermesSim,
-        HermesSimConfig,
+        HermesSimParams,
         QSim,
-        QSimConfig,
+        QSimParams,
     )
     from mobslim.events import EventLog, EventsManager
 
@@ -115,11 +115,11 @@ def child(size: int, persons: int, capacity: float, variant: str) -> dict:
     common = dict(stuck_time=math.inf, flow_capacity_factor=capacity,
                   storage_capacity_factor=capacity)
     if kind == "qsim":
-        sim = QSim(QSimConfig(**common, **opts))
+        sim = QSim(QSimParams(**common, **opts))
     elif kind == "hermes":
-        sim = HermesSim(HermesSimConfig(**common, **opts))
+        sim = HermesSim(HermesSimParams(**common, **opts))
     else:
-        sim = AgentSim(AgentSimConfig(**common, **opts))
+        sim = AgentSim(AgentSimParams(**common, **opts))
 
     def run():
         log = EventLog() if with_events else None

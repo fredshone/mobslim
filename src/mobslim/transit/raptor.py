@@ -37,7 +37,7 @@ from typing import Optional, Sequence
 import numpy as np
 
 from mobslim.network import Network
-from mobslim.population import PtRoute
+from mobslim.population import TransitPassengerRoute
 from mobslim.transit.core import Transit
 
 _I32 = np.dtype("=i4")
@@ -125,7 +125,7 @@ class PersonRaptorWeights:
 
 
 @dataclass(frozen=True)
-class RaptorConfig:
+class RaptorParams:
     search_radius: float = 1000.0  # access and egress search radius [m]
     extension_radius: float = 200.0  # added to the nearest stop's distance if none is in range [m]
     max_transfer_distance: float = 100.0  # MATSim's maxBeelineWalkConnectionDistance [m]
@@ -143,7 +143,7 @@ class RaptorConfig:
 
     @classmethod
     def from_scoring(cls, params, mode: str = "pt", walk_mode: Optional[str] = None,
-                     **kw) -> "RaptorConfig":
+                     **kw) -> "RaptorParams":
         """Utilities from a :class:`~mobslim.scoring.ScoringParams` (see
         :meth:`RaptorWeights.from_scoring`). ``kw`` sets the other fields
         (search radii, transfers)."""
@@ -153,7 +153,7 @@ class RaptorConfig:
 
 
 class RaptorData:
-    """Derived tables for RAPTOR, from a :class:`Transit` and a :class:`RaptorConfig`.
+    """Derived tables for RAPTOR, from a :class:`Transit` and a :class:`RaptorParams`.
 
     * per route ``r``: ``route_stops[r]`` (stop of each position),
       ``arr[r][trip][i]`` / ``dep[r][trip][i]`` (stop times, trips sorted by
@@ -164,9 +164,9 @@ class RaptorData:
       where ``transfer_time = max(walk_time, minimal transfer time)``.
     """
 
-    def __init__(self, transit: Transit, config: RaptorConfig):
+    def __init__(self, transit: Transit, params: RaptorParams):
         s = transit.schedule
-        walk = transit.config.walk
+        walk = transit.params.walk
         self.walk_speed = walk.speed
         self.walk_factor = walk.beeline_distance_factor
         self.stop_xy = np.ascontiguousarray(s.stop_xy, dtype=float)
@@ -188,7 +188,7 @@ class RaptorData:
             dep = [[t + rs_dep[k] for k in range(k0, k1)] for t in trips]
             self.dep.append(dep)
             self.dep_cols.append([[row[i] for row in dep] for i in range(k1 - k0)])
-        self.transfers = transfer_table(s, walk, config)
+        self.transfers = transfer_table(s, walk, params)
 
     def walk_time(self, distance: float) -> float:
         return distance * self.walk_factor / self.walk_speed
@@ -206,7 +206,7 @@ class RaptorData:
         return list(zip(hit.tolist(), d[hit].tolist()))
 
 
-def transfer_table(s, walk, config: RaptorConfig) -> list:
+def transfer_table(s, walk, params: RaptorParams) -> list:
     """Footpaths per stop: ``[(to_stop, walk_time, transfer_time, distance)]``.
 
     Every stop has itself (walk 0, the stop's minimal transfer time), then
@@ -219,12 +219,12 @@ def transfer_table(s, walk, config: RaptorConfig) -> list:
     xy = np.ascontiguousarray(s.stop_xy, dtype=float)
     mtt = {(a, b): t for a, b, t in zip(s.mtt_from.tolist(), s.mtt_to.tolist(), s.mtt_time.tolist())}
     pairs: dict = {}
-    cell = max(config.max_transfer_distance, 1e-9)
+    cell = max(params.max_transfer_distance, 1e-9)
     grid: dict = {}
     keys = np.floor(xy / cell).astype(np.int64).tolist() if n else []
     for i, (cx, cy) in enumerate(keys):
         grid.setdefault((cx, cy), []).append(i)
-    max_d = config.max_transfer_distance
+    max_d = params.max_transfer_distance
     for i, (cx, cy) in enumerate(keys):
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
@@ -239,11 +239,11 @@ def transfer_table(s, walk, config: RaptorConfig) -> list:
             pairs[(a, b)] = math.hypot(*(xy[a] - xy[b]).tolist())
     out = [[] for _ in range(n)]
     for i in range(n):
-        out[i].append((i, 0.0, mtt.get((i, i), config.min_transfer_time), 0.0))
+        out[i].append((i, 0.0, mtt.get((i, i), params.min_transfer_time), 0.0))
     factor, speed = walk.beeline_distance_factor, walk.speed
     for (a, b), d in sorted(pairs.items()):
         w = d * factor / speed
-        out[a].append((b, w, max(w, mtt.get((a, b), config.min_transfer_time)), d * factor))
+        out[a].append((b, w, max(w, mtt.get((a, b), params.min_transfer_time)), d * factor))
     return out
 
 
@@ -257,35 +257,35 @@ class RaptorRouter:
     coordinates, which is what ``route_plans`` uses for activities).
 
     ``route_many_xy(..., weights=)`` takes one :class:`RaptorWeights` (or
-    ``None``: the config's) per query, for person-specific routing; the
+    ``None``: the params's) per query, for person-specific routing; the
     tables are shared, only the search differs.
     """
 
-    def __init__(self, network: Network, transit: Transit, config: RaptorConfig = RaptorConfig()):
+    def __init__(self, network: Network, transit: Transit, params: RaptorParams = RaptorParams()):
         self.network = network
         self.transit = transit
-        self.config = config
-        self.data = RaptorData(transit, config)
-        self._costs = config.weights.costs()
+        self.params = params
+        self.data = RaptorData(transit, params)
+        self._costs = params.weights.costs()
 
     # -- interface ----------------------------------------------------------
-    def route(self, origin: int, destination: int, departure_time: float) -> PtRoute:
+    def route(self, origin: int, destination: int, departure_time: float) -> TransitPassengerRoute:
         xy = self.network.node_xy
         return self.route_xy(tuple(xy[origin].tolist()), tuple(xy[destination].tolist()), departure_time)
 
     def route_many(self, origins: Sequence[int], destinations: Sequence[int],
-                   departure_times: Sequence[float]) -> list[PtRoute]:
+                   departure_times: Sequence[float]) -> list[TransitPassengerRoute]:
         xy = self.network.node_xy.tolist()
         return self.route_many_xy([tuple(xy[o]) for o in origins],
                                   [tuple(xy[d]) for d in destinations], departure_times)
 
-    def route_xy(self, origin_xy, destination_xy, departure_time: float) -> PtRoute:
+    def route_xy(self, origin_xy, destination_xy, departure_time: float) -> TransitPassengerRoute:
         return self._search(tuple(origin_xy), float(departure_time), [tuple(destination_xy)])[0]
 
     def route_many_xy(self, origins_xy, destinations_xy, departure_times,
-                      weights: Optional[Sequence[Optional[RaptorWeights]]] = None) -> list[PtRoute]:
+                      weights: Optional[Sequence[Optional[RaptorWeights]]] = None) -> list[TransitPassengerRoute]:
         """``[route_xy(o, d, t) for ...]``: one search per distinct ``(origin,
-        time, weights)``. ``weights``: per query (``None``: the config's)."""
+        time, weights)``. ``weights``: per query (``None``: the params's)."""
         groups: dict = {}
         if weights is None:
             weights = [None] * len(origins_xy)
@@ -300,8 +300,8 @@ class RaptorRouter:
         return out
 
     # -- search ---------------------------------------------------------------
-    def _search(self, origin, t0: float, dests: list, costs=None) -> list[PtRoute]:
-        data, cfg = self.data, self.config
+    def _search(self, origin, t0: float, dests: list, costs=None) -> list[TransitPassengerRoute]:
+        data, cfg = self.data, self.params
         c_travel, c_wait, c_walk, c_switch = self._costs if costs is None else costs
         factor = data.walk_factor
         n_dest = len(dests)
@@ -405,9 +405,9 @@ class RaptorRouter:
 
         return [self._result(best[j], walks[j], t0) for j in range(n_dest)]
 
-    def _result(self, found, walk, t0: float) -> PtRoute:
+    def _result(self, found, walk, t0: float) -> TransitPassengerRoute:
         if found is None:
-            return PtRoute.packed(b"", walk[0], walk[1])
+            return TransitPassengerRoute.packed(b"", walk[0], walk[1])
         elem, egress_time, egress_dist = found
         rides, walks = [], []  # walks: access, then one per transfer
         e = elem
@@ -429,7 +429,7 @@ class RaptorRouter:
                 distance += walks[n + 1]
         distance += egress_dist
         data = np.array(rides, dtype=_I32).tobytes()
-        return PtRoute.packed(data, elem[2] + egress_time - t0, distance)
+        return TransitPassengerRoute.packed(data, elem[2] + egress_time - t0, distance)
 
 
 # ---------------------------------------------------------------- compiled
@@ -440,10 +440,10 @@ def rust_raptor_available() -> bool:
     return _rust is not None and hasattr(_rust, "Raptor")
 
 
-def _kernel_tables(transit: Transit, config: RaptorConfig):
+def _kernel_tables(transit: Transit, params: RaptorParams):
     """The compiled router, built from the schedule (see ``rust/mobslim-router/src/raptor.rs``)."""
     s = transit.schedule
-    walk = transit.config.walk
+    walk = transit.params.walk
     i8, f8 = np.int64, np.float64
     rso, dep_off = s.route_stop_offsets.astype(i8), s.route_dep_offsets.astype(i8)
     rs_arr, rs_dep = s.rs_arrival.astype(f8), s.rs_departure.astype(f8)
@@ -466,7 +466,7 @@ def _kernel_tables(transit: Transit, config: RaptorConfig):
     order = np.argsort(rs_stop, kind="stable")  # by stop, then route and position
     rs_route = s.rs_route.astype(i8)
     stop_rs_offsets = np.concatenate([[0], np.cumsum(np.bincount(rs_stop, minlength=s.n_stops))])
-    transfers = transfer_table(s, walk, config)
+    transfers = transfer_table(s, walk, params)
     flat = [t for row in transfers for t in row]
     tr_offsets = np.concatenate([[0], np.cumsum([len(row) for row in transfers])]).astype(i8)
     tr = np.array(flat, dtype=f8).reshape(-1, 4)
@@ -479,10 +479,10 @@ def _kernel_tables(transit: Transit, config: RaptorConfig):
         np.ascontiguousarray(tr[:, 1]), np.ascontiguousarray(tr[:, 2]),
         np.ascontiguousarray(tr[:, 3]),
         walk_speed=float(walk.speed), walk_factor=float(walk.beeline_distance_factor),
-        radius=float(config.search_radius), extension=float(config.extension_radius),
-        max_transfers=int(config.max_transfers),
-        after_first=int(config.max_transfers_after_first_arrival),
-        **dict(zip(("c_travel", "c_wait", "c_walk", "c_switch"), config.weights.costs())),
+        radius=float(params.search_radius), extension=float(params.extension_radius),
+        max_transfers=int(params.max_transfers),
+        after_first=int(params.max_transfers_after_first_arrival),
+        **dict(zip(("c_travel", "c_wait", "c_walk", "c_switch"), params.weights.costs())),
     )
 
 
@@ -494,7 +494,7 @@ class RustRaptorRouter:
     ``$MOBSLIM_ROUTER_THREADS`` or the number of CPUs).
     """
 
-    def __init__(self, network: Network, transit: Transit, config: RaptorConfig = RaptorConfig(),
+    def __init__(self, network: Network, transit: Transit, params: RaptorParams = RaptorParams(),
                  threads: Optional[int] = None):
         if not rust_raptor_available():
             raise ImportError(
@@ -505,30 +505,30 @@ class RustRaptorRouter:
 
         self.network = network
         self.transit = transit
-        self.config = config
+        self.params = params
         self.threads = threads or default_threads()
-        self._kernel = _kernel_tables(transit, config)
+        self._kernel = _kernel_tables(transit, params)
 
-    def route(self, origin: int, destination: int, departure_time: float) -> PtRoute:
+    def route(self, origin: int, destination: int, departure_time: float) -> TransitPassengerRoute:
         return self.route_many([origin], [destination], [departure_time])[0]
 
     def route_many(self, origins: Sequence[int], destinations: Sequence[int],
-                   departure_times: Sequence[float]) -> list[PtRoute]:
+                   departure_times: Sequence[float]) -> list[TransitPassengerRoute]:
         xy = self.network.node_xy
         return self.route_many_xy(xy[np.asarray(origins, dtype=np.int64)],
                                   xy[np.asarray(destinations, dtype=np.int64)], departure_times)
 
-    def route_xy(self, origin_xy, destination_xy, departure_time: float) -> PtRoute:
+    def route_xy(self, origin_xy, destination_xy, departure_time: float) -> TransitPassengerRoute:
         return self.route_many_xy([origin_xy], [destination_xy], [departure_time])[0]
 
     def route_many_xy(self, origins_xy, destinations_xy, departure_times,
-                      weights: Optional[Sequence[Optional[RaptorWeights]]] = None) -> list[PtRoute]:
+                      weights: Optional[Sequence[Optional[RaptorWeights]]] = None) -> list[TransitPassengerRoute]:
         o = np.asarray(origins_xy, dtype=np.float64).reshape(-1, 2)
         d = np.asarray(destinations_xy, dtype=np.float64).reshape(-1, 2)
         t = np.ascontiguousarray(departure_times, dtype=np.float64)
         costs = None
         if weights is not None and any(w is not None for w in weights):
-            own = self.config.weights.costs()
+            own = self.params.weights.costs()
             costs = np.array([own if w is None else w.costs() for w in weights],
                              dtype=np.float64).reshape(-1, 4)
         offsets, rides, tt, dist = self._kernel.route_many(
@@ -537,6 +537,6 @@ class RustRaptorRouter:
             costs=costs)
         data = np.asarray(rides, dtype=_I32).tobytes()
         off = (np.asarray(offsets) * 8).tolist()  # 2 int32 per ride
-        return [PtRoute.packed(data[off[q]:off[q + 1]], tt_q, d_q)
+        return [TransitPassengerRoute.packed(data[off[q]:off[q + 1]], tt_q, d_q)
                 for q, (tt_q, d_q) in enumerate(zip(np.asarray(tt).tolist(),
                                                      np.asarray(dist).tolist()))]

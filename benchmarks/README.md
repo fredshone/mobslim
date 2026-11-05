@@ -59,7 +59,7 @@ not timed.
 | `routing.rust_alt_1thread` | the same trips with `RustRouter`'s ALT (A*, landmarks) on one thread |
 | `replanning.default_strategies` | one `SerialRunner` step with `StrategyManager.default()` |
 | `replanning.default_strategies_vectorised` | the same step with the `VectorRunner` (the controller's default) |
-| `replanning.reroute_all` | `ReRoute` on every selected plan, plan by plan, Python router (the most routing replanning can do) |
+| `replanning.reroute_all` | `Reroute` on every selected plan, plan by plan, Python router (the most routing replanning can do) |
 | `replanning.reroute_all_batched` | the same, batched as the runners do it (`route_plans`), default router |
 | `replanning.reroute_all_vectorised` | the same on columns (`clear_routes_batch` + `route_batch`), as the `VectorRunner` does it |
 | `transit.raptor` | routing every pt leg with the Python `RaptorRouter.route_many_xy` (one search per shared origin and time) |

@@ -2,7 +2,7 @@
 
 A module must not mutate its input; plans are immutable and modules build new
 ones. Modules compose: a strategy applies its modules in order (e.g.
-``ChangeTripMode`` then ``ReRoute``).
+``ChangeTripMode`` then ``Reroute``).
 
 Two forms of the same module:
 
@@ -24,7 +24,7 @@ import numpy as np
 
 from mobslim.planbatch import _I32, PlanBatch
 from mobslim.planstore import csr_gather
-from mobslim.population import Activity, Leg, Plan, PtRoute, Route
+from mobslim.population import Activity, Leg, Plan, Route, TransitPassengerRoute
 from mobslim.replanning.context import ReplanningContext
 from mobslim.routing.base import route_many_to_links
 
@@ -34,7 +34,7 @@ class PlanInnovationModule(Protocol):
     def mutate(self, plan: Plan, ctx: ReplanningContext, rng: Random) -> Plan: ...
 
 
-class ReRoute:
+class Reroute:
     """Route every network leg with the context's routers.
 
     Departure times are estimated by walking through the plan using activity
@@ -47,8 +47,8 @@ class ReRoute:
     When ``ctx.batch_routing`` is set (the replanning runners set it), the
     legs are not routed here: their routes are cleared and the runner routes
     every new plan afterwards in one batch (:func:`route_plans`), which gives
-    the same routes. Modules *after* ``ReRoute`` in a strategy then see legs
-    without routes, so put ``ReRoute`` last.
+    the same routes. Modules *after* ``Reroute`` in a strategy then see legs
+    without routes, so put ``Reroute`` last.
 
     A network leg to an activity on a link (``Activity.link``) ends by
     driving through that link, as in MATSim
@@ -94,7 +94,7 @@ def _has_route(leg: Leg, modes) -> bool:
     if route is None:
         return False
     if modes.is_transit_mode(leg.mode):
-        return route.__class__ is PtRoute
+        return route.__class__ is TransitPassengerRoute
     return route.__class__ is Route
 
 
@@ -136,7 +136,7 @@ def route_plans(plans: Sequence[Plan], ctx: ReplanningContext,
                 persons: Optional[Sequence[Optional[int]]] = None) -> list[Plan]:
     """Route every network leg without a route, in all ``plans`` at once.
 
-    Each plan is walked as :class:`ReRoute` walks it (a leg departs when the
+    Each plan is walked as :class:`Reroute` walks it (a leg departs when the
     previous activity ends, given the expected travel times of the legs
     before it). Legs are routed in rounds: every plan's first unrouted leg,
     then every plan's next one, and so on, with one ``route_many`` call per
@@ -259,7 +259,7 @@ class TimeAllocationMutator:
 class ChangeTripMode:
     """Switch all legs to a randomly chosen different mode from ``modes``.
 
-    Routes are dropped; combine with :class:`ReRoute` in the same strategy.
+    Routes are dropped; combine with :class:`Reroute` in the same strategy.
 
     With ``ignore_car_availability=False`` (MATSim's
     ``changeMode.ignoreCarAvailability=false``), ``car_mode`` is not chosen
@@ -357,7 +357,7 @@ class ChangeTripMode:
 
 def _set_routes(batch: PlanBatch, clear: np.ndarray, new: Optional[dict] = None) -> PlanBatch:
     """``batch`` with the routes of legs ``clear`` (bool per leg) removed and
-    ``new`` (``{leg: Route or PtRoute}``) set; other legs keep theirs."""
+    ``new`` (``{leg: Route or TransitPassengerRoute}``) set; other legs keep theirs."""
     new = new or {}
     n_legs = batch.n_legs
     is_new = np.zeros(n_legs, dtype=bool)
@@ -368,7 +368,7 @@ def _set_routes(batch: PlanBatch, clear: np.ndarray, new: Optional[dict] = None)
     keep_pt = keep & batch.leg_pt_route
     new_legs = sorted(new)
     new_pt = np.zeros(n_legs, dtype=bool)
-    new_pt[[leg for leg in new_legs if new[leg].__class__ is PtRoute]] = True
+    new_pt[[leg for leg in new_legs if new[leg].__class__ is TransitPassengerRoute]] = True
     new_net = is_new & ~new_pt
 
     def rebuild(old_offsets, keep_mask, new_mask, old_values, new_data, width):

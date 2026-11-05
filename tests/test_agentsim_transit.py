@@ -1,4 +1,4 @@
-"""Transit in AgentSim (``AGENTSIM_TRANSIT_PLAN.md``). The shared transit spec
+"""Transit in AgentSim. The shared transit spec
 runs against AgentSim in ``test_transit.py``; this module checks where its
 native implementation must exactly agree with the QSim, and the mechanisms
 only AgentSim has (tickets, displaced heads, waiting without polling)."""
@@ -11,17 +11,17 @@ import pytest
 
 from mobslim import (
     AgentSim,
-    AgentSimConfig,
+    AgentSimParams,
     NetworkBuilder,
     Plan,
     Population,
     QSim,
-    QSimConfig,
+    QSimParams,
     Scenario,
 )
 from mobslim.events import EventLog, EventsManager, VehicleDepartsAtFacility
 from mobslim.mobsim import agentsim
-from mobslim.transit import PtRoute, TransitBuilder, TransitConfig
+from mobslim.transit import TransitBuilder, TransitParams, TransitPassengerRoute
 from tests.conftest import routed
 from tests.test_transit import (
     STOP_LINKS,
@@ -56,7 +56,7 @@ def _sorted_events(events):
 def run_both(scenario, **config):
     """QSim and AgentSim trajectories and events on ``scenario``."""
     out = []
-    for sim in (QSim(QSimConfig(**config)), AgentSim(AgentSimConfig(**config))):
+    for sim in (QSim(QSimParams(**config)), AgentSim(AgentSimParams(**config))):
         log = EventLog()
         out.append((sim.run(scenario, EventsManager([log])), log.events))
     return out
@@ -103,7 +103,7 @@ def mixed_corridor(seed=3, n_cars=120, n_pax=80, headway=90.0, doors="parallel",
     b.route("L", "r", mode="bus", links=["a-0", "0-1", "1-2", "2-3", "3-4"],
             stops=[(f"S{i}", 120.0 * i, 120.0 * i, i % 2 == 0) for i in range(5)])
     b.departures("L", "r", times=[T0 + headway * k for k in range(20)], vehicle_type="bus")
-    transit = b.build(TransitConfig(vehicles="network", walk=WALK, door_open_time=1.0,
+    transit = b.build(TransitParams(vehicles="network", walk=WALK, door_open_time=1.0,
                                     door_close_time=1.0))
     plans = {}
     for i in range(n_cars):
@@ -186,7 +186,7 @@ def test_pce_takes_storage():
     tb.stop("B", 22.5, 0.0, link="short", blocking=True)
     tb.route("L", "r", mode="bus", links=["in", "short", "out"], stops=[("A", 0, 0), ("B", 300, 300)])
     tb.departures("L", "r", times=[T0], vehicle_type="bus")
-    transit = tb.build(TransitConfig(vehicles="network", walk=WALK))
+    transit = tb.build(TransitParams(vehicles="network", walk=WALK))
     plans = {i: Plan.builder().act("home", 1, end_time=T0 + 10 + i).leg("car").act("work", 3).build()
              for i in range(2)}
     scenario = routed(Scenario(net, Population.from_plans(plans), teleported_modes={"walk": WALK},
@@ -217,8 +217,8 @@ def test_mixed_traffic_spillback_chain_matches_poll(config, pce, checked_heads):
     """Buses blocked downstream poll like cars; chain mode only skips retries
     that must fail, also with buses in stops filling links."""
     scenario = mixed_corridor(pce=pce)
-    poll = AgentSim(AgentSimConfig(**config)).run(scenario, EventsManager())
-    chain = AgentSim(AgentSimConfig(blocked="chain", **config)).run(scenario, EventsManager())
+    poll = AgentSim(AgentSimParams(**config)).run(scenario, EventsManager())
+    chain = AgentSim(AgentSimParams(blocked="chain", **config)).run(scenario, EventsManager())
     assert_same(poll, chain)
     # every arrived passenger rode; times along each trip never decrease
     v = poll.transit
@@ -237,7 +237,7 @@ def test_storage_is_released(monkeypatch):
     original = agentsim._AgentSimRun._abort_unfinished
     monkeypatch.setattr(agentsim._AgentSimRun, "_abort_unfinished",
                         lambda self: (runs.append(self), original(self)))
-    AgentSim(AgentSimConfig(storage_capacity_factor=0.05, flow_capacity_factor=0.05)).run(
+    AgentSim(AgentSimParams(storage_capacity_factor=0.05, flow_capacity_factor=0.05)).run(
         mixed_corridor(pce=2.5), EventsManager())
     (run,) = runs
     assert not any(t.link is not None for t in run.trips)
@@ -278,11 +278,11 @@ def test_missed_last_departure_is_stuck_without_stuck_time(vehicles):
     net = corridor_network()
     transit = corridor_transit(net, vehicles=vehicles)
     s = transit.schedule
-    route = PtRoute([(s.route_stop("L", "r", "S0"), s.route_stop("L", "r", "S3"))], 360.0, 3000.0)
+    route = TransitPassengerRoute([(s.route_stop("L", "r", "S0"), s.route_stop("L", "r", "S3"))], 360.0, 3000.0)
     plan = (Plan.builder().act("home", node(net, 0), end_time=T0 + 1300).leg("pt", route=route)
             .act("work", node(net, 3)).build())
     scenario = Scenario(net, Population.from_plans({0: plan}), teleported_modes={"walk": WALK},
                         transit=transit)
-    tr = AgentSim(AgentSimConfig(stuck_time=INF)).run(scenario, EventsManager())
+    tr = AgentSim(AgentSimParams(stuck_time=INF)).run(scenario, EventsManager())
     assert tr.stuck[0]
     assert np.isnan(tr.ride_board[0]) and tr.ride_wait_start[0] == T0 + 1300

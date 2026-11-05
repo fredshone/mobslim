@@ -1,4 +1,4 @@
-"""``python -m mobslim.config``: check a mobslim config, translate a MATSim
+"""``python -m mobslim.config`` (also ``mobslim <command>``): check a mobslim config, translate a MATSim
 config, or print the parameter reference.
 
     python -m mobslim.config check config.yaml       # load + precheck against the inputs
@@ -13,22 +13,24 @@ import sys
 from pathlib import Path
 
 
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m mobslim.config", description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = parser.add_subparsers(dest="command", required=True)
+def add_commands(sub) -> None:
+    """Add ``check``, ``resolved``, ``from-matsim`` and ``reference`` to an
+    argparse subparsers object (shared with the ``mobslim`` command)."""
     check = sub.add_parser("check", help="load a mobslim config and precheck it against its inputs")
     check.add_argument("config")
     resolved = sub.add_parser("resolved", help="print the complete config with every default")
     resolved.add_argument("config")
-    conv = sub.add_parser("from-matsim", help="translate a MATSim config.xml")
+    conv = sub.add_parser("from-matsim", help="translate a MATSim config.xml to a mobslim config")
     conv.add_argument("config")
     conv.add_argument("-o", "--output", help="YAML file to write (default: stdout)")
     conv.add_argument("--strict", action="store_true", help="fail on params mobslim cannot honour")
-    sub.add_parser("reference", help="print the parameter reference (Markdown)")
-    args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    sub.add_parser("reference", help="print the config parameter reference (Markdown)")
 
+
+COMMANDS = ("check", "resolved", "from-matsim", "reference")
+
+
+def run_command(args) -> int:
     from mobslim.config.mobslim import ConfigError, MobslimConfig
 
     if args.command == "reference":
@@ -61,6 +63,15 @@ def main(argv=None) -> int:
         return 1
     print(f"{args.config}: OK")
     return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m mobslim.config", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_commands(parser.add_subparsers(dest="command", required=True))
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    return run_command(args)
 
 
 if __name__ == "__main__":

@@ -331,7 +331,12 @@ class PlanStore:
 
     def plan_elements(self, row: int) -> tuple:
         """Row ``row`` as ``Activity, Leg, ..., Activity`` objects."""
-        from mobslim.population import Activity, Leg, PtRoute, Route
+        from mobslim.population import (
+            Activity,
+            Leg,
+            Route,
+            TransitPassengerRoute,
+        )
 
         if not 0 <= row < self.n_plans:
             raise IndexError("plan row out of range")
@@ -370,7 +375,7 @@ class PlanStore:
                 pairs = np.empty((rio[i + 1] - rio[i], 2), dtype=_I32)
                 pairs[:, 0] = board[rio[i]:rio[i + 1]]
                 pairs[:, 1] = alight[rio[i]:rio[i + 1]]
-                route = PtRoute.packed(pairs.tobytes(), rtt, rdist)
+                route = TransitPassengerRoute.packed(pairs.tobytes(), rtt, rdist)
             else:
                 route = Route.packed(links[ro[i]:ro[i + 1]].astype(_I32, copy=False).tobytes(),
                                      rtt, rdist)

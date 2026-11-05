@@ -1,6 +1,6 @@
 """Transit inputs and outputs shared by the Python mobsims (``QSim``, ``AgentSim``).
 
-Both sims run the same transit semantics (``TRANSIT_PLAN.md`` §7.1) with their
+Both sims run the same transit semantics (pinned by ``tests/test_transit.py``) with their
 own control flow (``mobsim._transit`` for the QSim, ``mobsim._agentsim_transit``
 for AgentSim). What they share is here: the schedule, vehicle and ride tables
 as Python lists (element access from Python is much faster on lists than on
@@ -15,7 +15,7 @@ class TransitTables:
     """Python-list views of one run's transit tables."""
 
     def __init__(self, transit, plans, act_xy, network):
-        cfg = transit.config
+        cfg = transit.params
         self.transit = transit
         self.network_mode = cfg.vehicles == "network"
         self.door_open, self.door_close = cfg.door_open_time, cfg.door_close_time

@@ -13,7 +13,7 @@ remain the reference, and the way to run custom Python strategies in
 parallel (:class:`ProcessPoolRunner`).
 
 With ``batch_routing=True`` (the default) the runners replan with
-``ctx.batched()``: :class:`~mobslim.replanning.modules.ReRoute` only clears
+``ctx.batched()``: :class:`~mobslim.replanning.modules.Reroute` only clears
 routes, and the runner then routes every new plan of the batch at once
 (:func:`~mobslim.replanning.modules.route_plans`), letting the router share
 searches and run them in parallel. The routes are the same as routing during

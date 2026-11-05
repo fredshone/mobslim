@@ -1,6 +1,6 @@
-"""Transit in AgentSim, the native way (``AGENTSIM_TRANSIT_PLAN.md``).
+"""Transit in AgentSim, the native way.
 
-The semantics are the QSim's (``TRANSIT_PLAN.md`` §7.1, pinned by
+The semantics are the QSim's (pinned by
 ``tests/test_transit.py``); the control flow is AgentSim's: only agents are
 scheduled, and each has at most one live pending transition.
 

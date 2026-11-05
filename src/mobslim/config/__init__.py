@@ -2,7 +2,7 @@
 
 Every front-end translates into the same Python API: keyword arguments for
 :class:`~mobslim.controller.Controller` (scenario, mobsim, scorer,
-strategies, ``ControllerConfig``). A run uses one of them, never both.
+strategies, ``ControllerParams``). A run uses one of them, never both.
 
 * :mod:`mobslim.config.mobslim`: a mobslim YAML config, with per-person
   values from filters on person attributes (``Controller.from_mobslim_config``;

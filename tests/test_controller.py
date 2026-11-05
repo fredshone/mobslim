@@ -6,8 +6,8 @@ import pytest
 
 from mobslim import (
     Controller,
-    ControllerConfig,
     ControllerListener,
+    ControllerParams,
     EventRecorder,
     Scenario,
     StrategyManager,
@@ -20,7 +20,7 @@ from tests.conftest import commuters
 
 
 def test_equil_learns(equil_scenario):
-    result = Controller(equil_scenario, config=ControllerConfig(iterations=15)).run()
+    result = Controller(equil_scenario, params=ControllerParams(iterations=15)).run()
     m = result.metrics
     assert len(m) == 15
     assert m[-1]["score_best"] > m[0]["score_executed"]
@@ -34,30 +34,30 @@ def test_grid_spreads_traffic():
     net = grid_network(size=4, capacity=360)
     scenario = Scenario(net, commuters(30, net.node_index((0, 0)), net.node_index((4, 4))))
     strategies = StrategyManager.default()
-    result = Controller(scenario, strategies=strategies, config=ControllerConfig(iterations=10)).run()
+    result = Controller(scenario, strategies=strategies, params=ControllerParams(iterations=10)).run()
     assert result.metrics[-1]["car_travel_time"] < result.metrics[0]["car_travel_time"]
 
 
 def test_runs_are_reproducible(equil_scenario):
-    a = Controller(equil_scenario, config=ControllerConfig(iterations=4, seed=1)).run()
-    b = Controller(equil_scenario, config=ControllerConfig(iterations=4, seed=1)).run()
+    a = Controller(equil_scenario, params=ControllerParams(iterations=4, seed=1)).run()
+    b = Controller(equil_scenario, params=ControllerParams(iterations=4, seed=1)).run()
     assert a.metrics == b.metrics
 
 
 def test_parallel_replanning_is_identical(equil_scenario):
-    cfg = ControllerConfig(iterations=3, seed=7)
-    serial = Controller(equil_scenario, runner=SerialRunner(), config=cfg).run()
-    parallel = Controller(equil_scenario, runner=ProcessPoolRunner(workers=2), config=cfg).run()
+    cfg = ControllerParams(iterations=3, seed=7)
+    serial = Controller(equil_scenario, runner=SerialRunner(), params=cfg).run()
+    parallel = Controller(equil_scenario, runner=ProcessPoolRunner(workers=2), params=cfg).run()
     assert serial.metrics == parallel.metrics
 
 
 def test_vectorised_replanning_is_the_default_and_deterministic(equil_scenario):
-    cfg = ControllerConfig(iterations=4, seed=7)
-    controller = Controller(equil_scenario, config=cfg)
+    cfg = ControllerParams(iterations=4, seed=7)
+    controller = Controller(equil_scenario, params=cfg)
     assert isinstance(controller.runner, VectorRunner)
-    a, b = controller.run(), Controller(equil_scenario, config=cfg).run()
+    a, b = controller.run(), Controller(equil_scenario, params=cfg).run()
     assert a.metrics == b.metrics
-    other = Controller(equil_scenario, config=ControllerConfig(iterations=4, seed=8)).run()
+    other = Controller(equil_scenario, params=ControllerParams(iterations=4, seed=8)).run()
     assert other.metrics != a.metrics
 
 
@@ -70,7 +70,7 @@ def test_listener_hook_order(equil_scenario):
                 return lambda arg: calls.append(name)
             return super().__getattribute__(name)
 
-    Controller(equil_scenario, listeners=[Spy()], config=ControllerConfig(iterations=2)).run()
+    Controller(equil_scenario, listeners=[Spy()], params=ControllerParams(iterations=2)).run()
     assert calls == [
         "on_startup",
         "on_iteration_start", "on_before_mobsim", "on_after_mobsim", "on_scoring", "on_iteration_end",
@@ -82,14 +82,14 @@ def test_listener_hook_order(equil_scenario):
 
 def test_event_recorder_keeps_last_iteration(equil_scenario):
     recorder = EventRecorder()
-    Controller(equil_scenario, listeners=[recorder], config=ControllerConfig(iterations=3)).run()
+    Controller(equil_scenario, listeners=[recorder], params=ControllerParams(iterations=3)).run()
     assert list(recorder.events) == [2]
     assert any(isinstance(e, LinkEnter) for e in recorder.last)
 
 
 def test_output_files(equil_scenario, tmp_path):
-    cfg = ControllerConfig(iterations=3, output_dir=tmp_path, write_events_interval=2)
-    Controller(equil_scenario, config=cfg).run()
+    cfg = ControllerParams(iterations=3, output_dir=tmp_path, write_events_interval=2)
+    Controller(equil_scenario, params=cfg).run()
     rows = list(csv.DictReader(open(tmp_path / "metrics.csv")))
     assert [r["iteration"] for r in rows] == ["0", "1", "2"]
     written = sorted(p.parent.name for p in tmp_path.glob("ITERS/*/events.xml.gz"))
@@ -101,7 +101,7 @@ def test_unknown_mode_is_rejected(equil_scenario):
     net = equil_scenario.network
     scenario = Scenario(net, commuters(1, 0, 1, mode="hoverboard"))
     with pytest.raises(ValueError, match="hoverboard"):
-        Controller(scenario, config=ControllerConfig(iterations=1)).run()
+        Controller(scenario, params=ControllerParams(iterations=1)).run()
 
 
 def test_apply_scores_learning_rate(equil_scenario):

@@ -1,4 +1,4 @@
-"""MATSim's pt routes (``default_pt``) as mobslim :class:`~mobslim.population.PtRoute`s.
+"""MATSim's pt routes (``default_pt``) as mobslim :class:`~mobslim.population.TransitPassengerRoute`s.
 
 Layer 2 runs mobslim on MATSim's routes, so pt riders must take the same
 lines between the same stops as in MATSim (mobslim would otherwise route
@@ -6,7 +6,7 @@ them afresh with its RAPTOR). Each pt leg of a MATSim trip
 (``{"transitLineId", "transitRouteId", "accessFacilityId", "egressFacilityId"}``)
 becomes one ride ``(board_route_stop, alight_route_stop)``; the walks are
 implied, as in mobslim. A pt trip MATSim's router made walk-only gets an
-empty ``PtRoute`` (walked).
+empty ``TransitPassengerRoute`` (walked).
 """
 
 from __future__ import annotations
@@ -17,7 +17,13 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-from mobslim.population import Leg, Person, Plan, Population, PtRoute
+from mobslim.population import (
+    Leg,
+    Person,
+    Plan,
+    Population,
+    TransitPassengerRoute,
+)
 from mobslim.timeutils import parse_time
 
 
@@ -98,7 +104,7 @@ def apply_matsim_pt_routes(population: Population, plans_path, schedule,
                         board = _route_stop_after(schedule, line, route, rd["accessFacilityId"])
                         alight = _route_stop_after(schedule, line, route, rd["egressFacilityId"], board)
                         pairs.append((board, alight))
-                    e = Leg(e.mode, PtRoute(pairs, tt, 0.0))
+                    e = Leg(e.mode, TransitPassengerRoute(pairs, tt, 0.0))
             elements.append(e)
         plans = list(person.plans)
         plans[person.selected] = Plan(tuple(elements))

@@ -48,7 +48,7 @@ def mobslim_scenario(cfg: MatsimConfig, plans_path: Path, vehicles: str = "netwo
     population = read_population_xml(plans_path, network, keep_routes=True)
     transit = None
     if cfg.get("transit", "useTransit") == "true":
-        from mobslim.transit import TransitConfig, read_transit
+        from mobslim.transit import TransitParams, read_transit
         from verification.pt_routes import apply_matsim_pt_routes
 
         modes = tuple((cfg.get("transit", "transitModes") or "pt").split(","))
@@ -58,7 +58,7 @@ def mobslim_scenario(cfg: MatsimConfig, plans_path: Path, vehicles: str = "netwo
         if transit_walk is not None:
             tc["walk"] = TeleportedModeParams(*transit_walk)
         transit = read_transit(cfg.input_path("transit", "transitScheduleFile"),
-                               cfg.input_path("transit", "vehiclesFile"), network, TransitConfig(**tc))
+                               cfg.input_path("transit", "vehiclesFile"), network, TransitParams(**tc))
         if keep_pt_routes:
             population = apply_matsim_pt_routes(population, plans_path, transit.schedule, modes)
     return route_scenario(Scenario(network, population, transit=transit))
@@ -269,7 +269,7 @@ def run_l3(case: Case, force_matsim: bool = False) -> dict:
     mode-share curves and final link volumes against MATSim's seed spread."""
     import pandas as pd
 
-    from mobslim import Controller, ControllerConfig
+    from mobslim import Controller, ControllerParams
     from mobslim.config.matsim import strategy_manager
     from mobslim.scoring import CharyparNagelScorer
 
@@ -306,7 +306,7 @@ def run_l3(case: Case, force_matsim: bool = False) -> dict:
         controller = Controller(
             scenario, mobsim=MOBSIMS["qsim"](**kwargs), scorer=CharyparNagelScorer(params),
             strategies=manager, listeners=[_last_iteration_events(events_path)],
-            config=ControllerConfig(iterations=last + 1, seed=seed, learning_rate=lr))
+            params=ControllerParams(iterations=last + 1, seed=seed, learning_rate=lr))
         t0 = time.perf_counter()
         res = controller.run()
         runtimes["mobslim"].append(round(time.perf_counter() - t0, 1))

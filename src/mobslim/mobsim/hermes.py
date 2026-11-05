@@ -130,7 +130,7 @@ def rust_available() -> bool:
 
 
 @dataclass(frozen=True)
-class HermesSimConfig:
+class HermesSimParams:
     flow_capacity_factor: float = 1.0
     storage_capacity_factor: float = 1.0
     stuck_time: float = 10.0
@@ -151,9 +151,9 @@ class HermesSimConfig:
 class HermesSim:
     """Whole-second queue mobsim. Stateless between runs; safe to reuse."""
 
-    def __init__(self, config: HermesSimConfig = HermesSimConfig()):
-        self.config = config
-        if config.backend == "rust" and _rust is None:
+    def __init__(self, params: HermesSimParams = HermesSimParams()):
+        self.params = params
+        if params.backend == "rust" and _rust is None:
             raise ImportError(
                 "HermesSim backend='rust' needs the mobslim_hermes extension "
                 "(rust/mobslim-hermes; `uv sync` builds it when cargo is installed)."
@@ -162,9 +162,9 @@ class HermesSim:
     @property
     def backend(self) -> str:
         """The kernel that runs: ``"rust"`` or ``"python"``."""
-        if self.config.backend == "auto":
+        if self.params.backend == "auto":
             return "rust" if _rust is not None else "python"
-        return self.config.backend
+        return self.params.backend
 
     def run(self, scenario: Scenario, events: EventsManager) -> Trajectories:
         plans = scenario.population.selected_batch()
@@ -174,7 +174,7 @@ class HermesSim:
         """Run already-encoded plans (``plans`` row ``i`` = person index ``i``)."""
         if plans.n_plans != len(scenario.population):
             raise ValueError("PlanBatch must have one plan per person.")
-        cfg = self.config
+        cfg = self.params
         if cfg.validate_routes:
             validate(scenario, plans)
         inputs, tele_distance = kernel_inputs(scenario, plans, cfg, _event_mask(events))
@@ -229,7 +229,7 @@ def ceil_steps(x: np.ndarray) -> np.ndarray:
     return np.ceil(np.asarray(x, dtype=float) - EPS).astype(np.int64)
 
 
-def kernel_inputs(scenario: Scenario, plans: PlanBatch, cfg: HermesSimConfig,
+def kernel_inputs(scenario: Scenario, plans: PlanBatch, cfg: HermesSimParams,
                   event_mask: int) -> tuple[dict, np.ndarray]:
     """The kernel's keyword arguments, plus each leg's teleport distance."""
     net = scenario.network
@@ -303,7 +303,7 @@ def _transit_inputs(scenario: Scenario, plans: PlanBatch, xy: np.ndarray,
             trip_pce=np.zeros(0, f8), trip_access_steps=z, trip_egress_steps=z,
             trip_parallel=np.zeros(0, u1), door_open_steps=0, door_close_steps=0,
         )
-    s, v, tc, net = transit.schedule, transit.vehicles, transit.config, scenario.network
+    s, v, tc, net = transit.schedule, transit.vehicles, transit.params, scenario.network
     walks = pt_walks(plans, xy, transit)
     route = s.dep_route.astype(i8)
     rso, rlo = s.route_stop_offsets.astype(i8), s.route_link_offsets.astype(i8)
@@ -477,7 +477,7 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
     * for each stuck person, in person order, the leg and link they were on
       (``-1`` = none), and the time the run ended (``last_time``), when they
       count as stuck;
-    * the ride arrays and the per trip stop times (``TRANSIT_PLAN.md`` 8).
+    * the ride arrays and the per trip stop times.
 
     Transit follows the QSim's rules (:mod:`mobslim.mobsim._transit`) in
     whole seconds. Vehicles ``0 .. n_plans - 1`` are the persons and

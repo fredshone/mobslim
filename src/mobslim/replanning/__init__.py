@@ -2,7 +2,7 @@ from mobslim.replanning.context import ReplanningContext, TransitRouterFactory
 from mobslim.replanning.modules import (
     ChangeTripMode,
     PlanInnovationModule,
-    ReRoute,
+    Reroute,
     TimeAllocationMutator,
 )
 from mobslim.replanning.prepare import route_scenario
@@ -15,9 +15,9 @@ from mobslim.replanning.selectors import (
     BestScoreSelector,
     ChangeExpBetaSelector,
     ExpBetaSelector,
-    KeepSelected,
+    KeepSelectedSelector,
     PlanSelector,
-    RandomPlanSelector,
+    RandomSelector,
     WorstScoreSelector,
 )
 from mobslim.replanning.strategy import (
@@ -34,13 +34,13 @@ __all__ = [
     "ChangeExpBetaSelector",
     "ChangeTripMode",
     "ExpBetaSelector",
-    "KeepSelected",
+    "KeepSelectedSelector",
     "PlanInnovationModule",
     "PlanSelector",
     "PlanStrategy",
     "ProcessPoolRunner",
-    "RandomPlanSelector",
-    "ReRoute",
+    "RandomSelector",
+    "Reroute",
     "ReplanningContext",
     "ReplanningRunner",
     "SerialRunner",

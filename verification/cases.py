@@ -9,11 +9,11 @@ from typing import Optional
 
 from mobslim.mobsim import (
     AgentSim,
-    AgentSimConfig,
+    AgentSimParams,
     HermesSim,
-    HermesSimConfig,
+    HermesSimParams,
     QSim,
-    QSimConfig,
+    QSimParams,
 )
 from mobslim.mobsim.hermes import rust_available
 
@@ -46,10 +46,10 @@ class Case:
 
 # mobslim mobsims a layer-2 case runs: name -> factory(**qsim_kwargs)
 MOBSIMS = {
-    "qsim": lambda **kw: QSim(QSimConfig(**kw)),
-    "agentsim": lambda **kw: AgentSim(AgentSimConfig(**kw)),
-    "agentsim_chain": lambda **kw: AgentSim(AgentSimConfig(blocked="chain", **kw)),
-    "hermes": lambda **kw: HermesSim(HermesSimConfig(
+    "qsim": lambda **kw: QSim(QSimParams(**kw)),
+    "agentsim": lambda **kw: AgentSim(AgentSimParams(**kw)),
+    "agentsim_chain": lambda **kw: AgentSim(AgentSimParams(blocked="chain", **kw)),
+    "hermes": lambda **kw: HermesSim(HermesSimParams(
         backend="rust" if rust_available() else "python", **kw)),
 }
 
@@ -80,7 +80,7 @@ CASES = [
 
 CASES.append(Case(
     "pt-tutorial.l2", "l2", "pt-tutorial", "0.config.xml", params=dict(_L2),
-    references=("qsim",), vehicles=("network", "schedule"),  # MATSim Hermes: see VERIFICATION_PLAN.md
+    references=("qsim",), vehicles=("network", "schedule"),  # no MATSim Hermes reference for pt-tutorial
     # 0.plans.xml.gz comes with pt routes from an older MATSim router, whose
     # walks are beeline / 3 km/h (factor 1.0); MATSim keeps and teleports them
     transit_walk=(3 / 3.6, 1.0),

@@ -9,9 +9,9 @@ scenarios (equil and pt-tutorial), in three layers:
 | **L2 mobsim** | every mobslim mobsim against MATSim's QSim (and Hermes) on MATSim's plans *and routes*, one iteration | close |
 | **L3 loop** | the whole co-evolutionary loop, several seeds per side | inside MATSim's seed spread |
 
-The design, the known differences and the findings are in
-[`VERIFICATION_PLAN.md`](../VERIFICATION_PLAN.md); the latest numbers in
-[`reports/latest.md`](reports/latest.md).
+The latest numbers, with the known differences that explain them, are in
+[`reports/latest.md`](reports/latest.md); deliberate differences from MATSim
+are listed in [`docs/design.md`](../docs/design.md) section 5.
 
 ```bash
 uv run python -m verification list
@@ -51,7 +51,7 @@ further from MATSim than when frozen) on frozen MATSim runs in
 | `events_io.py` | `events_v1` XML -> link traversals, trips, activities, transit stop calls. Used for **both** sides |
 | `experienced.py` | MATSim events -> mobslim `ExperiencedPlan`s (L1) |
 | `matsim_events.py` | mobslim events -> what MATSim's scoring reads (links on activities, vehicle events, pt trips expanded) |
-| `pt_routes.py` | MATSim's `default_pt` routes -> mobslim `PtRoute`s (L2 rides MATSim's routes) |
+| `pt_routes.py` | MATSim's `default_pt` routes -> mobslim `TransitPassengerRoute`s (L2 rides MATSim's routes) |
 | `compare.py` | Metrics (scores, GEH, link and trip times, transit) and their green/amber/red bands |
 | `runner.py` | `run_l1`, `run_l2`, `run_l3` |
 | `report.py` | `reports/latest.md` (+ L3 plots) |

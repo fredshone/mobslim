@@ -12,8 +12,8 @@ mobslim's Python API and return the params mobslim cannot honour:
   (default and per subpopulation)
 * ``strategy_manager``: ``replanning`` (+ ``timeAllocationMutator``,
   ``changeMode``) -> ``StrategyManager``
-* ``controller_config``: ``controller``, ``global``, ``travelTimeCalculator``
-  -> ``ControllerConfig``
+* ``controller_params``: ``controller``, ``global``, ``travelTimeCalculator``
+  -> ``ControllerParams``
 
 ``controller_kwargs`` combines them into keyword arguments for
 ``Controller``; ``Controller.from_matsim_config`` is the entry point.
@@ -187,16 +187,16 @@ def mobsim(cfg: MatsimConfig):
     ``qsim`` gives a ``QSim``, ``hermes`` a ``HermesSim`` (Rust kernel if
     built); anything else falls back to the ``QSim`` and is listed.
     """
-    from mobslim.mobsim import HermesSim, HermesSimConfig, QSim, QSimConfig
+    from mobslim.mobsim import HermesSim, HermesSimParams, QSim, QSimParams
 
     name = cfg.get("controller", "mobsim", "qsim")
     if name == "hermes":
         kwargs, unsupported = _hermes_params(cfg)
-        return HermesSim(HermesSimConfig(**kwargs)), unsupported
+        return HermesSim(HermesSimParams(**kwargs)), unsupported
     kwargs, unsupported = _qsim_params(cfg)
     if name != "qsim":
         unsupported.append(f"controller.mobsim={name} (using qsim)")
-    return QSim(QSimConfig(**kwargs)), unsupported
+    return QSim(QSimParams(**kwargs)), unsupported
 
 
 # ---------------------------------------------------------------- scoring
@@ -373,7 +373,7 @@ def strategy_manager(cfg: MatsimConfig):
     """``replanning`` module -> (mobslim ``StrategyManager``, unsupported).
 
     As MATSim builds them: selectors choose among a person's plans;
-    innovative strategies copy a random plan (``RandomPlanSelector``) and
+    innovative strategies copy a random plan (``RandomSelector``) and
     change it, rerouting afterwards.
     """
     from mobslim.replanning import (
@@ -381,10 +381,10 @@ def strategy_manager(cfg: MatsimConfig):
         ChangeExpBetaSelector,
         ChangeTripMode,
         ExpBetaSelector,
-        KeepSelected,
+        KeepSelectedSelector,
         PlanStrategy,
-        RandomPlanSelector,
-        ReRoute,
+        RandomSelector,
+        Reroute,
         StrategyManager,
         TimeAllocationMutator,
     )
@@ -401,15 +401,15 @@ def strategy_manager(cfg: MatsimConfig):
     ignore_car = cfg.get("changeMode", "ignoreCarAvailability", "true") != "false"
 
     def innovate(*modules):
-        return PlanStrategy(RandomPlanSelector(), [*modules, ReRoute()])
+        return PlanStrategy(RandomSelector(), [*modules, Reroute()])
 
     builders = {
         "BestScore": lambda: PlanStrategy(BestScoreSelector()),
-        "KeepLastSelected": lambda: PlanStrategy(KeepSelected()),
+        "KeepLastSelected": lambda: PlanStrategy(KeepSelectedSelector()),
         "ChangeExpBeta": lambda: PlanStrategy(ChangeExpBetaSelector(beta)),
         "SelectExpBeta": lambda: PlanStrategy(ExpBetaSelector(beta)),
-        "SelectRandom": lambda: PlanStrategy(RandomPlanSelector()),
-        "ReRoute": lambda: PlanStrategy(RandomPlanSelector(), [ReRoute()]),
+        "SelectRandom": lambda: PlanStrategy(RandomSelector()),
+        "ReRoute": lambda: PlanStrategy(RandomSelector(), [Reroute()]),
         "TimeAllocationMutator": lambda: innovate(TimeAllocationMutator(tam_range)),
         "TimeAllocationMutator_ReRoute": lambda: innovate(TimeAllocationMutator(tam_range)),
         "ChangeTripMode": lambda: innovate(ChangeTripMode(modes, ignore_car)),
@@ -492,8 +492,8 @@ def read_scenario(cfg: MatsimConfig):
     keeps them; other legs are routed by the controller before the first
     iteration. Transit vehicles run on the network, as in MATSim's QSim.
     """
-    from mobslim.network import read_network_xml
-    from mobslim.population import read_population_xml
+    from mobslim.formats.matsim_network import read_network_xml
+    from mobslim.formats.matsim_plans import read_population_xml
     from mobslim.scenario import Scenario
 
     unsupported: list[str] = []
@@ -516,25 +516,25 @@ def read_scenario(cfg: MatsimConfig):
     unsupported += unsupported_tp
     transit = None
     if cfg.get("transit", "useTransit") == "true":
-        from mobslim.transit import TransitConfig, read_transit
+        from mobslim.transit import TransitParams, read_transit
 
         passenger_modes = tuple((cfg.get("transit", "transitModes") or "pt").split(","))
         transit = read_transit(cfg.input_path("transit", "transitScheduleFile"),
                                cfg.input_path("transit", "vehiclesFile"), network,
-                               TransitConfig(passenger_modes=passenger_modes, vehicles="network"))
+                               TransitParams(passenger_modes=passenger_modes, vehicles="network"))
     return Scenario(network, population, teleported_modes=modes, transit=transit), unsupported
 
 
 # -------------------------------------------------------------- controller
 
 
-def controller_config(cfg: MatsimConfig):
+def controller_params(cfg: MatsimConfig):
     """``controller``, ``global``, ``scoring.learningRate`` and
-    ``travelTimeCalculator`` -> (``ControllerConfig``, unsupported).
+    ``travelTimeCalculator`` -> (``ControllerParams``, unsupported).
 
     ``outputDirectory`` is relative to the working directory, as in MATSim.
     """
-    from mobslim.controller import ControllerConfig
+    from mobslim.controller import ControllerParams
 
     unsupported: list[str] = []
     first = int(cfg.get("controller", "firstIteration", "0"))
@@ -551,13 +551,13 @@ def controller_config(cfg: MatsimConfig):
     )
     if (v := cfg.get("travelTimeCalculator", "traveltimeBinSize")) is not None:
         kwargs["travel_time_bin_size"] = float(parse_time(v)) if ":" in v else float(v)
-    return ControllerConfig(**kwargs), unsupported
+    return ControllerParams(**kwargs), unsupported
 
 
 def controller_kwargs(cfg: MatsimConfig) -> tuple[dict, list[str]]:
     """The whole config -> (keyword arguments for ``Controller``, unsupported).
 
-    Keys: ``scenario``, ``mobsim``, ``scorer``, ``strategies``, ``config``.
+    Keys: ``scenario``, ``mobsim``, ``scorer``, ``strategies``, ``params``.
     """
     from mobslim.scoring import CharyparNagelScorer
 
@@ -565,8 +565,8 @@ def controller_kwargs(cfg: MatsimConfig) -> tuple[dict, list[str]]:
     sim, u_mobsim = mobsim(cfg)
     params, by_subpop, u_scoring = scoring_params_by_subpopulation(cfg)
     manager, u_replanning = strategy_manager(cfg)
-    config, u_controller = controller_config(cfg)
+    loop, u_controller = controller_params(cfg)
     scorer = CharyparNagelScorer(params, subpopulations=by_subpop)
     kwargs = dict(scenario=scenario, mobsim=sim, scorer=scorer,
-                  strategies=manager, config=config)
+                  strategies=manager, params=loop)
     return kwargs, u_scenario + u_mobsim + u_scoring + u_replanning + u_controller

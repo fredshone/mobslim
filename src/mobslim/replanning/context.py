@@ -15,7 +15,7 @@ strategies and modules read the person being replanned with
 Person-specific transit routing: ``ctx.transit_weights`` (a
 :class:`~mobslim.transit.PersonRaptorWeights`, computed once per run from the
 attributes) gives each person's :class:`~mobslim.transit.RaptorWeights`;
-``ReRoute``, the runners' batch routing and ``route_scenario`` route each
+``Reroute``, the runners' batch routing and ``route_scenario`` route each
 person's pt legs with them.
 """
 
@@ -33,38 +33,38 @@ from mobslim.routing.compiled import default_router
 class TransitRouterFactory:
     """Transit router factory: :class:`~mobslim.transit.RustRaptorRouter` when
     the compiled router is installed, else :class:`~mobslim.transit.RaptorRouter`
-    (identical routes either way), with ``config`` (a
-    :class:`~mobslim.transit.RaptorConfig`; ``None``: its defaults).
+    (identical routes either way), with ``params`` (a
+    :class:`~mobslim.transit.RaptorParams`; ``None``: its defaults).
 
     ``TransitRouterFactory.from_scoring(params)`` routes with the utilities
-    the scorer uses (see :meth:`RaptorConfig.from_scoring
-    <mobslim.transit.RaptorConfig.from_scoring>`). Picklable, so it can be
+    the scorer uses (see :meth:`RaptorParams.from_scoring
+    <mobslim.transit.RaptorParams.from_scoring>`). Picklable, so it can be
     sent to replanning worker processes.
     """
 
-    config: Optional[object] = None
+    params: Optional[object] = None
 
     @classmethod
     def from_scoring(cls, params, mode: str = "pt", **kw) -> "TransitRouterFactory":
-        from mobslim.transit.raptor import RaptorConfig
+        from mobslim.transit.raptor import RaptorParams
 
-        return cls(RaptorConfig.from_scoring(params, mode, **kw))
+        return cls(RaptorParams.from_scoring(params, mode, **kw))
 
     def __call__(self, network, transit):
         from mobslim.transit.raptor import (
-            RaptorConfig,
+            RaptorParams,
             RaptorRouter,
             RustRaptorRouter,
             rust_raptor_available,
         )
 
-        config = self.config if self.config is not None else RaptorConfig()
+        params = self.params if self.params is not None else RaptorParams()
         if rust_raptor_available():
-            return RustRaptorRouter(network, transit, config)
-        return RaptorRouter(network, transit, config)
+            return RustRaptorRouter(network, transit, params)
+        return RaptorRouter(network, transit, params)
 
 
-# RaptorConfig's own defaults (not tied to any scoring)
+# RaptorParams's own defaults (not tied to any scoring)
 default_transit_router = TransitRouterFactory()
 
 
@@ -78,8 +78,8 @@ class ReplanningContext:
     iteration: int = 0
     router_factory: RouterFactory = default_router
     transit_router_factory: object = default_transit_router
-    # set by the replanning runners: ReRoute only clears routes and the runner
-    # routes all new plans in one batch (see ReRoute, route_plans)
+    # set by the replanning runners: Reroute only clears routes and the runner
+    # routes all new plans in one batch (see Reroute, route_plans)
     batch_routing: bool = False
     attributes: Optional[PersonAttributes] = field(default=None, repr=False)
     # the person being replanned (set by for_person); None outside replanning

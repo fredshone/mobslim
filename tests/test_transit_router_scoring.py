@@ -8,7 +8,7 @@ from mobslim.config.matsim import MatsimConfig, scoring_params
 from mobslim.replanning import TransitRouterFactory
 from mobslim.replanning.context import default_transit_router
 from mobslim.scoring import CharyparNagelScorer
-from mobslim.transit import RaptorConfig
+from mobslim.transit import RaptorParams
 from tests.test_transit_scenarios import load
 
 H = 3600.0
@@ -16,13 +16,13 @@ H = 3600.0
 
 def test_from_scoring_subtracts_performing():
     # MATSim's RaptorUtils / TransitRouterConfig: utility - performing
-    cfg = RaptorConfig.from_scoring(ScoringParams())
+    cfg = RaptorParams.from_scoring(ScoringParams())
     assert (cfg.travel, cfg.waiting, cfg.walk, cfg.line_switch) == (-12.0, -12.0, -12.0, -1.0)
     params = ScoringParams(performing=4.0, marginal_utility_of_waiting_pt=-2.0,
                            utility_of_line_switch=-3.0, walk_mode="foot",
                            modes={"pt": ModeParams(marginal_utility_of_traveling=-1.0),
                                   "foot": ModeParams(marginal_utility_of_traveling=-8.0)})
-    cfg = RaptorConfig.from_scoring(params, max_transfers=3)
+    cfg = RaptorParams.from_scoring(params, max_transfers=3)
     assert (cfg.travel, cfg.waiting, cfg.walk, cfg.line_switch) == (-5.0, -6.0, -12.0, -3.0)
     assert cfg.max_transfers == 3
 
@@ -31,8 +31,8 @@ def test_factory_is_picklable_and_builds_routers_with_its_config():
     scenario = load("pt_simple")
     f = TransitRouterFactory.from_scoring(ScoringParams(utility_of_line_switch=-7.0))
     assert pickle.loads(pickle.dumps(f)) == f
-    assert f(scenario.network, scenario.transit).config.line_switch == -7.0
-    assert default_transit_router(scenario.network, scenario.transit).config == RaptorConfig()
+    assert f(scenario.network, scenario.transit).params.line_switch == -7.0
+    assert default_transit_router(scenario.network, scenario.transit).params == RaptorParams()
 
 
 def test_controller_routes_pt_with_the_scorers_utilities():
@@ -40,12 +40,12 @@ def test_controller_routes_pt_with_the_scorers_utilities():
     params = ScoringParams(performing=3.0, activities={"h": ActivityParams(12 * H)},
                            utility_of_line_switch=-2.0)
     c = Controller(scenario, scorer=CharyparNagelScorer(params))
-    assert c.transit_router_factory.config == RaptorConfig.from_scoring(params, "pt")
+    assert c.transit_router_factory.params == RaptorParams.from_scoring(params, "pt")
     # an explicit factory wins
-    mine = TransitRouterFactory(RaptorConfig(line_switch=-50.0))
+    mine = TransitRouterFactory(RaptorParams(line_switch=-50.0))
     assert Controller(scenario, transit_router_factory=mine).transit_router_factory is mine
 
-    # a scorer without ScoringParams: RaptorConfig's defaults
+    # a scorer without ScoringParams: RaptorParams's defaults
     class Flat:
         def score(self, plan):
             return 0.0
@@ -60,8 +60,8 @@ def test_matsim_config_routes_pt_with_its_scoring(case):
     cfg = MatsimConfig.load(FIXTURES / case / "config.xml")
     params, _ = scoring_params(cfg)
     c = Controller.from_matsim_config(cfg)
-    assert c.transit_router_factory.config == RaptorConfig.from_scoring(params, "pt")
-    assert c.transit_router_factory.config.travel == params.mode("pt").marginal_utility_of_traveling - 6.0
+    assert c.transit_router_factory.params == RaptorParams.from_scoring(params, "pt")
+    assert c.transit_router_factory.params.travel == params.mode("pt").marginal_utility_of_traveling - 6.0
 
 
 # ------------------------------------------------- person-specific weights
@@ -72,12 +72,12 @@ from mobslim import Population  # noqa: E402
 from mobslim.replanning import (  # noqa: E402
     ProcessPoolRunner,
     ReplanningContext,
-    ReRoute,
+    Reroute,
     SerialRunner,
     StrategyManager,
     route_scenario,
 )
-from mobslim.replanning.selectors import KeepSelected  # noqa: E402
+from mobslim.replanning.selectors import KeepSelectedSelector  # noqa: E402
 from mobslim.replanning.strategy import PlanStrategy  # noqa: E402
 from mobslim.routing import TravelTimeTable  # noqa: E402
 from mobslim.transit import (  # noqa: E402
@@ -111,7 +111,7 @@ def test_per_query_weights_equal_a_router_with_those_weights(name):
         router = cls(scenario.network, scenario.transit)
         mixed = router.route_many_xy(o, d, t, weights=weights)
         for w in sets:
-            cfg = RaptorConfig() if w is None else replace(RaptorConfig(), travel=w.travel,
+            cfg = RaptorParams() if w is None else replace(RaptorParams(), travel=w.travel,
                                                            waiting=w.waiting, walk=w.walk,
                                                            line_switch=w.line_switch)
             own = cls(scenario.network, scenario.transit, cfg).route_many_xy(o, d, t)
@@ -146,7 +146,7 @@ def test_route_scenario_routes_each_person_with_their_weights():
     mixed = route_scenario(scenario, transit_weights=weights)
     plain = route_scenario(scenario)
     walkers = route_scenario(scenario, transit_router_factory=TransitRouterFactory(
-        RaptorConfig(walk=WALKER.walk)))
+        RaptorParams(walk=WALKER.walk)))
     got, a, b = _rides(mixed.population), _rides(plain.population), _rides(walkers.population)
     assert got == [b[i] if i % 2 else a[i] for i in range(len(got))]
     assert got != a
@@ -158,10 +158,10 @@ def test_replanning_reroutes_each_person_with_their_weights(runner):
     scenario, weights = _pt_tutorial_split()
     plain = route_scenario(scenario)
     walkers = route_scenario(scenario, transit_router_factory=TransitRouterFactory(
-        RaptorConfig(walk=WALKER.walk)))
+        RaptorParams(walk=WALKER.walk)))
     expected = [b if i % 2 else a for i, (a, b) in
                 enumerate(zip(_rides(plain.population), _rides(walkers.population)))]
-    manager = StrategyManager([(1.0, PlanStrategy(KeepSelected(), [ReRoute()]))])
+    manager = StrategyManager([(1.0, PlanStrategy(KeepSelectedSelector(), [Reroute()]))])
     ctx = ReplanningContext.from_scenario(plain, TravelTimeTable.free_speed(plain.network), 1,
                                           transit_weights=weights)
     if runner == "pool":

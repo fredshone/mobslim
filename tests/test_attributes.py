@@ -23,7 +23,7 @@ from mobslim.config.matsim import (
 )
 from mobslim.events import EventsManager
 from mobslim.ids import IdMap
-from mobslim.mobsim import QSim, QSimConfig
+from mobslim.mobsim import QSim, QSimParams
 from mobslim.replanning import (
     ChangeTripMode,
     ProcessPoolRunner,
@@ -187,7 +187,7 @@ def _params(performing):
 def _run(pop):
     net = chain_network([100, 100], freespeed=10)
     scenario = routed(Scenario(net, pop))
-    return QSim(QSimConfig()).run(scenario, EventsManager()), scenario.population
+    return QSim(QSimParams()).run(scenario, EventsManager()), scenario.population
 
 
 def test_subpopulation_scoring_params():

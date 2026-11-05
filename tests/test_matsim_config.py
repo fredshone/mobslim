@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from mobslim import Controller, ControllerConfig, HermesSim, QSim
+from mobslim import Controller, ControllerParams, HermesSim, QSim
 from mobslim.config import MatsimConfig, UnsupportedConfigError
 from mobslim.config.matsim import controller_kwargs
 from tests.conftest import FIXTURES
@@ -20,14 +20,14 @@ def test_equil_translates_fully():
     assert isinstance(kwargs["mobsim"], QSim)
     assert len(kwargs["scenario"].population) == 100
     assert kwargs["scenario"].transit is None
-    c = kwargs["config"]
+    c = kwargs["params"]
     assert (c.iterations, c.seed, c.output_dir) == (1, 4711, "./output")
 
 
 def test_pt_tutorial_reads_transit_and_runs():
-    controller = Controller.from_matsim_config(PT, strict=True, config=ControllerConfig(iterations=2))
+    controller = Controller.from_matsim_config(PT, strict=True, params=ControllerParams(iterations=2))
     assert controller.scenario.transit is not None
-    assert controller.scenario.transit.config.passenger_modes == ("pt",)
+    assert controller.scenario.transit.params.passenger_modes == ("pt",)
     assert controller.strategies.max_plans == 5
     result = controller.run()
     assert len(result.metrics) == 2
@@ -39,7 +39,7 @@ def test_controller_params(tmp_path):
            .set("global", "randomSeed", 42)
            .set("scoring", "learningRate", 0.5)
            .set("travelTimeCalculator", "traveltimeBinSize", "00:05:00"))
-    c = Controller.from_matsim_config(cfg.write(tmp_path / "config.xml"), strict=True).config
+    c = Controller.from_matsim_config(cfg.write(tmp_path / "config.xml"), strict=True).params
     assert (c.iterations, c.seed, c.learning_rate, c.travel_time_bin_size) == (5, 42, 0.5, 300.0)
 
 
@@ -47,7 +47,7 @@ def test_hermes_mobsim():
     cfg = MatsimConfig.load(EQUIL).set("controller", "mobsim", "hermes").set("hermes", "flowCapacityFactor", 0.5)
     sim = Controller.from_matsim_config(cfg, strict=True).mobsim
     assert isinstance(sim, HermesSim)
-    assert sim.config.flow_capacity_factor == 0.5
+    assert sim.params.flow_capacity_factor == 0.5
 
 
 def test_teleported_modes():

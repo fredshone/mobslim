@@ -10,8 +10,7 @@
 Exact timings are pinned down in ``test_transit.py``. Here, against MATSim's
 own inputs, the tests check structure (which lines, stops and vehicles),
 exact walk times (walks start at the activities' coordinates), and vehicle
-times within windows that allow for MATSim's 1 s steps (see
-``TRANSIT_PLAN.md``, section 13).
+times within windows that allow for MATSim's 1 s steps.
 
 The module is skipped until ``mobslim.transit`` provides the planned API.
 """
@@ -26,7 +25,7 @@ from mobslim import (
     ActivityParams,
     CharyparNagelScorer,
     Controller,
-    ControllerConfig,
+    ControllerParams,
     ModeParams,
     PlanStrategy,
     Scenario,
@@ -41,8 +40,8 @@ from mobslim.replanning import (
     ChangeExpBetaSelector,
     ChangeTripMode,
     ProcessPoolRunner,
-    RandomPlanSelector,
-    ReRoute,
+    RandomSelector,
+    Reroute,
     SerialRunner,
     TimeAllocationMutator,
 )
@@ -52,14 +51,14 @@ from tests.conftest import FIXTURES, make_mobsim, routed
 try:
     from mobslim.events import PersonEntersVehicle, VehicleDepartsAtFacility
     from mobslim.transit import (
-        TransitConfig,
+        TransitParams,
         read_transit,
         read_transit_schedule_xml,
         read_transit_vehicles_xml,
         rust_raptor_available,
     )
 except ImportError:  # pragma: no cover - until the transit API exists
-    pytest.skip("transit simulation is not implemented yet (TRANSIT_PLAN.md)",
+    pytest.skip("transit simulation is not implemented yet",
                 allow_module_level=True)
 
 H = 3600.0
@@ -74,7 +73,7 @@ def load(name, vehicles="schedule"):  # the default vehicle mode
     plans = d / "population.xml"
     population = read_population_xml(plans if plans.exists() else d / "population.xml.gz", network)
     transit = read_transit(d / "transitSchedule.xml", d / "transitVehicles.xml", network,
-                           TransitConfig(vehicles=vehicles))
+                           TransitParams(vehicles=vehicles))
     return Scenario(network, population, transit=transit)
 
 
@@ -197,7 +196,7 @@ def test_siouxfalls_runs():
     read as pt); nobody is stuck in either vehicle mode."""
     from dataclasses import replace
 
-    from mobslim import HermesSim, HermesSimConfig
+    from mobslim import HermesSim, HermesSimParams
 
     d = Path(SIOUXFALLS)
     f = siouxfalls_layout(d)
@@ -208,9 +207,9 @@ def test_siouxfalls_runs():
         "car", "pt", "walk"}
     scenario = route_scenario(Scenario(network, population, transit=transit))
     for vehicles in VEHICLE_MODES:
-        s = replace(scenario, transit=transit.with_config(
-            replace(transit.config, vehicles=vehicles)))
-        tr = HermesSim(HermesSimConfig(flow_capacity_factor=0.7)).run(s, EventsManager())
+        s = replace(scenario, transit=transit.with_params(
+            replace(transit.params, vehicles=vehicles)))
+        tr = HermesSim(HermesSimParams(flow_capacity_factor=0.7)).run(s, EventsManager())
         assert not tr.stuck.any(), vehicles
         assert np.isfinite(tr.ride_alight).all() and len(tr.ride_alight) > 10_000
         assert tr.pt_load().max() <= 90
@@ -227,7 +226,7 @@ def test_pt_simple(vehicles, mobsim):
     assert scenario.modes.is_transit_mode("pt")  # although the links allow "pt"
     leg = scenario.population[0].selected_plan.legs[0]
     # least cost: alighting at 495 and walking 14 m beats riding 30 s on to 596
-    # and walking 10 m (0.074 vs 0.10 util with the default RaptorConfig)
+    # and walking 10 m (0.074 vs 0.10 util with the default RaptorParams)
     assert s.describe_rides(leg.route.rides) == [("gelb", "gelb_1", "192", "495")]
 
     log = EventLog()
@@ -306,12 +305,12 @@ def tutorial_controller(iterations, runner=None, vehicles="schedule"):
     )
     strategies = StrategyManager([
         (0.7, PlanStrategy(ChangeExpBetaSelector())),
-        (0.1, PlanStrategy(RandomPlanSelector(), [ReRoute()])),
-        (0.1, PlanStrategy(RandomPlanSelector(), [TimeAllocationMutator(), ReRoute()])),
-        (0.1, PlanStrategy(RandomPlanSelector(), [ChangeTripMode(["car", "pt"]), ReRoute()])),
+        (0.1, PlanStrategy(RandomSelector(), [Reroute()])),
+        (0.1, PlanStrategy(RandomSelector(), [TimeAllocationMutator(), Reroute()])),
+        (0.1, PlanStrategy(RandomSelector(), [ChangeTripMode(["car", "pt"]), Reroute()])),
     ])
     return Controller(scenario, scorer=CharyparNagelScorer(scoring), strategies=strategies,
-                      runner=runner, config=ControllerConfig(iterations=iterations, seed=4711))
+                      runner=runner, params=ControllerParams(iterations=iterations, seed=4711))
 
 
 @pytest.mark.parametrize("vehicles", VEHICLE_MODES)
@@ -378,10 +377,10 @@ def random_queries(scenario, n, seed):
     {"max_transfers": 1, "max_transfers_after_first_arrival": 0},
 ])
 def test_rust_raptor_matches_python(name, config):
-    from mobslim.transit import RaptorConfig, RaptorRouter, RustRaptorRouter
+    from mobslim.transit import RaptorParams, RaptorRouter, RustRaptorRouter
 
     scenario = load(name)
-    cfg = RaptorConfig(**config)
+    cfg = RaptorParams(**config)
     py = RaptorRouter(scenario.network, scenario.transit, cfg)
     rs = RustRaptorRouter(scenario.network, scenario.transit, cfg, threads=3)
     o, d, t = random_queries(scenario, 300, seed=len(name))

@@ -28,7 +28,7 @@ from mobslim.config.matsim import (
     _hermes_params,
     _params,
     _qsim_params,
-    controller_config,
+    controller_params,
     scoring_params_by_subpopulation,
     teleported_modes,
 )
@@ -172,7 +172,7 @@ def matsim_to_mobslim(cfg: MatsimConfig, attribute_names=None) -> tuple[dict, li
     unsupported: list[str] = []
     out: dict = {"version": 1}
 
-    controller, u = controller_config(cfg)
+    controller, u = controller_params(cfg)
     unsupported += u
     out["run"] = {"iterations": controller.iterations, "seed": controller.seed,
                   "output_dir": str(Path(controller.output_dir or "output").resolve()),  # MATSim: from the cwd

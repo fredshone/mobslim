@@ -5,18 +5,20 @@ the full interfaces (``mobsim``, ``routing``, ``replanning``).
 """
 
 from mobslim.attributes import PersonAttributes
-from mobslim.controller import Controller, ControllerConfig, RunResult
+from mobslim.controller import Controller, ControllerParams, RunResult
 from mobslim.events import EventLog, EventsManager
 from mobslim.experience import ExperiencedPlan
 from mobslim.formats import read_population, write_population
+from mobslim.formats.matsim_network import read_network_xml
+from mobslim.formats.matsim_plans import read_population_xml
 from mobslim.listeners import ControllerListener, EventRecorder, IterationState
 from mobslim.mobsim import (
     AgentSim,
-    AgentSimConfig,
+    AgentSimParams,
     HermesSim,
-    HermesSimConfig,
+    HermesSimParams,
     QSim,
-    QSimConfig,
+    QSimParams,
 )
 from mobslim.modes import Modes
 from mobslim.network import (
@@ -24,7 +26,6 @@ from mobslim.network import (
     NetworkBuilder,
     grid_network,
     linear_network,
-    read_network_xml,
 )
 from mobslim.planbatch import PlanBatch
 from mobslim.planstore import PlanStore
@@ -35,7 +36,6 @@ from mobslim.population import (
     Plan,
     Population,
     Route,
-    read_population_xml,
 )
 from mobslim.replanning import PlanStrategy, StrategyManager, route_scenario
 from mobslim.routing import TeleportedModeParams, TravelTimeTable
@@ -53,17 +53,17 @@ __all__ = [
     "Activity",
     "ActivityParams",
     "AgentSim",
-    "AgentSimConfig",
+    "AgentSimParams",
     "CharyparNagelScorer",
     "Controller",
-    "ControllerConfig",
+    "ControllerParams",
     "ControllerListener",
     "EventLog",
     "EventRecorder",
     "EventsManager",
     "ExperiencedPlan",
     "HermesSim",
-    "HermesSimConfig",
+    "HermesSimParams",
     "IterationState",
     "Modes",
     "Leg",
@@ -78,7 +78,7 @@ __all__ = [
     "PlanStrategy",
     "Population",
     "QSim",
-    "QSimConfig",
+    "QSimParams",
     "Route",
     "RunResult",
     "Scenario",

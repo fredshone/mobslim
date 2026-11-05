@@ -1,4 +1,4 @@
-"""Transit in the QSim: scheduled trips and their passengers (TRANSIT_PLAN.md 7.1).
+"""Transit in the QSim: scheduled trips and their passengers (rules pinned by ``tests/test_transit.py``).
 
 A :class:`_TransitRun` shares its QSim run's heap. It is created only when
 the scenario has transit.

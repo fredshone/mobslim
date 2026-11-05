@@ -32,12 +32,12 @@ from benchmarks.harness import Benchmark, SkipBenchmark
 from benchmarks.scenarios import ScenarioSpec
 from mobslim import (
     AgentSim,
-    AgentSimConfig,
+    AgentSimParams,
     CharyparNagelScorer,
     Controller,
-    ControllerConfig,
+    ControllerParams,
     HermesSim,
-    HermesSimConfig,
+    HermesSimParams,
     QSim,
     Scenario,
     route_scenario,
@@ -48,7 +48,7 @@ from mobslim.listeners import ControllerListener
 from mobslim.metrics import iteration_metrics
 from mobslim.replanning import (
     ReplanningContext,
-    ReRoute,
+    Reroute,
     SerialRunner,
     StrategyManager,
     VectorRunner,
@@ -178,8 +178,8 @@ class Workload:
         if self.transit is None:
             raise SkipBenchmark(f"scenario {self.spec.name!r} has no transit")
         transit = self.routed.transit
-        return replace(self.routed, transit=transit.with_config(
-            replace(transit.config, vehicles=vehicles)))
+        return replace(self.routed, transit=transit.with_params(
+            replace(transit.params, vehicles=vehicles)))
 
 
 def replay(events, *handlers) -> None:
@@ -313,14 +313,14 @@ _CONGESTED = dict(storage_capacity_factor=0.002, flow_capacity_factor=0.01, stuc
 @benchmark("mobsim.agentsim_congested_poll", info=_trajectories_info)
 def _agentsim_congested_poll(w: Workload):
     """AgentSim under heavy spillback, blocked agents polling every retry tick."""
-    scenario, mobsim = w.routed, AgentSim(AgentSimConfig(**_CONGESTED))
+    scenario, mobsim = w.routed, AgentSim(AgentSimParams(**_CONGESTED))
     return lambda: mobsim.run(scenario, EventsManager())
 
 
 @benchmark("mobsim.agentsim_congested_chain", info=_trajectories_info)
 def _agentsim_congested_chain(w: Workload):
     """The same run with blocked="chain" (identical results, fewer retries)."""
-    scenario, mobsim = w.routed, AgentSim(AgentSimConfig(blocked="chain", **_CONGESTED))
+    scenario, mobsim = w.routed, AgentSim(AgentSimParams(blocked="chain", **_CONGESTED))
     return lambda: mobsim.run(scenario, EventsManager())
 
 
@@ -360,14 +360,14 @@ def _hermes(w: Workload):
 @benchmark("mobsim.hermes_congested", info=_trajectories_info)
 def _hermes_congested(w: Workload):
     """HermesSim under the same heavy spillback as agentsim_congested_*."""
-    scenario, mobsim = w.routed, HermesSim(HermesSimConfig(**_CONGESTED))
+    scenario, mobsim = w.routed, HermesSim(HermesSimParams(**_CONGESTED))
     return lambda: mobsim.run(scenario, EventsManager())
 
 
 @benchmark("mobsim.hermes_py_no_events", info=_trajectories_info)
 def _hermes_py_no_events(w: Workload):
     """HermesSim's Python reference kernel, no event handlers."""
-    scenario, mobsim = w.routed, HermesSim(HermesSimConfig(backend="python"))
+    scenario, mobsim = w.routed, HermesSim(HermesSimParams(backend="python"))
     return lambda: mobsim.run(scenario, EventsManager())
 
 
@@ -652,7 +652,7 @@ def _hermes_network(w: Workload):
 @benchmark("transit.hermes_py_network", info=_pt_mobsim_info)
 def _hermes_py_network(w: Workload):
     """HermesSim's Python reference kernel, queue-model vehicles."""
-    return _pt_mobsim(w, "network", HermesSim(HermesSimConfig(backend="python")))
+    return _pt_mobsim(w, "network", HermesSim(HermesSimParams(backend="python")))
 
 
 # ----------------------------------------------------------- replanning
@@ -665,7 +665,7 @@ def _replan_info(population):
 @benchmark("replanning.default_strategies", info=_replan_info)
 def _replan_default(w: Workload):
     """One replanning step with the MATSim-like default strategies
-    (80% ChangeExpBeta, 10% ReRoute, 10% TimeAllocationMutator+ReRoute)."""
+    (80% ChangeExpBeta, 10% Reroute, 10% TimeAllocationMutator+Reroute)."""
     population, manager, runner = w.scored.population, StrategyManager.default(), SerialRunner()
     ctx = w.context()
     return lambda: runner.run(population, manager, ctx, SEED)
@@ -682,11 +682,11 @@ def _replan_default_vectorised(w: Workload):
 
 @benchmark("replanning.reroute_all")
 def _reroute_all(w: Workload):
-    """ReRoute every selected plan, one plan at a time, with the Python
+    """Reroute every selected plan, one plan at a time, with the Python
     router: the worst case for routing in replanning."""
     plans = list(w.scored.population.selected_plans())
     ctx = ReplanningContext.from_scenario(w.scored, w.travel_time, 1, DijkstraRouter)
-    module, rng = ReRoute(), Random(SEED)
+    module, rng = Reroute(), Random(SEED)
     return lambda: [module.mutate(p, ctx, rng) for p in plans]
 
 
@@ -695,7 +695,7 @@ def _reroute_all_batched(w: Workload):
     """The same, batched as the replanning runners do it (clear routes, then
     route_plans), with the default router (Rust if built). Same routes."""
     plans = list(w.scored.population.selected_plans())
-    batched, module = w.context().batched(), ReRoute()
+    batched, module = w.context().batched(), Reroute()
 
     def run():
         ctx = w.context()  # fresh routers, as each iteration gets
@@ -728,7 +728,7 @@ def _run_info(result):
 
 def _controller(scenario: Scenario, iterations: int) -> Controller:
     logging.getLogger("mobslim").setLevel(logging.WARNING)
-    return Controller(scenario, config=ControllerConfig(iterations=iterations, seed=SEED))
+    return Controller(scenario, params=ControllerParams(iterations=iterations, seed=SEED))
 
 
 @benchmark("run.controller", info=_run_info)

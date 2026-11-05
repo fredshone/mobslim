@@ -20,3 +20,9 @@ rust/*/target/
 # Verification: raw MATSim/mobslim outputs and the Java build
 verification/output/
 verification/java/target/
+
+# Run outputs (e.g. scenarios/equil/mobslim.yaml writes output/equil)
+output/
+
+# Built API docs
+docs/_build/

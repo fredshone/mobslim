@@ -1,4 +1,14 @@
-"""Population file formats, chosen by path.
+"""File formats: every reader and writer lives in this package.
+
+==========================  ===================================================
+:mod:`.matsim_network`      MATSim network XML -> :class:`~mobslim.network.Network`
+:mod:`.matsim_plans`        MATSim population XML: read and write
+:mod:`.matsim_attributes`   MATSim person attributes (``objectAttributes``)
+:mod:`.matsim_transit`      MATSim transit schedule and vehicles
+:mod:`.parquet`             MobSlim Parquet population directory
+==========================  ===================================================
+
+Populations can be read and written in either format, chosen by path:
 
 =================================  ==========================================
 ``*.xml``, ``*.xml.gz``            MATSim plans (``plans_v4``/``population_v6``)
@@ -51,7 +61,7 @@ def read_population(path, network: Network, *, format: Optional[str] = None,
     routes are always routed again)."""
     fmt = population_format(path, format)
     if fmt == "xml":
-        from mobslim.population import read_population_xml
+        from mobslim.formats.matsim_plans import read_population_xml
 
         population = read_population_xml(path, network, keep_routes=keep_routes)
     else:
@@ -68,7 +78,8 @@ def read_population(path, network: Network, *, format: Optional[str] = None,
 def read_person_attributes(path, population: Population):
     """Person attributes from a MATSim ``objectAttributes`` XML or a Parquet
     persons table, aligned with ``population``'s persons."""
-    from mobslim.attributes import PersonAttributes, read_person_attributes_xml
+    from mobslim.attributes import PersonAttributes
+    from mobslim.formats.matsim_attributes import read_person_attributes_xml
 
     name = Path(path).name.lower()
     if name.endswith(".xml") or name.endswith(".xml.gz"):
@@ -88,7 +99,7 @@ def write_population(population: Population, path, network: Network, *,
     """Write a population as MATSim XML or Parquet (by ``path``, or ``format``)."""
     fmt = population_format(path, format)
     if fmt == "xml":
-        from mobslim.formats.matsim import write_population_xml
+        from mobslim.formats.matsim_plans import write_population_xml
 
         return write_population_xml(population, path, network)
     from mobslim.formats.parquet import write_population_parquet

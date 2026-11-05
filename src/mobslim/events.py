@@ -100,7 +100,7 @@ class PersonStuck(PersonEvent):
     matsim_type: ClassVar[str] = "stuckAndAbort"
 
 
-# -- transit (TRANSIT_PLAN.md section 8). ``trip`` is a departure index,
+# -- transit. ``trip`` is a departure index,
 # ``stop`` a stop index; vehicle events carry no person.
 
 

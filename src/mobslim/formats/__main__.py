@@ -1,4 +1,4 @@
-"""``python -m mobslim.formats``: convert and inspect population files.
+"""``python -m mobslim.formats`` (also ``mobslim <command>``): convert and inspect population files.
 
     python -m mobslim.formats convert plans.xml.gz plans_pq --network network.xml
     python -m mobslim.formats convert plans_pq output_plans.xml.gz --network network.xml
@@ -16,10 +16,9 @@ import sys
 import time
 
 
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m mobslim.formats", description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = parser.add_subparsers(dest="command", required=True)
+def add_commands(sub) -> None:
+    """Add ``convert`` and ``info`` to an argparse subparsers object (shared
+    with the ``mobslim`` command)."""
     conv = sub.add_parser("convert", help="convert a population between formats")
     conv.add_argument("input")
     conv.add_argument("output")
@@ -33,16 +32,19 @@ def main(argv=None) -> int:
         p.add_argument("--from", dest="from_format", choices=("xml", "parquet"))
     conv.add_argument("--to", dest="to_format", choices=("xml", "parquet"))
     conv.add_argument("--drop-routes", action="store_true", help="write every leg unrouted")
-    args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+
+COMMANDS = ("convert", "info")
+
+
+def run_command(args) -> int:
     from mobslim.formats import read_population, write_population
-    from mobslim.network import read_network_xml
+    from mobslim.formats.matsim_network import read_network_xml
 
     network = read_network_xml(args.network)
     schedule = None
     if args.schedule:
-        from mobslim.transit.io import read_transit_schedule_xml
+        from mobslim.formats.matsim_transit import read_transit_schedule_xml
 
         schedule = read_transit_schedule_xml(args.schedule, network)
     t0 = time.perf_counter()
@@ -63,6 +65,15 @@ def main(argv=None) -> int:
                            transit_schedule=schedule)
     print(f"wrote {out} in {time.perf_counter() - t1:.2f}s", file=sys.stderr)
     return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m mobslim.formats", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_commands(parser.add_subparsers(dest="command", required=True))
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    return run_command(args)
 
 
 def _summary(population) -> str:

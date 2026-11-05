@@ -13,18 +13,25 @@ import numpy as np
 import pytest
 
 from mobslim import PlanBatch, Population, Scenario, route_scenario
-from mobslim.population import Activity, Leg, Person, Plan, PtRoute, Route
+from mobslim.population import (
+    Activity,
+    Leg,
+    Person,
+    Plan,
+    Route,
+    TransitPassengerRoute,
+)
 from mobslim.replanning import (
     BestScoreSelector,
     ChangeExpBetaSelector,
     ChangeTripMode,
     ExpBetaSelector,
-    KeepSelected,
+    KeepSelectedSelector,
     PersonStrategyManager,
     PlanStrategy,
-    RandomPlanSelector,
+    RandomSelector,
     ReplanningContext,
-    ReRoute,
+    Reroute,
     SerialRunner,
     StrategyManager,
     TimeAllocationMutator,
@@ -102,7 +109,7 @@ def person_of(scores_row, n, selected):
 
 
 @pytest.mark.parametrize("selector, draws", [
-    (KeepSelected(), 0), (BestScoreSelector(), 0), (RandomPlanSelector(), 1),
+    (KeepSelectedSelector(), 0), (BestScoreSelector(), 0), (RandomSelector(), 1),
     (ExpBetaSelector(beta=0.7), 1), (ChangeExpBetaSelector(beta=2.0), 2),
     (ChangeExpBetaSelector(beta=200.0), 2), (WorstScoreSelector(), 1),
 ])
@@ -120,7 +127,7 @@ def test_select_many_matches_select(selector, draws):
 
 def _scalar_select(selector, person, us):
     """``selector.select`` fed the person's draws (only those it uses, in order)."""
-    unscored_first = not isinstance(selector, (KeepSelected, WorstScoreSelector))
+    unscored_first = not isinstance(selector, (KeepSelectedSelector, WorstScoreSelector))
     if unscored_first and any(s is None for s in person.scores):
         return selector.select(person, ScalarDraws([]))
     if isinstance(selector, ChangeExpBetaSelector):
@@ -187,7 +194,7 @@ def test_clear_routes_batch(equil):
     # a walk leg with a stale car route, and a car leg with a pt route
     p = plans[0].elements
     plans[0] = plans[0].with_elements([*p[:1], Leg("walk", p[1].route), *p[2:]])
-    plans[1] = plans[1].with_elements([*plans[1].elements[:1], Leg("car", PtRoute([], 1.0, 1.0)),
+    plans[1] = plans[1].with_elements([*plans[1].elements[:1], Leg("car", TransitPassengerRoute([], 1.0, 1.0)),
                                        *plans[1].elements[2:]])
     batch = PlanBatch.from_plans(plans)
     for keep in (True, False):
@@ -241,9 +248,9 @@ def scored(scenario, seed=0):
 
 
 @pytest.mark.parametrize("strategy", [
-    PlanStrategy(KeepSelected(), [ReRoute()]),
+    PlanStrategy(KeepSelectedSelector(), [Reroute()]),
     PlanStrategy(BestScoreSelector()),
-    PlanStrategy(KeepSelected(), [ChangeTripMode(["car", "walk"]), ReRoute()]),
+    PlanStrategy(KeepSelectedSelector(), [ChangeTripMode(["car", "walk"]), Reroute()]),
 ])
 def test_runner_matches_serial_for_deterministic_choices(equil, strategy):
     """With one strategy and no random selection, both paths agree exactly
@@ -271,7 +278,7 @@ def test_runner_falls_back_per_person_for_custom_modules(equil):
     pop = scored(scenario)
     ctx = ReplanningContext.from_scenario(Scenario(scenario.network, pop),
                                           TravelTimeTable.free_speed(scenario.network), 2)
-    manager = StrategyManager([(1.0, PlanStrategy(RandomPlanSelector(), [SwapToWalk(), ReRoute()]))],
+    manager = StrategyManager([(1.0, PlanStrategy(RandomSelector(), [SwapToWalk(), Reroute()]))],
                               max_plans=2)
     assert list(VectorRunner().run(pop, manager, ctx, 9)) == list(SerialRunner().run(pop, manager, ctx, 9))
 
@@ -281,8 +288,8 @@ def test_runner_mixes_vectorised_and_per_person_strategies(equil):
     pop = scored(scenario)
     ctx = ReplanningContext.from_scenario(Scenario(scenario.network, pop),
                                           TravelTimeTable.free_speed(scenario.network), 2)
-    manager = StrategyManager([(0.5, PlanStrategy(KeepSelected(), [SwapToWalk()])),
-                               (0.5, PlanStrategy(KeepSelected(), [TimeAllocationMutator(), ReRoute()]))])
+    manager = StrategyManager([(0.5, PlanStrategy(KeepSelectedSelector(), [SwapToWalk()])),
+                               (0.5, PlanStrategy(KeepSelectedSelector(), [TimeAllocationMutator(), Reroute()]))])
     out = VectorRunner().run(pop, manager, ctx, 1)
     assert (out.n_plans == 2).all()
     walked = sum(all(leg.mode == "walk" for leg in p.selected_plan.legs) for p in out)
@@ -297,8 +304,8 @@ def test_person_strategy_manager(equil):
     pop = scored(scenario)
     ctx = ReplanningContext.from_scenario(Scenario(scenario.network, pop),
                                           TravelTimeTable.free_speed(scenario.network), 2)
-    keep = StrategyManager([(1.0, PlanStrategy(KeepSelected()))])
-    innovate = StrategyManager([(1.0, PlanStrategy(KeepSelected(), [ReRoute()]))])
+    keep = StrategyManager([(1.0, PlanStrategy(KeepSelectedSelector()))])
+    innovate = StrategyManager([(1.0, PlanStrategy(KeepSelectedSelector(), [Reroute()]))])
     codes = np.arange(len(pop)) % 2
     out = VectorRunner().run(pop, PersonStrategyManager([keep, innovate], codes), ctx, 3)
     assert out.n_plans.tolist() == (1 + codes).tolist()
@@ -330,8 +337,8 @@ def test_strategy_shares_follow_weights(equil):
     big = big.with_selected_scores(np.zeros(len(big)))
     ctx = ReplanningContext.from_scenario(Scenario(scenario.network, big),
                                           TravelTimeTable.free_speed(scenario.network), 1)
-    manager = StrategyManager([(0.8, PlanStrategy(KeepSelected())),
-                               (0.2, PlanStrategy(KeepSelected(), [ReRoute()]))])
+    manager = StrategyManager([(0.8, PlanStrategy(KeepSelectedSelector())),
+                               (0.2, PlanStrategy(KeepSelectedSelector(), [Reroute()]))])
     out = VectorRunner().run(big, manager, ctx, 0)
     share = (out.n_plans == 2).mean()
     assert 0.17 < share < 0.23

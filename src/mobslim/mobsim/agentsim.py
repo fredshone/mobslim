@@ -85,7 +85,7 @@ from mobslim.trajectories import Trajectories
 
 
 @dataclass(frozen=True)
-class AgentSimConfig:
+class AgentSimParams:
     flow_capacity_factor: float = 1.0
     storage_capacity_factor: float = 1.0
     stuck_time: float = 10.0
@@ -108,8 +108,8 @@ class AgentSimConfig:
 class AgentSim:
     """Agent-driven queue mobsim. Stateless between runs; safe to reuse."""
 
-    def __init__(self, config: AgentSimConfig = AgentSimConfig()):
-        self.config = config
+    def __init__(self, params: AgentSimParams = AgentSimParams()):
+        self.params = params
 
     def run(self, scenario: Scenario, events: EventsManager) -> Trajectories:
         plans = scenario.population.selected_batch()
@@ -119,9 +119,9 @@ class AgentSim:
         """Run already-encoded plans (``plans`` row ``i`` = person index ``i``)."""
         if plans.n_plans != len(scenario.population):
             raise ValueError("PlanBatch must have one plan per person.")
-        if self.config.validate_routes:
+        if self.params.validate_routes:
             validate(scenario, plans)
-        return _AgentSimRun(scenario, plans, events, self.config).run()
+        return _AgentSimRun(scenario, plans, events, self.params).run()
 
 
 def _next_tick(since: float, interval: float, after: float) -> float:
@@ -212,7 +212,7 @@ class _AgentSimRun(_TransitMixin):
     """
 
     def __init__(self, scenario: Scenario, plans: PlanBatch, events: EventsManager,
-                 cfg: AgentSimConfig):
+                 cfg: AgentSimParams):
         self.scenario = scenario
         self.plans = plans
         self.cfg = cfg

@@ -124,7 +124,7 @@ def test_link_travel_times_vector_matches_scalar():
     assert table.link_travel_times(1e9) == (4.0, 8.0, 12.0)  # after horizon: last bin
 
 
-# -- legs end on their activity's link (MATSim's routes; VERIFICATION_PLAN.md D3)
+# -- legs end on their activity's link (MATSim's routes; docs/design.md section 5)
 
 def side_entry():
     """Node h has two ways in: straight from a ('ah', 10 s) or via b ('ab'

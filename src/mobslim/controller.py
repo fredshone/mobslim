@@ -37,8 +37,9 @@ scorer's ``transit_weights`` is used if it has one
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Union
+from typing import Callable, Iterable, Optional, Sequence, Union
 
+from mobslim.attributes import PersonAttributes
 from mobslim.events import EventsManager
 from mobslim.listeners import (
     ControllerListener,
@@ -69,13 +70,15 @@ logger = logging.getLogger("mobslim")
 
 
 @dataclass(frozen=True)
-class ControllerConfig:
+class ControllerParams:
+    """Settings of the iteration loop itself (not of its components)."""
+
     iterations: int = 10  # number of mobsim runs
-    seed: int = 4711
+    seed: int = 4711  # MATSim's default random seed
     learning_rate: float = 1.0  # score averaging: new = (1-lr) * old + lr * observed
-    travel_time_bin_size: float = 900.0
-    travel_time_horizon: float = DEFAULT_HORIZON
-    output_dir: Optional[Union[str, Path]] = None
+    travel_time_bin_size: float = 900.0  # seconds per learned travel-time bin
+    travel_time_horizon: float = DEFAULT_HORIZON  # seconds covered by the travel-time table
+    output_dir: Optional[Union[str, Path]] = None  # None: write no files
     write_events_interval: int = 0  # with output_dir: every N iterations (0 = last only)
 
     def __post_init__(self):
@@ -87,17 +90,46 @@ class ControllerConfig:
 
 @dataclass
 class RunResult:
+    """What :meth:`Controller.run` returns."""
+
     scenario: Scenario  # final population with scored plans
     travel_time: TravelTimeTable  # learned in the last iteration
-    metrics: list[dict]
+    metrics: list[dict]  # one row per iteration (see mobslim.metrics.iteration_metrics)
 
     def metrics_frame(self):
+        """The metrics as a pandas DataFrame indexed by iteration."""
         import pandas as pd
 
         return pd.DataFrame(self.metrics).set_index("iteration")
 
 
 class Controller:
+    """Runs MATSim's co-evolutionary loop on a scenario.
+
+    Every component is optional and has a MATSim-like default (see the module
+    docstring). ``Controller(scenario).run()`` routes un-routed legs, then
+    repeats replan, simulate, score and learn travel times for
+    ``params.iterations`` iterations.
+
+    Args:
+        scenario: network, population, mode definitions and transit.
+        mobsim: executes the selected plans (default :class:`QSim`).
+        scorer: scores what happened (default :class:`CharyparNagelScorer`).
+        strategies: replanning strategies (default
+            :meth:`StrategyManager.default`).
+        runner: how replanning is executed (default :class:`VectorRunner`).
+        router_factory: ``(network, mode, travel_time) -> Router`` for
+            network modes (default: the Rust router if built, else Dijkstra).
+        transit_router_factory: ``(network, transit) -> transit router``
+            (default: RAPTOR with the scorer's pt utilities).
+        transit_weights: ``(attributes) -> one RaptorWeights or None per
+            person``: person-specific transit routing (default: from the
+            scorer, if it has ``transit_weights``).
+        listeners: :class:`ControllerListener` objects, hooked into each
+            stage of the loop.
+        params: loop settings (iterations, seed, output directory...).
+    """
+
     def __init__(
         self,
         scenario: Scenario,
@@ -107,10 +139,10 @@ class Controller:
         strategies: Optional[StrategyManager] = None,
         runner: Optional[ReplanningRunner] = None,
         router_factory: RouterFactory = default_router,
-        transit_router_factory=None,
-        transit_weights=None,
+        transit_router_factory: Optional[Callable] = None,
+        transit_weights: Optional[Callable[[PersonAttributes], Optional[Sequence]]] = None,
         listeners: Iterable[ControllerListener] = (),
-        config: ControllerConfig = ControllerConfig(),
+        params: ControllerParams = ControllerParams(),
     ):
         self.scenario = scenario
         self.mobsim = mobsim or QSim()
@@ -122,17 +154,26 @@ class Controller:
             transit_router_factory = self._transit_router_from_scoring(scenario, self.scorer)
         self.transit_router_factory = transit_router_factory
         self.transit_weights = transit_weights
-        self.config = config
+        self.params = params
         self.listeners: list[ControllerListener] = [ProgressLogger()]
-        if config.output_dir is not None:
-            self.listeners.append(MetricsCSVWriter(config.output_dir))
-            self.listeners.append(EventsXMLListener(config.output_dir, config.write_events_interval))
+        if params.output_dir is not None:
+            self.listeners.append(MetricsCSVWriter(params.output_dir))
+            self.listeners.append(EventsXMLListener(params.output_dir, params.write_events_interval))
         self.listeners.extend(listeners)
         self.metrics: list[dict] = []
 
     @classmethod
+    def _from_kwargs(cls, kwargs: dict, overrides: dict) -> "Controller":
+        """``overrides`` replace any keyword argument, except ``listeners``,
+        which are added to the config's own."""
+        listeners = [*kwargs.pop("listeners", ()), *overrides.pop("listeners", ())]
+        kwargs.update(overrides)
+        return cls(kwargs.pop("scenario"), listeners=listeners, **kwargs)
+
+    @classmethod
     def from_matsim_config(cls, path, *, strict: bool = False, **overrides) -> "Controller":
-        """A controller for a MATSim ``config.xml``.
+        """A controller for a MATSim ``config.xml`` (a path or a
+        :class:`~mobslim.config.MatsimConfig`).
 
         Reads the network, plans and transit it names (paths relative to the
         config file) and translates the ``controller``, ``qsim``/``hermes``,
@@ -140,7 +181,7 @@ class Controller:
         :mod:`mobslim.config.matsim`). Params mobslim cannot honour are
         logged as a warning, or raise :class:`UnsupportedConfigError` if
         ``strict``. ``overrides`` replace any ``Controller`` argument, e.g.
-        ``listeners=[...]`` or ``config=ControllerConfig(iterations=5)``.
+        ``params=ControllerParams(iterations=5)``; ``listeners`` are added.
         """
         from mobslim.config.matsim import (
             MatsimConfig,
@@ -155,36 +196,34 @@ class Controller:
                 raise UnsupportedConfigError(unsupported)
             logger.warning("MATSim config params mobslim cannot honour (ignored):\n  %s",
                            "\n  ".join(unsupported))
-        kwargs.update(overrides)
-        return cls(kwargs.pop("scenario"), **kwargs)
+        return cls._from_kwargs(kwargs, overrides)
 
     @classmethod
     def from_mobslim_config(cls, path, **overrides) -> "Controller":
-        """A controller for a mobslim YAML config (see
-        :mod:`mobslim.config.mobslim`): loads and checks it, reads the
-        inputs, prechecks them against it (raising one ``ConfigError`` that
-        lists every problem), and writes ``output_config.yaml`` at startup.
-        ``overrides`` replace any ``Controller`` argument; ``listeners`` are
-        added to the config's own."""
+        """A controller for a mobslim YAML config (a path or a
+        :class:`~mobslim.config.MobslimConfig`; see :mod:`mobslim.config.mobslim`).
+
+        Loads and checks it, reads the inputs, prechecks them against it
+        (raising one ``ConfigError`` that lists every problem), and writes
+        ``output_config.yaml`` at startup. ``overrides`` replace any
+        ``Controller`` argument, e.g. ``params=ControllerParams(iterations=5)``;
+        ``listeners`` are added to the config's own."""
         from mobslim.config.mobslim import MobslimConfig
 
         cfg = path if isinstance(path, MobslimConfig) else MobslimConfig.load(path)
-        kwargs = cfg.controller_kwargs()
-        listeners = [*kwargs.pop("listeners"), *overrides.pop("listeners", ())]
-        kwargs.update(overrides)
-        return cls(kwargs.pop("scenario"), listeners=listeners, **kwargs)
+        return cls._from_kwargs(cfg.controller_kwargs(), overrides)
 
     @staticmethod
     def _transit_router_from_scoring(scenario: Scenario, scorer):
         """The scorer's pt utilities (for the first transit passenger mode),
-        or RaptorConfig's defaults if the scorer has no ``ScoringParams``."""
+        or RaptorParams's defaults if the scorer has no ``ScoringParams``."""
         from mobslim.scoring import ScoringParams
 
         params = getattr(scorer, "params", None)
         if not isinstance(params, ScoringParams):
             return default_transit_router
         transit = scenario.transit
-        mode = transit.config.passenger_modes[0] if transit is not None else "pt"
+        mode = transit.params.passenger_modes[0] if transit is not None else "pt"
         return TransitRouterFactory.from_scoring(params, mode)
 
     def person_transit_weights(self, scenario: Scenario):
@@ -202,7 +241,7 @@ class Controller:
             from_scorer = getattr(self.scorer, "transit_weights", None)
             if from_scorer is None:
                 return None
-            weights = from_scorer(attributes, scenario.transit.config.passenger_modes[0])
+            weights = from_scorer(attributes, scenario.transit.params.passenger_modes[0])
         if weights is None:
             return None
         if not isinstance(weights, PersonRaptorWeights):
@@ -213,6 +252,7 @@ class Controller:
         return weights if weights.any else None
 
     def add_listener(self, listener: ControllerListener) -> ControllerListener:
+        """Add a listener after construction; returns it."""
         self.listeners.append(listener)
         return listener
 
@@ -221,7 +261,7 @@ class Controller:
             getattr(listener, hook)(arg)
 
     def free_speed_travel_time(self) -> TravelTimeTable:
-        c = self.config
+        c = self.params
         return TravelTimeTable.free_speed(self.scenario.network, c.travel_time_bin_size, c.travel_time_horizon)
 
     def prepare(self, scenario: Scenario) -> Scenario:
@@ -230,7 +270,9 @@ class Controller:
                               self.transit_router_factory, self.person_transit_weights(scenario))
 
     def run(self) -> RunResult:
-        cfg = self.config
+        """Run every iteration and return the final scenario, the last
+        learned travel times and the per-iteration metrics."""
+        cfg = self.params
         scenario = self.prepare(self.scenario)
         transit_weights = self.person_transit_weights(scenario)  # attributes never change
         travel_time = self.free_speed_travel_time()

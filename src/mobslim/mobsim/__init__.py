@@ -1,7 +1,7 @@
-from mobslim.mobsim.agentsim import AgentSim, AgentSimConfig
+from mobslim.mobsim.agentsim import AgentSim, AgentSimParams
 from mobslim.mobsim.base import Mobsim, SimulationError
-from mobslim.mobsim.hermes import HermesSim, HermesSimConfig
-from mobslim.mobsim.qsim import QSim, QSimConfig
+from mobslim.mobsim.hermes import HermesSim, HermesSimParams
+from mobslim.mobsim.qsim import QSim, QSimParams
 
-__all__ = ["AgentSim", "AgentSimConfig", "HermesSim", "HermesSimConfig", "Mobsim", "QSim",
-           "QSimConfig", "SimulationError"]
+__all__ = ["AgentSim", "AgentSimParams", "HermesSim", "HermesSimParams", "Mobsim", "QSim",
+           "QSimParams", "SimulationError"]

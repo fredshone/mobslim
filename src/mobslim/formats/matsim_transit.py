@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 from mobslim.network import Network
 from mobslim.timeutils import parse_time
-from mobslim.transit.core import Transit, TransitConfig
+from mobslim.transit.core import Transit, TransitParams
 from mobslim.transit.schedule import TransitSchedule, build_schedule
 from mobslim.transit.vehicles import TransitVehicles, build_vehicles
 
@@ -131,6 +131,6 @@ def _read_type(el) -> dict:
 
 
 def read_transit(schedule_path, vehicles_path, network: Network,
-                 config: TransitConfig = TransitConfig()) -> Transit:
+                 params: TransitParams = TransitParams()) -> Transit:
     return Transit(read_transit_schedule_xml(schedule_path, network),
-                   read_transit_vehicles_xml(vehicles_path), config)
+                   read_transit_vehicles_xml(vehicles_path), params)

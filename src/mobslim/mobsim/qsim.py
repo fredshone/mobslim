@@ -76,7 +76,7 @@ _LATE = 1 << 62  # sequence offset: after every ordinary event at the same time
 
 
 @dataclass(frozen=True)
-class QSimConfig:
+class QSimParams:
     flow_capacity_factor: float = 1.0
     storage_capacity_factor: float = 1.0
     stuck_time: float = 10.0
@@ -88,8 +88,8 @@ class QSimConfig:
 class QSim:
     """Queue-based mobsim. Stateless between runs; safe to reuse."""
 
-    def __init__(self, config: QSimConfig = QSimConfig()):
-        self.config = config
+    def __init__(self, params: QSimParams = QSimParams()):
+        self.params = params
 
     def run(self, scenario: Scenario, events: EventsManager) -> Trajectories:
         plans = scenario.population.selected_batch()
@@ -99,9 +99,9 @@ class QSim:
         """Run already-encoded plans (``plans`` row ``i`` = person index ``i``)."""
         if plans.n_plans != len(scenario.population):
             raise ValueError("PlanBatch must have one plan per person.")
-        if self.config.validate_routes:
+        if self.params.validate_routes:
             _validate(scenario, plans)
-        return _QSimRun(scenario, plans, events, self.config).run()
+        return _QSimRun(scenario, plans, events, self.params).run()
 
 
 class _Agent:
@@ -154,7 +154,7 @@ class _QSimRun:
     """State for a single mobsim run."""
 
     def __init__(self, scenario: Scenario, plans: PlanBatch, events: EventsManager,
-                 cfg: QSimConfig):
+                 cfg: QSimParams):
         self.scenario = scenario
         self.plans = plans
         self.cfg = cfg

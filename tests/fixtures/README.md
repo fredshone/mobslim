@@ -15,4 +15,4 @@ unchanged apart from the renames listed above.
 Sioux Falls 2014 (`examples/scenarios/siouxfalls-2014`: 2,040 bus departures
 on 10 lines, sharing `car,bus,pt` links with cars) is too large to commit. Its
 tests and benchmarks look for it in `$MOBSLIM_SIOUXFALLS` and are skipped if
-that is unset (see `TRANSIT_PLAN.md`).
+that is unset.

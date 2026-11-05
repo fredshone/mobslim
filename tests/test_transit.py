@@ -1,7 +1,7 @@
 """Behavioural spec for transit simulation, on small synthetic scenarios.
 
-The expected numbers follow from the rules in ``TRANSIT_PLAN.md`` section 7.1
-("Semantics"). Every scenario uses the same corridor so the arithmetic
+The expected numbers follow from the transit rules (this module is their
+specification; ``docs/design.md`` section 5 summarises them). Every scenario uses the same corridor so the arithmetic
 stays easy to check by hand:
 
     a ──100 m── 0 ──1000 m── 1 ──1000 m── 2 ──1000 m── 3 ──1000 m── 4
@@ -55,14 +55,14 @@ try:
         VehicleDepartsAtFacility,
     )
     from mobslim.transit import (
-        PtRoute,
-        RaptorConfig,
+        RaptorParams,
         RaptorRouter,
         TransitBuilder,
-        TransitConfig,
+        TransitParams,
+        TransitPassengerRoute,
     )
 except ImportError:  # pragma: no cover - until the transit API exists
-    pytest.skip("transit simulation is not implemented yet (TRANSIT_PLAN.md)",
+    pytest.skip("transit simulation is not implemented yet",
                 allow_module_level=True)
 
 H = 3600.0
@@ -116,7 +116,7 @@ def corridor_transit(net, *, vehicles="schedule", capacity=10, access=0.0, egres
     b.departures("L", "r", times=list(departures), vehicle_type="bus")
     if extra_routes:
         extra_routes(b)
-    return b.build(TransitConfig(vehicles=vehicles, walk=WALK, door_open_time=door_open,
+    return b.build(TransitParams(vehicles=vehicles, walk=WALK, door_open_time=door_open,
                                  door_close_time=door_close))
 
 
@@ -154,7 +154,7 @@ def rides_of(tr, person):
 
 
 def test_default_vehicle_mode_is_schedule():
-    assert TransitConfig().vehicles == "schedule"
+    assert TransitParams().vehicles == "schedule"
 
 
 def test_access_walk_starts_at_activity_coordinates():
@@ -172,8 +172,8 @@ def test_access_walk_starts_at_activity_coordinates():
 
 
 def test_teleport_from_activity_coordinates():
-    """Teleported legs (here walk) also run between activity coordinates
-    (TRANSIT_PLAN.md phase 2a): (0, 50) -> node 1 at (1000, 0), 1 m/s."""
+    """Teleported legs (here walk) also run between activity coordinates:
+    (0, 50) -> node 1 at (1000, 0), 1 m/s."""
     def population(net):
         plan = (Plan.builder().act("home", node(net, 0), end_time=25000.0, xy=(0.0, 50.0))
                 .leg("walk").act("work", node(net, 1)).build())
@@ -228,11 +228,11 @@ def test_plan_batch_encodes_rides_as_csr():
 
 
 def test_pt_route_is_packed_and_hashable():
-    a = PtRoute([(0, 3), (5, 7)], travel_time=100.0, distance=10.0)
+    a = TransitPassengerRoute([(0, 3), (5, 7)], travel_time=100.0, distance=10.0)
     assert a.rides == ((0, 3), (5, 7))
     assert a.n_rides == 2
     assert len(a.data) == 16  # two int32 pairs
-    assert a == PtRoute([(0, 3), (5, 7)], 100.0, 10.0) and hash(a) == hash(PtRoute(a.rides, 100.0, 10.0))
+    assert a == TransitPassengerRoute([(0, 3), (5, 7)], 100.0, 10.0) and hash(a) == hash(TransitPassengerRoute(a.rides, 100.0, 10.0))
 
 
 # ---------------------------------------------------------------- routing
@@ -266,7 +266,7 @@ def test_raptor_takes_the_transfer_when_it_is_faster():
 
 def test_raptor_line_switch_penalty_prefers_the_direct_line():
     scenario = transfer_scenario()
-    router = RaptorRouter(scenario.network, scenario.transit, RaptorConfig(line_switch=-1000.0))
+    router = RaptorRouter(scenario.network, scenario.transit, RaptorParams(line_switch=-1000.0))
     route = router.route(node(scenario.network, 0), node(scenario.network, 4), 25000.0)
     assert scenario.transit.schedule.describe_rides(route.rides) == [("C", "c", "S0", "S4")]
 
@@ -276,7 +276,7 @@ def test_raptor_min_transfer_time_can_force_the_later_connection():
     # 07:04 at S2 + 120 s misses B at 07:05; B at 07:15 still beats C (07:21)
     # (with the default line-switch penalty the later connection would lose to C)
     router = RaptorRouter(scenario.network, scenario.transit,
-                          RaptorConfig(min_transfer_time=120.0, line_switch=0.0))
+                          RaptorParams(min_transfer_time=120.0, line_switch=0.0))
     route = router.route(node(scenario.network, 0), node(scenario.network, 4), 25000.0)
     assert [r[0] for r in scenario.transit.schedule.describe_rides(route.rides)] == ["A", "B"]
     assert route.travel_time == pytest.approx(T0 + 1140 - 25000.0)
@@ -311,7 +311,7 @@ def test_route_many_equals_route():
 def test_prepare_routes_pt_legs():
     scenario = routed(pt_scenario(passengers(1, 0, 3)))
     leg = scenario.population[0].selected_plan.legs[0]
-    assert isinstance(leg.route, PtRoute)
+    assert isinstance(leg.route, TransitPassengerRoute)
     assert scenario.transit.schedule.describe_rides(leg.route.rides) == [("L", "r", "S0", "S3")]
 
 
@@ -416,7 +416,7 @@ def test_missed_last_departure_is_stuck(vehicles):
     net = corridor_network()
     transit = corridor_transit(net, vehicles=vehicles)
     s = transit.schedule
-    route = PtRoute([(s.route_stop("L", "r", "S0"), s.route_stop("L", "r", "S3"))], 360.0, 3000.0)
+    route = TransitPassengerRoute([(s.route_stop("L", "r", "S0"), s.route_stop("L", "r", "S3"))], 360.0, 3000.0)
     plan = (Plan.builder().act("home", node(net, 0), end_time=T0 + 1300).leg("pt", route=route)
             .act("work", node(net, 3)).build())
     log = EventLog()
@@ -587,7 +587,7 @@ def test_learn_from_transit_adds_vehicle_link_times_without_dwell():
     link, t_bin = net.link_index("0-1"), int(T0 // 900)
     off = run(scenario).travel_time_table(net).times[link, t_bin]
     assert off == pytest.approx(251.0, abs=tol())  # the car, held by the bus at S1
-    learn = replace(scenario.transit.config, learn_from_transit=True)
-    on = run(replace(scenario, transit=scenario.transit.with_config(learn)))
+    learn = replace(scenario.transit.params, learn_from_transit=True)
+    on = run(replace(scenario, transit=scenario.transit.with_params(learn)))
     # the bus: entered 0-1 at T0, left at T0 + 300, of which 200 s dwell
     assert on.travel_time_table(net).times[link, t_bin] == pytest.approx((off + 100.0) / 2)

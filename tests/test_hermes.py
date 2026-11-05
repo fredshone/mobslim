@@ -24,14 +24,14 @@ import pytest
 
 from mobslim import (
     Controller,
-    ControllerConfig,
+    ControllerParams,
     HermesSim,
-    HermesSimConfig,
+    HermesSimParams,
     NetworkBuilder,
     Plan,
     Population,
     QSim,
-    QSimConfig,
+    QSimParams,
     Scenario,
     grid_network,
     route_scenario,
@@ -158,8 +158,8 @@ def random_corridor(seed, vehicles, blocking, persons=120):
 def test_rust_matches_python(seed, flow, storage, stuck_time):
     scenario = random_grid(seed, integer_times=False, walkers=0.2)
     cfg = dict(flow_capacity_factor=flow, storage_capacity_factor=storage, stuck_time=stuck_time)
-    py = run(HermesSim(HermesSimConfig(backend="python", **cfg)), scenario)
-    rs = run(HermesSim(HermesSimConfig(backend="rust", **cfg)), scenario)
+    py = run(HermesSim(HermesSimParams(backend="python", **cfg)), scenario)
+    rs = run(HermesSim(HermesSimParams(backend="rust", **cfg)), scenario)
     assert_same(py, rs, f"seed={seed} flow={flow} storage={storage} stuck={stuck_time}")
 
 
@@ -168,8 +168,8 @@ def test_rust_matches_python(seed, flow, storage, stuck_time):
 def test_rust_matches_python_when_cut_off(end_time):
     scenario = random_grid(3, integer_times=False, walkers=0.2)
     cfg = dict(flow_capacity_factor=0.1, storage_capacity_factor=0.03, end_time=end_time)
-    py = run(HermesSim(HermesSimConfig(backend="python", **cfg)), scenario)
-    rs = run(HermesSim(HermesSimConfig(backend="rust", **cfg)), scenario)
+    py = run(HermesSim(HermesSimParams(backend="python", **cfg)), scenario)
+    rs = run(HermesSim(HermesSimParams(backend="rust", **cfg)), scenario)
     assert_same(py, rs, f"end_time={end_time}")
     assert py[0].stuck.any()
 
@@ -184,8 +184,8 @@ def test_rust_matches_python_far_in_the_future():
              .act("w", 2, duration=7).leg("walk").act("h", 0).build() for i in range(12)}
     scenario = routed(Scenario(net, Population.from_plans(plans)))
     cfg = dict(storage_capacity_factor=0.01, stuck_time=2e6)
-    py = run(HermesSim(HermesSimConfig(backend="python", **cfg)), scenario)
-    rs = run(HermesSim(HermesSimConfig(backend="rust", **cfg)), scenario)
+    py = run(HermesSim(HermesSimParams(backend="python", **cfg)), scenario)
+    rs = run(HermesSim(HermesSimParams(backend="rust", **cfg)), scenario)
     assert_same(py, rs)
     assert not py[0].stuck.any() and np.nanmin(py[0].leg_departure) == late
 
@@ -197,8 +197,8 @@ def test_rust_matches_python_far_in_the_future():
 def test_rust_matches_python_with_transit(seed, vehicles, blocking):
     scenario = random_corridor(seed, vehicles, blocking)
     cfg = dict(storage_capacity_factor=0.05, flow_capacity_factor=0.3)
-    py = run(HermesSim(HermesSimConfig(backend="python", **cfg)), scenario)
-    rs = run(HermesSim(HermesSimConfig(backend="rust", **cfg)), scenario)
+    py = run(HermesSim(HermesSimParams(backend="python", **cfg)), scenario)
+    rs = run(HermesSim(HermesSimParams(backend="rust", **cfg)), scenario)
     assert_same_transit(py, rs, f"seed={seed} vehicles={vehicles} blocking={blocking}")
     assert np.isfinite(py[0].ride_board).sum() > 50  # the riders rode
     assert (py[0].denied_boardings() > 0).any()  # and some were left behind
@@ -210,8 +210,8 @@ def test_rust_matches_python_on_pt_tutorial(vehicles):
     from tests.test_transit_scenarios import load
 
     scenario = route_scenario(load("pt_tutorial", vehicles))
-    py = run(HermesSim(HermesSimConfig(backend="python")), scenario)
-    rs = run(HermesSim(HermesSimConfig(backend="rust")), scenario)
+    py = run(HermesSim(HermesSimParams(backend="python")), scenario)
+    rs = run(HermesSim(HermesSimParams(backend="rust")), scenario)
     assert_same_transit(py, rs, vehicles)
     assert np.isfinite(py[0].ride_board).any()
 
@@ -227,8 +227,8 @@ def test_matches_qsim_with_whole_second_parameters(flow, storage, stuck_time):
     and whole-second activity times: the same moves in the same order."""
     scenario = random_grid(7, integer_times=True)
     cfg = dict(flow_capacity_factor=flow, storage_capacity_factor=storage, stuck_time=stuck_time)
-    q = run(QSim(QSimConfig(**cfg)), scenario)
-    h = run(HermesSim(HermesSimConfig(**cfg)), scenario)
+    q = run(QSim(QSimParams(**cfg)), scenario)
+    h = run(HermesSim(HermesSimParams(**cfg)), scenario)
     assert_same_up_to_float_noise(q, h, f"flow={flow} storage={storage} stuck={stuck_time}")
 
 
@@ -240,8 +240,8 @@ def test_close_to_qsim_with_fractional_parameters():
     scenario = random_grid(5, size=6, persons=900, capacity=600.0, integer_times=False)
     for flow, storage in CONGESTION:
         cfg = dict(flow_capacity_factor=flow, storage_capacity_factor=storage, stuck_time=math.inf)
-        q = QSim(QSimConfig(**cfg)).run(scenario, EventsManager())
-        h = HermesSim(HermesSimConfig(**cfg)).run(scenario, EventsManager())
+        q = QSim(QSimParams(**cfg)).run(scenario, EventsManager())
+        h = HermesSim(HermesSimParams(**cfg)).run(scenario, EventsManager())
         tq = np.nansum(q.leg_arrival - q.leg_departure)
         th = np.nansum(h.leg_arrival - h.leg_departure)
         assert th == pytest.approx(tq, rel=0.07), (flow, storage)
@@ -254,7 +254,7 @@ def test_close_to_qsim_with_fractional_parameters():
 @pytest.mark.parametrize("backend", ["python", pytest.param("rust", marks=needs_rust)])
 def test_free_speed_time_rounds_half_up(backend):
     net = chain_network([104, 105, 106], freespeed=10)  # 10.4, 10.5, 10.6 s
-    tr, events = run(HermesSim(HermesSimConfig(backend=backend)),
+    tr, events = run(HermesSim(HermesSimParams(backend=backend)),
                      routed(Scenario(net, commuters(1, 0, 3))))
     assert [e.time for e in events if isinstance(e, LinkEnter)] == [0, 10, 21]
     assert [e.time for e in events if isinstance(e, PersonArrival)] == [32]
@@ -265,7 +265,7 @@ def test_activity_ends_round_up(backend):
     net = chain_network([100], freespeed=10)
     plan = (Plan.builder().act("h", 0, end_time=100.2).leg("car")
             .act("w", 1, duration=4.5).leg("car").act("x", 1).build())
-    _, events = run(HermesSim(HermesSimConfig(backend=backend)),
+    _, events = run(HermesSim(HermesSimParams(backend=backend)),
                     routed(Scenario(net, Population.from_plans({"a": plan}))))
     assert [e.time for e in events if isinstance(e, ActivityEnd)] == [101, 111 + 5]
 
@@ -274,7 +274,7 @@ def test_activity_ends_round_up(backend):
 def test_teleport_time_rounds_half_up(backend):
     net = chain_network([1000])
     plan = Plan.builder().act("h", 0, end_time=0).leg("walk").act("w", 1).build()
-    tr, events = run(HermesSim(HermesSimConfig(backend=backend)),
+    tr, events = run(HermesSim(HermesSimParams(backend=backend)),
                      Scenario(net, Population.from_plans({"a": plan})))
     exact = 1300 / (3 / 3.6)  # beeline 1000 m * 1.3 at 3 km/h
     assert [e.time for e in events if isinstance(e, PersonArrival)] == [math.floor(exact + 0.5)]
@@ -283,7 +283,7 @@ def test_teleport_time_rounds_half_up(backend):
 
 def test_several_vehicles_leave_in_one_second():
     net = chain_network([100], freespeed=10, capacity=3 * 3600)  # 3 veh/s
-    tr, _ = run(HermesSim(HermesSimConfig()), routed(Scenario(net, commuters(9, 0, 1))))
+    tr, _ = run(HermesSim(HermesSimParams()), routed(Scenario(net, commuters(9, 0, 1))))
     # exact slots 10, 10.33, 10.67, 11, ...; each leaves at the first whole second at or after its slot
     assert tr.leg_arrival.tolist() == [10, 11, 11, 11, 12, 12, 12, 13, 13]
 
@@ -293,7 +293,7 @@ def test_several_vehicles_leave_in_one_second():
 
 def test_controller_learns_with_hermes(equil_scenario):
     result = Controller(equil_scenario, mobsim=HermesSim(),
-                        config=ControllerConfig(iterations=10)).run()
+                        params=ControllerParams(iterations=10)).run()
     m = result.metrics
     assert m[-1]["score_best"] > m[0]["score_executed"]
     assert m[-1]["car_travel_time"] < m[0]["car_travel_time"]
@@ -301,15 +301,15 @@ def test_controller_learns_with_hermes(equil_scenario):
 
 
 def test_backend_selection(monkeypatch):
-    assert HermesSim(HermesSimConfig(backend="python")).backend == "python"
+    assert HermesSim(HermesSimParams(backend="python")).backend == "python"
     expected = "rust" if hermes.rust_available() else "python"
     assert HermesSim().backend == expected
     with pytest.raises(ValueError, match="backend"):
-        HermesSimConfig(backend="java")
+        HermesSimParams(backend="java")
     monkeypatch.setattr(hermes, "_rust", None)
     assert HermesSim().backend == "python"
     with pytest.raises(ImportError, match="mobslim_hermes"):
-        HermesSim(HermesSimConfig(backend="rust"))
+        HermesSim(HermesSimParams(backend="rust"))
 
 
 def test_storage_never_exceeded_without_stuck_time():
@@ -321,7 +321,7 @@ def test_storage_never_exceeded_without_stuck_time():
         b.add_link(i, i, i + 1, 100, 10, 3600 if i < 2 else 60)  # last link: 1 veh/min
     net = b.build()
     scenario = routed(Scenario(net, commuters(40, 0, 3)))
-    cfg = HermesSimConfig(stuck_time=math.inf, storage_capacity_factor=0.3)
+    cfg = HermesSimParams(stuck_time=math.inf, storage_capacity_factor=0.3)
     _, events = run(HermesSim(cfg), scenario)
     storage = hermes.kernel_inputs(scenario, hermes.PlanBatch.from_plans(
         scenario.population.selected_plans()), cfg, 0)[0]["storage"]

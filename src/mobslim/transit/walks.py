@@ -4,7 +4,7 @@ A pt leg with rides ``r0 .. r1-1`` walks: to ride ``r0``'s board stop from
 the origin activity, between rides (alight stop of ``r - 1`` to board stop of
 ``r``), and from the last alight stop to the destination activity. A pt leg
 without rides walks from origin to destination. Walks are beeline between
-coordinates x ``TransitConfig.walk.beeline_distance_factor`` /
+coordinates x ``TransitParams.walk.beeline_distance_factor`` /
 ``speed``; distances include the factor, as for teleported legs.
 """
 
@@ -26,9 +26,9 @@ class PtWalks:
 
 def pt_walks(plans: PlanBatch, act_xy: np.ndarray, transit) -> PtWalks:
     """Walk times and distances of every pt leg's walks (``act_xy`` resolved)."""
-    s, walk = transit.schedule, transit.config.walk
+    s, walk = transit.schedule, transit.params.walk
     stop_xy = s.stop_xy
-    is_pt = plans.mode_legs(transit.config.passenger_modes)
+    is_pt = plans.mode_legs(transit.params.passenger_modes)
     origin = plans.leg_origin_act()
     ro = plans.ride_offsets
     board = plans.ride_board_stop.astype(np.int64)

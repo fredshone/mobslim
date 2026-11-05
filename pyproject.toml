@@ -6,6 +6,8 @@ authors = [
 ]
 description = "A modular, MATSim-inspired agent-based transport simulation for experiments."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "fastquadtree>=2.1.1",
@@ -16,6 +18,9 @@ dependencies = [
     "pandas>=2.3.1",
     "pyyaml>=6.0.3",
 ]
+
+[project.scripts]
+mobslim = "mobslim.cli:main"
 
 [project.optional-dependencies]
 parquet = [
@@ -28,7 +33,7 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 # minversion = "6.0"
-addopts = "-rav --strict-markers --nbmake --nbmake-kernel=mobslim --cov --cov-report=html --cov-config=pyproject.toml -m 'not high_mem' -p no:memray"
+addopts = "-rav --strict-markers --nbmake --cov --cov-report=html --cov-config=pyproject.toml -m 'not high_mem' -p no:memray"
 testpaths = ["tests", "demos"]
 filterwarnings = [
     # https://github.com/pytest-dev/pytest-xdist/issues/825
@@ -81,15 +86,20 @@ dev = [
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
 ]
-# the compiled HermesSim kernel and router; need cargo. `uv sync --no-group
-# rust` skips them (HermesSim and routing then fall back to Python)
+docs = [
+    "furo>=2025.12.19",
+    "myst-parser>=4",
+    "sphinx>=8",
+]
+# the compiled HermesSim kernel and routers; need cargo. Opt in with
+# `uv sync --group rust` (without them HermesSim and routing run in Python)
 rust = ["mobslim-hermes", "mobslim-router"]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
 
 [tool.uv]
-default-groups = ["dev", "rust"]
+default-groups = ["dev"]
 
 [tool.uv.sources]
 mobslim-hermes = { path = "rust/mobslim-hermes" }

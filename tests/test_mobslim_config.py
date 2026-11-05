@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import yaml
 
-from mobslim import Controller, ControllerConfig
+from mobslim import Controller, ControllerParams
 from mobslim.attributes import PersonAttributes
 from mobslim.config.__main__ import main as cli
 from mobslim.config.conditions import (
@@ -295,9 +295,9 @@ def test_matsim_config_and_translation_run_identically(name, tmp_path):
     cfg = MatsimConfig.load(FIXTURES / "matsim_reference" / name / "config.xml")
     raw, unsupported = matsim_to_mobslim(cfg)
     assert unsupported == []
-    cc = ControllerConfig(iterations=3, seed=11, output_dir=None)
-    a = Controller.from_matsim_config(cfg, config=cc).run()
-    b = Controller.from_mobslim_config(MobslimConfig.from_dict(raw, tmp_path), config=cc).run()
+    cc = ControllerParams(iterations=3, seed=11, output_dir=None)
+    a = Controller.from_matsim_config(cfg, params=cc).run()
+    b = Controller.from_mobslim_config(MobslimConfig.from_dict(raw, tmp_path), params=cc).run()
     assert a.metrics == b.metrics
     np.testing.assert_array_equal(a.scenario.population.scores, b.scenario.population.scores)
 

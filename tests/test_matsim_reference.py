@@ -2,7 +2,7 @@
 
 ``tests/fixtures/matsim_reference/<case>/`` holds MATSim's iteration-0 events
 and plans and the inputs mobslim reads; ``python -m verification freeze``
-writes them (see ``verification/freeze.py``, ``VERIFICATION_PLAN.md``).
+writes them (see ``verification/freeze.py`` and ``verification/README.md``).
 
 * Layer 1: mobslim's scorer, on MATSim's events, gives MATSim's scores exactly.
 * Layer 2: the QSim and HermesSim, on MATSim's plans and routes, are no further

@@ -12,8 +12,10 @@ VEHICLE_MODES = ("schedule", "network")
 
 
 @dataclass(frozen=True)
-class TransitConfig:
-    """How transit is simulated (see ``TRANSIT_PLAN.md`` section 4.3)."""
+class TransitParams:
+    """How transit is simulated: passenger modes, vehicles on the timetable
+    (``"schedule"``) or in the queue network (``"network"``), access/egress walks,
+    door times, and whether transit vehicles feed the learned link travel times."""
 
     passenger_modes: tuple[str, ...] = ("pt",)
     vehicles: str = "schedule"  # or "network"
@@ -24,17 +26,17 @@ class TransitConfig:
 
     def __post_init__(self):
         if self.vehicles not in VEHICLE_MODES:
-            raise ValueError(f"TransitConfig.vehicles must be one of {VEHICLE_MODES}.")
+            raise ValueError(f"TransitParams.vehicles must be one of {VEHICLE_MODES}.")
         object.__setattr__(self, "passenger_modes", tuple(self.passenger_modes))
 
 
 @dataclass(frozen=True, eq=False)
 class Transit:
-    """Schedule + vehicles + config. ``dep_type`` is each trip's vehicle type."""
+    """Schedule + vehicles + params. ``dep_type`` is each trip's vehicle type."""
 
     schedule: TransitSchedule
     vehicles: TransitVehicles
-    config: TransitConfig = TransitConfig()
+    params: TransitParams = TransitParams()
     dep_type: np.ndarray = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -57,5 +59,5 @@ class Transit:
     def vehicle_id(self, trip: int):
         return self.schedule.vehicle_ids.id(int(self.schedule.dep_vehicle[trip]))
 
-    def with_config(self, config: TransitConfig) -> "Transit":
-        return Transit(self.schedule, self.vehicles, config)
+    def with_params(self, params: TransitParams) -> "Transit":
+        return Transit(self.schedule, self.vehicles, params)

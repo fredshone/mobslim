@@ -17,7 +17,7 @@
 
 	<module name="transit">
 		<param name="useTransit" value="true" />
-		<param name="transitScheduleFile" value="transitschedule.xml" />
+		<param name="transitScheduleFile" value="transitSchedule.xml" />
 		<param name="vehiclesFile" value="transitVehicles.xml" />
 		<param name="transitModes" value="pt" />
 	</module>

@@ -8,12 +8,12 @@ from mobslim.replanning import (
     ChangeExpBetaSelector,
     ChangeTripMode,
     ExpBetaSelector,
-    KeepSelected,
+    KeepSelectedSelector,
     PlanStrategy,
     ProcessPoolRunner,
-    RandomPlanSelector,
+    RandomSelector,
     ReplanningContext,
-    ReRoute,
+    Reroute,
     SerialRunner,
     StrategyManager,
     TimeAllocationMutator,
@@ -44,8 +44,8 @@ def test_selectors():
     p = scored_person(1.0, 5.0, 3.0)
     assert BestScoreSelector().select(p, rng) == 1
     assert WorstScoreSelector().select(p, rng) == 0
-    assert KeepSelected().select(p, rng) == 0
-    assert RandomPlanSelector().select(scored_person(1.0, None), rng) == 1  # unscored first
+    assert KeepSelectedSelector().select(p, rng) == 0
+    assert RandomSelector().select(scored_person(1.0, None), rng) == 1  # unscored first
     picks = [ExpBetaSelector(beta=100).select(p, rng) for _ in range(20)]
     assert set(picks) == {1}
 
@@ -60,7 +60,7 @@ def test_change_exp_beta():
 
 def test_reroute(equil_scenario, ctx):
     plan = equil_scenario.population[0].selected_plan
-    new = ReRoute().mutate(plan, ctx, Random(0))
+    new = Reroute().mutate(plan, ctx, Random(0))
     assert plan.legs[0].route is None  # input untouched
     assert all(leg.route is not None for leg in new.legs)
     assert new.legs[1].route.links == ()  # work -> work at the same node
@@ -75,17 +75,17 @@ def test_time_allocation_mutator(equil_scenario, ctx):
 
 
 def test_change_trip_mode(equil_scenario, ctx):
-    plan = ReRoute().mutate(equil_scenario.population[0].selected_plan, ctx, Random(0))
+    plan = Reroute().mutate(equil_scenario.population[0].selected_plan, ctx, Random(0))
     new = ChangeTripMode(["car", "walk"]).mutate(plan, ctx, Random(0))
     assert {leg.mode for leg in new.legs} == {"walk"}
-    rerouted = ReRoute().mutate(new, ctx, Random(0))
+    rerouted = Reroute().mutate(new, ctx, Random(0))
     assert all(leg.route is None for leg in rerouted.legs)  # teleported
 
 
 def test_innovative_strategy_adds_unscored_selected_plan(ctx, equil_scenario):
     person = routed(equil_scenario).population[0]
     person = person.with_selected_score(1.0)
-    out = PlanStrategy(KeepSelected(), [TimeAllocationMutator()]).apply(person, ctx, Random(0))
+    out = PlanStrategy(KeepSelectedSelector(), [TimeAllocationMutator()]).apply(person, ctx, Random(0))
     assert len(out.plans) == 2 and out.selected == 1 and out.scores == (1.0, None)
     assert len(person.plans) == 1  # pure
 
@@ -93,7 +93,7 @@ def test_innovative_strategy_adds_unscored_selected_plan(ctx, equil_scenario):
 def test_strategy_manager_respects_memory_limit(ctx, equil_scenario):
     person = routed(equil_scenario).population[0]
     person = person.with_selected_score(-1.0)
-    manager = StrategyManager([(1.0, PlanStrategy(RandomPlanSelector(), [TimeAllocationMutator()]))], max_plans=3)
+    manager = StrategyManager([(1.0, PlanStrategy(RandomSelector(), [TimeAllocationMutator()]))], max_plans=3)
     for i in range(10):
         person = manager.replan(person, ctx, Random(i))
         person = person.with_selected_score(float(i))
@@ -133,7 +133,7 @@ def test_parallel_runner_picks_up_a_new_context_each_call(equil_scenario):
     sc = Scenario(scenario.network, pop)
     free = TravelTimeTable.free_speed(scenario.network)
     slow = TravelTimeTable(free.times * 3, free.bin_size)
-    manager = StrategyManager([(1.0, PlanStrategy(RandomPlanSelector(), [ReRoute()]))])
+    manager = StrategyManager([(1.0, PlanStrategy(RandomSelector(), [Reroute()]))])
     with ProcessPoolRunner(workers=2, chunks_per_worker=1) as runner:
         for it, table in ((1, free), (2, slow)):
             ctx = ReplanningContext.from_scenario(sc, table, iteration=it)
@@ -147,7 +147,7 @@ def test_strategy_manager_is_immutable_and_validates():
     manager = StrategyManager.default()
     with pytest.raises(dataclasses.FrozenInstanceError):
         manager.max_plans = 2
-    only_innovative = StrategyManager([(1.0, PlanStrategy(RandomPlanSelector(), [ReRoute()]))],
+    only_innovative = StrategyManager([(1.0, PlanStrategy(RandomSelector(), [Reroute()]))],
                                       disable_innovation_at=1)
     with pytest.raises(ValueError):
         only_innovative.choose(1, Random(0))

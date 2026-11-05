@@ -5,19 +5,19 @@ aligned with the executed :class:`~mobslim.planbatch.PlanBatch`: one value
 per activity, per leg and per route link. ``NaN`` means "did not happen"
 (e.g. an activity never reached because the person got stuck).
 
-==============  ==========  ==================================================
-act_start       per act     activity start (``NaN`` for each plan's first)
-act_end         per act     activity end (``NaN`` for the last, or if stuck)
-leg_departure   per leg     departure time
-leg_arrival     per leg     arrival time (``NaN`` if stuck on the way)
-leg_distance    per leg     entered link lengths, or the teleport distance
-link_enter      per link    time the route link was entered
-stuck           per plan    the person did not finish their plan
-ride_wait_start per ride    pt: reached the board stop (``NaN`` = never)
-ride_board      per ride    pt: boarded
-ride_alight     per ride    pt: alighted
-ride_trip       per ride    pt: departure boarded (-1 = none)
-==============  ==========  ==================================================
+===============  ========  ================================================
+act_start        per act   activity start (``NaN`` for each plan's first)
+act_end          per act   activity end (``NaN`` for the last, or if stuck)
+leg_departure    per leg   departure time
+leg_arrival      per leg   arrival time (``NaN`` if stuck on the way)
+leg_distance     per leg   entered link lengths, or the teleport distance
+link_enter       per link  time the route link was entered
+stuck            per plan  the person did not finish their plan
+ride_wait_start  per ride  pt: reached the board stop (``NaN`` = never)
+ride_board       per ride  pt: boarded
+ride_alight      per ride  pt: alighted
+ride_trip        per ride  pt: departure boarded (-1 = none)
+===============  ========  ================================================
 
 With transit, ``transit`` (:class:`TransitTrajectories`) holds the
 vehicles' times at their stops (and, in network mode, their link entries).
@@ -211,7 +211,7 @@ class Trajectories:
         if transit is not None:
             from mobslim.transit.walks import pt_walks
 
-            transit_modes = frozenset(transit.config.passenger_modes)
+            transit_modes = frozenset(transit.params.passenger_modes)
             rides = dict(
                 ride_wait_start=np.asarray(ride_wait_start, dtype=float),
                 ride_board=np.asarray(ride_board, dtype=float),
@@ -316,7 +316,7 @@ class Trajectories:
         enter = self.link_enter[entered]
         leave = self.link_leave()[entered]
         tt = self.transit
-        if tt is not None and tt.transit.config.learn_from_transit:
+        if tt is not None and tt.transit.params.learn_from_transit:
             v_links, v_enter, v_leave = tt.link_traversals()
             links = np.concatenate([links, v_links])
             enter = np.concatenate([enter, v_enter])
@@ -495,7 +495,7 @@ class TrajectoryCollector(EventHandler):
     def _transit_kwargs(self) -> dict:
         if self.transit is None:
             return {}
-        modes = self.transit.config.passenger_modes
+        modes = self.transit.params.passenger_modes
         return dict(network_modes=self.network.modes - frozenset(modes), transit=self.transit,
                     ride_wait_start=self._rw, ride_board=self._rb, ride_alight=self._ra,
                     ride_trip=self._rt, stop_arrival=self._stop_arr,

@@ -15,9 +15,9 @@ from mobslim.population import Leg
 from mobslim.replanning import (
     ChangeTripMode,
     PlanStrategy,
-    RandomPlanSelector,
+    RandomSelector,
     ReplanningContext,
-    ReRoute,
+    Reroute,
     SerialRunner,
     StrategyManager,
     TimeAllocationMutator,
@@ -246,10 +246,10 @@ def test_route_plans_equals_rerouting_plan_by_plan(equil_ctx, router):
         if k % 3 == 0 and len(p.elements) > 3 else p
         for k, p in enumerate(plans)
     ]
-    cleared = [ReRoute().mutate(p, ctx.batched(), None) for p in mixed]
+    cleared = [Reroute().mutate(p, ctx.batched(), None) for p in mixed]
     assert all(leg.route is None for p in cleared for leg in p.legs)
     batched = route_plans(cleared, ctx)
-    assert batched == [ReRoute().mutate(p, reference, None) for p in mixed]
+    assert batched == [Reroute().mutate(p, reference, None) for p in mixed]
 
 
 def test_route_plans_returns_routed_plans_unchanged(equil_ctx):
@@ -261,10 +261,10 @@ def test_route_plans_returns_routed_plans_unchanged(equil_ctx):
 
 def mixed_manager():
     return StrategyManager([
-        (0.4, PlanStrategy(RandomPlanSelector())),
-        (0.2, PlanStrategy(RandomPlanSelector(), [ReRoute()])),
-        (0.2, PlanStrategy(RandomPlanSelector(), [TimeAllocationMutator(), ReRoute()])),
-        (0.2, PlanStrategy(RandomPlanSelector(), [ChangeTripMode(["car", "walk"]), ReRoute()])),
+        (0.4, PlanStrategy(RandomSelector())),
+        (0.2, PlanStrategy(RandomSelector(), [Reroute()])),
+        (0.2, PlanStrategy(RandomSelector(), [TimeAllocationMutator(), Reroute()])),
+        (0.2, PlanStrategy(RandomSelector(), [ChangeTripMode(["car", "walk"]), Reroute()])),
     ])
 
 

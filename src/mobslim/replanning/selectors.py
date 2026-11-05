@@ -51,7 +51,7 @@ def _first_unscored(person: Person) -> Optional[int]:
     return None
 
 
-class KeepSelected:
+class KeepSelectedSelector:
     """Keep the currently selected plan."""
 
     def select(self, person: Person, rng: Random) -> int:
@@ -74,7 +74,7 @@ class BestScoreSelector:
         return np.where(first >= 0, first, best)
 
 
-class RandomPlanSelector:
+class RandomSelector:
     def select(self, person: Person, rng: Random) -> int:
         unscored = _first_unscored(person)
         if unscored is not None:
