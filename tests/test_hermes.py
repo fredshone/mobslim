@@ -217,6 +217,48 @@ def test_rust_matches_python_on_pt_tutorial(vehicles):
 
 
 
+@pytest.mark.parametrize("timing", TIMINGS_TRANSIT := [
+    dict(junction_delays=j, rounding=r) for j in (False, True) for r in ("nearest", "down")])
+@pytest.mark.parametrize("vehicles,blocking", [("schedule", False), ("network", False),
+                                               ("network", True)])
+def test_transit_with_timing_options(timing, vehicles, blocking):
+    """With every junction-delay and rounding setting, transit in the QSim
+    with ``continuous_time=False`` equals HermesSim's (Python and Rust
+    kernels) move for move, under congestion too."""
+    scenario = random_corridor(4, vehicles, blocking)
+    cfg = dict(storage_capacity_factor=0.05, flow_capacity_factor=0.3, **timing)
+    label = f"{timing} vehicles={vehicles} blocking={blocking}"
+    py = run(HermesSim(HermesSimParams(backend="python", **cfg)), scenario)
+    q = run(QSim(QSimParams(continuous_time=False, **cfg)), scenario)
+    assert_same_transit(q, py, label)
+    if hermes.rust_available():
+        rs = run(HermesSim(HermesSimParams(backend="rust", **cfg)), scenario)
+        assert_same_transit(py, rs, label)
+    assert np.isfinite(py[0].ride_board).sum() > 50
+
+
+@pytest.mark.parametrize("timing", [dict(), dict(junction_delays=True, rounding="down")])
+def test_mixed_timetable_and_traffic_transit(timing):
+    """Rail lines on the timetable (``schedule_modes``) and bus lines in
+    traffic in one run: the whole-second QSim equals HermesSim (both
+    kernels), and AgentSim equals the QSim (no spillback)."""
+    from mobslim import AgentSim, AgentSimParams
+    from tests.conftest import transit_grid
+
+    scenario = transit_grid(2, rail=True)
+    assert 0 < scenario.transit.trip_on_network.mean() < 1
+    py = run(HermesSim(HermesSimParams(backend="python", **timing)), scenario)
+    q = run(QSim(QSimParams(continuous_time=False, **timing)), scenario)
+    assert_same_transit(q, py, str(timing))
+    if hermes.rust_available():
+        assert_same_transit(py, run(HermesSim(HermesSimParams(backend="rust", **timing)), scenario))
+    big = dict(storage_capacity_factor=1e6, **timing)  # trajectories only: AgentSim
+    a, _ = run(AgentSim(AgentSimParams(continuous_time=False, **big)), scenario)  # orders
+    q, _ = run(QSim(QSimParams(continuous_time=False, **big)), scenario)  # same-second events
+    assert_same_transit((q, []), (a, []))  # its own way
+    assert np.isfinite(py[0].ride_board).sum() > 400
+
+
 # ------------------------------------------------- == QSim on whole seconds
 
 
@@ -230,6 +272,47 @@ def test_matches_qsim_with_whole_second_parameters(flow, storage, stuck_time):
     q = run(QSim(QSimParams(**cfg)), scenario)
     h = run(HermesSim(HermesSimParams(**cfg)), scenario)
     assert_same_up_to_float_noise(q, h, f"flow={flow} storage={storage} stuck={stuck_time}")
+
+
+TIMINGS = [dict(junction_delays=j, rounding=r) for j in (False, True) for r in ("nearest", "down")]
+
+
+@needs_rust
+@pytest.mark.parametrize("timing", TIMINGS)
+@pytest.mark.parametrize("flow,storage", CONGESTION)
+def test_rust_matches_python_with_timing_options(timing, flow, storage):
+    scenario = random_grid(3, integer_times=False, walkers=0.2)
+    cfg = dict(flow_capacity_factor=flow, storage_capacity_factor=storage, stuck_time=30.0, **timing)
+    py = run(HermesSim(HermesSimParams(backend="python", **cfg)), scenario)
+    rs = run(HermesSim(HermesSimParams(backend="rust", **cfg)), scenario)
+    assert_same(py, rs, f"{timing} flow={flow}")
+
+
+@pytest.mark.parametrize("timing", TIMINGS)
+@pytest.mark.parametrize("flow,storage", CONGESTION)
+@pytest.mark.parametrize("stuck_time", [math.inf, 2.5])
+def test_whole_second_qsim_is_hermes(timing, flow, storage, stuck_time):
+    """With continuous_time=False the QSim follows HermesSim's rules, so it
+    makes the same moves in the same order, even with fractional road
+    times, headways, activity times and stuck times."""
+    scenario = random_grid(4, integer_times=False, walkers=0.2)
+    cfg = dict(flow_capacity_factor=flow, storage_capacity_factor=storage, stuck_time=stuck_time,
+               **timing)
+    q = run(QSim(QSimParams(continuous_time=False, **cfg)), scenario)
+    h = run(HermesSim(HermesSimParams(backend="python", **cfg)), scenario)
+    assert_same(q, h, f"{timing} flow={flow} stuck={stuck_time}")
+
+
+@pytest.mark.parametrize("timing", TIMINGS)
+def test_whole_second_agentsim_is_hermes_without_spillback(timing):
+    """AgentSim polls blocked vehicles, so it only equals HermesSim when no
+    link fills up."""
+    from mobslim import AgentSim, AgentSimParams
+
+    scenario = random_grid(4, integer_times=False, walkers=0.2)
+    a = run(AgentSim(AgentSimParams(continuous_time=False, **timing)), scenario)
+    h = run(HermesSim(HermesSimParams(backend="python", **timing)), scenario)
+    assert_same(a, h, str(timing))
 
 
 def test_close_to_qsim_with_fractional_parameters():

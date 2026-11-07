@@ -56,6 +56,7 @@ from mobslim.replanning.context import (
     TransitRouterFactory,
     default_transit_router,
 )
+from mobslim.activity_links import ActivityLinkParams
 from mobslim.replanning.prepare import route_scenario
 from mobslim.replanning.runners import ReplanningRunner
 from mobslim.replanning.strategy import StrategyManager
@@ -80,6 +81,9 @@ class ControllerParams:
     travel_time_horizon: float = DEFAULT_HORIZON  # seconds covered by the travel-time table
     output_dir: Optional[Union[str, Path]] = None  # None: write no files
     write_events_interval: int = 0  # with output_dir: every N iterations (0 = last only)
+    # how activities without a link are assigned one before the first
+    # iteration (None: they keep reaching their node by any link)
+    activity_links: Optional[ActivityLinkParams] = ActivityLinkParams()
 
     def __post_init__(self):
         if self.iterations < 1:
@@ -265,9 +269,11 @@ class Controller:
         return TravelTimeTable.free_speed(self.scenario.network, c.travel_time_bin_size, c.travel_time_horizon)
 
     def prepare(self, scenario: Scenario) -> Scenario:
-        """Validate modes and route any un-routed network (free speed) and pt legs."""
+        """Validate modes, assign activities to links (``params.activity_links``)
+        and route any un-routed network (free speed) and pt legs."""
         return route_scenario(scenario, self.free_speed_travel_time(), self.router_factory,
-                              self.transit_router_factory, self.person_transit_weights(scenario))
+                              self.transit_router_factory, self.person_transit_weights(scenario),
+                              self.params.activity_links)
 
     def run(self) -> RunResult:
         """Run every iteration and return the final scenario, the last

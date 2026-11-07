@@ -26,7 +26,8 @@ number of moves, not to ``agents x seconds``.
 
 Legs whose mode is not a network mode are teleported. With
 ``scenario.transit``, pt legs ride scheduled vehicles that run on the
-timetable or in the queue model (see :mod:`mobslim.mobsim._transit`).
+timetable or in the queue model (see :mod:`mobslim.mobsim._transit`), with
+every timing setting (see :mod:`mobslim.mobsim._transit_tables`).
 Vehicles take ``pce`` units of storage and flow (cars 1).
 
 Data in and out are arrays. The QSim encodes the selected plans once per run
@@ -56,8 +57,14 @@ from mobslim.events import (
     Teleportation,
 )
 from mobslim.mobsim._common import EPS as _EPS
+from mobslim.mobsim._common import (
+    ceil_step,
+    check_timing,
+    link_parameters,
+    planned_end,
+    round_steps,
+)
 from mobslim.mobsim._common import fire as _fire
-from mobslim.mobsim._common import link_parameters, planned_end
 from mobslim.mobsim._common import none_if_nan as _none_if_nan
 from mobslim.mobsim._common import validate as _validate
 from mobslim.mobsim._transit import _TransitRun
@@ -72,6 +79,7 @@ _FORCE_LEAVE = 2
 _TRY_DEPART = 3
 _FORCE_DEPART = 4
 _TELEPORT_ARRIVE = 5
+_ACT_START = 6  # an activity starting after a junction delay
 _LATE = 1 << 62  # sequence offset: after every ordinary event at the same time
 
 
@@ -83,6 +91,15 @@ class QSimParams:
     effective_cell_size: float = 7.5  # meters per vehicle (PCU)
     end_time: Optional[float] = None  # None: run until every plan is done
     validate_routes: bool = True
+    # timing (see mobslim.mobsim._common.check_timing). Whole seconds give
+    # HermesSim's rules (and, with the same timing, HermesSim's results)
+    continuous_time: bool = True
+    junction_delays: bool = False
+    rounding: str = "nearest"
+
+    def __post_init__(self):
+        check_timing("QSim", self.continuous_time, self.junction_delays, self.rounding,
+                     continuous=True, whole=True)
 
 
 class QSim:
@@ -176,6 +193,14 @@ class _QSimRun:
         free_time, headway, storage = link_parameters(
             net, cfg.flow_capacity_factor, cfg.storage_capacity_factor, cfg.effective_cell_size
         )
+        # whole seconds: HermesSim's rules (rounded road and teleport times,
+        # activity ends and forced moves at the next whole second, exits at
+        # the first whole second at or after the next flow slot)
+        self.whole = not cfg.continuous_time
+        if self.whole:
+            free_time = round_steps(free_time, cfg.rounding).astype(float).tolist()
+        self.free_time = free_time
+        self.junction = 1.0 if cfg.junction_delays else 0.0
         self.links = [_Link(i, free_time[i], headway[i], storage[i]) for i in range(net.n_links)]
 
         # plan arrays as Python lists: element access from Python is several
@@ -218,11 +243,18 @@ class _QSimRun:
 
     def _schedule_stuck(self, kind: int, obj) -> None:
         if math.isfinite(self.cfg.stuck_time):  # inf: never force (gridlock possible)
-            self.schedule(self.now + self.cfg.stuck_time, kind, obj)
+            t = self.now + self.cfg.stuck_time
+            self.schedule(float(ceil_step(t)) if self.whole else t, kind, obj)
 
     def _planned_end(self, act: int, start: float) -> Optional[float]:
         """MATSim's ``tryEndTimeThenDuration`` (see ``Activity.planned_end``)."""
-        return planned_end(self.act_end_time[act], self.act_duration[act], start)
+        t = planned_end(self.act_end_time[act], self.act_duration[act], start)
+        return float(ceil_step(t)) if self.whole and t is not None else t
+
+    def _flow_slot(self, link: _Link) -> float:
+        """When the head may leave as far as flow capacity goes."""
+        nft = link.next_flow_time
+        return float(ceil_step(nft)) if self.whole else nft
 
     # -- main loop ----------------------------------------------------------
     def run(self) -> Trajectories:
@@ -240,6 +272,7 @@ class _QSimRun:
             _TRY_DEPART: self._try_depart_event,
             _FORCE_DEPART: self._force_depart,
             _TELEPORT_ARRIVE: self._teleport_arrive,
+            _ACT_START: self._start_activity,
         }
         if self.transit is not None:
             handlers.update(self.transit.handlers())
@@ -250,7 +283,7 @@ class _QSimRun:
             handlers[kind](obj)
 
         if end_time is not None:
-            self.now = max(self.now, end_time)
+            self.now = max(self.now, float(end_time))
         self._abort_unfinished()
         return Trajectories.build(
             self.plans, self.scenario.network,
@@ -315,6 +348,8 @@ class _QSimRun:
                 self.leg_mode[leg], self.act_xy[a], self.act_xy[a + 1], self.leg_fixed_time[leg],
                 agent.index,
             )
+            if self.whole:
+                tt = float(round_steps(tt, self.cfg.rounding))
             self.schedule(self.now + tt, _TELEPORT_ARRIVE, agent)
 
     def _teleport_arrive(self, agent: _Agent) -> None:
@@ -335,7 +370,10 @@ class _QSimRun:
                 self.now, agent.index, self.leg_mode[leg], self.act_node[agent.act + 1]))
         agent.leg = None
         agent.act += 1
-        self._start_activity(agent)
+        if self.junction:  # the activity starts one second later
+            self.schedule(self.now + self.junction, _ACT_START, agent)
+        else:
+            self._start_activity(agent)
 
     # departure: entering the first link of the route
     def _try_depart_event(self, agent: _Agent) -> None:
@@ -382,6 +420,8 @@ class _QSimRun:
             if self.on_enter:
                 _fire(self.on_enter, LinkEnter(self.now, agent.index, link.index))
             earliest = self.now + link.free_time
+            if agent.rpos + 1 < agent.rend:  # crosses a junction after it
+                earliest += self.junction
         agent.link = link.index
         link.occupied += agent.pce
         link.queue.append((agent, earliest))
@@ -393,8 +433,9 @@ class _QSimRun:
         next flow slot unless it is a transit vehicle about to serve a stop."""
         agent, earliest = link.queue[0]
         if agent.is_trip and self.transit.has_stop_here(agent):
-            return max(earliest, self.now)  # it may have queued past its earliest exit
-        return max(earliest, link.next_flow_time)
+            # it may have queued past the time it reaches the stop
+            return max(self.transit.reach_time(agent, earliest), self.now)
+        return max(earliest, self._flow_slot(link))
 
     def _schedule_link(self, link: _Link, time: float) -> None:
         """Ensure exactly one pending try-leave at or before ``time``."""
@@ -419,7 +460,7 @@ class _QSimRun:
         agent, earliest = link.queue[0]
         if agent.is_trip and self.transit.at_link_end(agent, link, earliest):
             return
-        ready = max(earliest, link.next_flow_time)
+        ready = max(earliest, self._flow_slot(link))
         if self.now < ready - _EPS:
             self._schedule_link(link, ready)
             return
@@ -448,14 +489,20 @@ class _QSimRun:
             nxt.waiters.appendleft(token) if was_blocked else nxt.waiters.append(token)
 
     def _pop_head(self, link: _Link) -> None:
-        agent, _ = link.queue.popleft()
+        agent, earliest = link.queue[0]
+        base = self.now
+        if self.whole:  # as HermesSim: no drift from fractional headways
+            nft = link.next_flow_time
+            if self.now == max(earliest, ceil_step(nft)):
+                base = earliest if earliest > nft else nft
+        link.queue.popleft()
         if agent.is_trip:
             self.transit.link_leave(agent, link.index)
         elif self.on_leave:
             _fire(self.on_leave, LinkLeave(self.now, agent.index, link.index))
         agent.link = None
         link.occupied -= agent.pce
-        link.next_flow_time = self.now + link.headway * agent.pce
+        link.next_flow_time = base + link.headway * agent.pce
         link.blocked_since = None
         link.waiting_on = None
         if link.queue:

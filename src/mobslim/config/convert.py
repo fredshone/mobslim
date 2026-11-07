@@ -29,6 +29,7 @@ from mobslim.config.matsim import (
     _params,
     _qsim_params,
     controller_params,
+    deterministic_modes,
     scoring_params_by_subpopulation,
     teleported_modes,
 )
@@ -195,7 +196,8 @@ def matsim_to_mobslim(cfg: MatsimConfig, attribute_names=None) -> tuple[dict, li
         out["transit"] = {"schedule": path("transit", "transitScheduleFile"),
                           "vehicles": path("transit", "vehiclesFile"),
                           "passenger_modes": (cfg.get("transit", "transitModes") or "pt").split(","),
-                          "vehicles_on": "network"}
+                          "vehicles_on": "network",
+                          "schedule_modes": list(deterministic_modes(cfg))}
     modes, u = teleported_modes(cfg)
     unsupported += u
     out["modes"] = {m: {"max_speed": p.speed, "beeline_distance_factor": p.beeline_distance_factor}

@@ -230,12 +230,15 @@ SCHEMA = Section({
                                  matsim="transit.transitModes"),
         "vehicles_on": Param("str", "network", "transit vehicles drive the network or keep the "
                              "schedule", choices=("network", "schedule")),
+        "schedule_modes": Param("strlist", [], "route modes (e.g. rail) whose vehicles keep the "
+                                "schedule even with vehicles_on: network (MATSim's deterministic pt)",
+                                matsim="SBBPt.deterministicServiceModes"),
     }, "Scheduled transit (MATSim transit module)."),
     "modes": MapOf(MODE, {"walk": {"max_speed": 3 / 3.6}, "bike": {"max_speed": 15 / 3.6}},
                    "Teleported modes. walk and bike are always present (MATSim's defaults).",
                    key="mode"),
     "mobsim": Section({
-        "type": Param("str", "qsim", "the mobsim", choices=("qsim", "hermes", "agentsim"),
+        "type": Param("str", "qsim", "the mobsim", choices=("qsim", "hermes", "agentsim", "parallel", "shard"),
                       matsim="controller.mobsim"),
         "flow_capacity_factor": Param("float", 1.0, "link flow capacity scale", min=0,
                                       min_exclusive=True, matsim="flowCapacityFactor"),
@@ -248,10 +251,33 @@ SCHEMA = Section({
                           nullable=True, min=0, matsim="endTime"),
         "effective_cell_size": Param("float", 7.5, "m of road per vehicle", min=0,
                                      min_exclusive=True),
+        "continuous_time": Param("bool", None, "exact times (true) or whole seconds (false); "
+                                 "null: the mobsim's own (qsim, agentsim: true; others: false)",
+                                 nullable=True),
+        "junction_delays": Param("bool", None, "a vehicle crosses into its next link one "
+                                 "second after it could leave, and an activity starts one "
+                                 "second after the arrival, as MATSim steps; null: the "
+                                 "mobsim's own (shard: true; others: false)", nullable=True),
+        "rounding": Param("str", None, "with whole seconds, road and teleport times round to "
+                          "the nearest second or down; null: the mobsim's own (shard: down; "
+                          "others: nearest)", nullable=True, choices=("nearest", "down")),
         "hermes_backend": Param("str", "auto", "hermes only: kernel",
                                 choices=("auto", "rust", "python")),
         "agentsim_blocked": Param("str", "poll", "agentsim only: blocked agents",
                                   choices=("poll", "chain")),
+        "parallel_backend": Param("str", "auto", "parallel only: kernel",
+                                  choices=("auto", "rust", "python")),
+        "parallel_threads": Param("int", None, "parallel only: threads (null: one per CPU); "
+                                  "results do not depend on it", nullable=True, min=1),
+        "parallel_partitioner": Param("str", "morton", "parallel only: how nodes are split "
+                                      "between threads", choices=("morton", "metis")),
+        "shard_threads": Param("int", None, "shard only: worker threads (null: one per CPU); "
+                               "trajectories do not depend on it", nullable=True, min=1),
+        "shard_partitioner": Param("str", "metis", "shard only: how nodes are split between "
+                                   "workers (metis needs pymetis)", choices=("metis", "morton")),
+        "shard_buffer_in_storage": Param("bool", True, "shard only: a vehicle waiting to "
+                                         "cross a node still fills its link (false: it frees "
+                                         "its space, as matsim-rust)"),
     }, "The mobility simulation (MATSim qsim / hermes modules)."),
     "travel_time": Section({
         "bin_size": Param("time", 900.0, "s per travel-time bin", min=0, min_exclusive=True,
@@ -259,6 +285,24 @@ SCHEMA = Section({
         "horizon": Param("time", DEFAULT_HORIZON, "s covered by the travel-time table", min=0,
                          min_exclusive=True),
     }, "Travel-time learning between iterations."),
+    "activity_links": Section({
+        "modes": Param("strlist", ["car"], "activities are assigned to links that allow one of "
+                       "these modes (none allowed by any link: every link)",
+                       matsim="XY2Links on the car network"),
+        "snap_node_activities": Param("bool", False, "also assign activities placed at a node "
+                                      "without coordinates (else they stay on their node)"),
+        "avoid": Section({
+            "attribute": Param("str", None, "link attribute to match, e.g. type or "
+                               "osm:way:highway (or length, freespeed, capacity, lanes); "
+                               "null: avoid nothing", nullable=True),
+            "values": Param("strlist", [], "avoid links whose attribute is one of these"),
+            "min_value": Param("float", None, "avoid links whose (numeric) attribute is at "
+                               "least this", nullable=True),
+            "unless_beyond": Param("float", 1000.0, "m: use avoided links only if no other "
+                                   "link is this close", min=0),
+        }, "Links to keep activities off, e.g. motorways."),
+    }, "Assigning activities to the link with the nearest midpoint before the first "
+       "iteration (activities with a link in the plans keep it)."),
     "routing": Section({
         "transit": Section({
             "search_radius": Param("float", 1000.0, "m around origin/destination for stops", min=0),

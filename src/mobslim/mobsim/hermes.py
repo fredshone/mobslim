@@ -43,7 +43,9 @@ identical. Same-second entries are processed in push order, like the QSim's
 **Transit** (``scenario.transit``) follows the QSim's rules
 (:mod:`mobslim.mobsim._transit`) on the same clock: trips start and serve
 stops no earlier than the timetable's times rounded up; walks, door and
-per-passenger times round half up. Transit vehicles are vehicles
+per-passenger times round like road times (``rounding``). With junction
+delays a transit vehicle serves its stops on reaching the end of a link and
+crosses into the next link one second after it leaves. Transit vehicles are vehicles
 ``n_plans + d`` in the kernel and take their PCE of storage and flow. Stop
 departures are "late" entries: they run after every other entry of their
 second, so passengers arriving in that second still board.
@@ -76,12 +78,18 @@ from mobslim.events import (
     VehicleArrivesAtFacility,
     VehicleDepartsAtFacility,
 )
-from mobslim.mobsim._common import EPS, link_parameters, validate
+from mobslim.mobsim._common import (
+    EPS,
+    check_timing,
+    link_parameters,
+    round_steps,
+    validate,
+)
+from mobslim.mobsim._transit_tables import transit_times
 from mobslim.planbatch import PlanBatch
 from mobslim.routing.teleport import teleport_many
 from mobslim.scenario import Scenario
 from mobslim.trajectories import Trajectories
-from mobslim.transit.walks import pt_walks
 
 try:  # the compiled kernel (rust/mobslim-hermes); optional
     import mobslim_hermes as _rust
@@ -118,7 +126,7 @@ MAX_INDEX = 1 << 29  # persons, trips, activities, legs and links must be below 
 # agenda entry kinds
 _ACT_END, _TRY_LEAVE, _FORCE_LEAVE, _TRY_DEPART, _FORCE_DEPART, _TELEPORT_ARRIVE = range(6)
 _TRIP_START, _STOP_ARRIVE, _STOP_DEPART, _DOOR_OPEN, _ALIGHT_DONE = range(6, 11)
-_BOARD_DONE, _DOOR_CLOSE, _PAX_AT_STOP, _PAX_ARRIVE = range(11, 15)
+_BOARD_DONE, _DOOR_CLOSE, _PAX_AT_STOP, _PAX_ARRIVE, _ACT_START = range(11, 16)
 
 # doors of a trip in network mode
 _OPENING, _OPEN, _CLOSING, _CLOSED = 1, 2, 3, 4
@@ -140,12 +148,18 @@ class HermesSimParams:
     # "rust": the compiled kernel (ImportError if missing); "python": the
     # reference kernel in this module; "auto": rust if installed
     backend: str = "auto"
+    # timing (see mobslim.mobsim._common.check_timing): whole seconds only
+    continuous_time: bool = False
+    junction_delays: bool = False
+    rounding: str = "nearest"
 
     def __post_init__(self):
         if self.backend not in BACKENDS:
             raise ValueError(f"backend must be one of {BACKENDS}, not {self.backend!r}.")
         if not self.stuck_time > 0:
             raise ValueError("stuck_time must be positive (inf disables it).")
+        check_timing("HermesSim", self.continuous_time, self.junction_delays, self.rounding,
+                     continuous=False, whole=True)
 
 
 class HermesSim:
@@ -179,33 +193,39 @@ class HermesSim:
             validate(scenario, plans)
         inputs, tele_distance = kernel_inputs(scenario, plans, cfg, _event_mask(events))
         kernel = _rust.run if self.backend == "rust" else run_kernel
-        (act_start, act_end, dep, arr, enter, stuck, ev_time, ev_code, stuck_leg, stuck_link,
-         last_time, ride_wait, ride_board, ride_alight, ride_trip, stop_arr,
-         stop_dep) = kernel(**inputs)
-        arr, enter = np.asarray(arr), np.asarray(enter)
-        n_plan_links = len(plans.route_links)
-        teleported = ~plans.network_legs(scenario.modes.network_modes)
-        distance = np.where(teleported & ~np.isnan(arr), tele_distance, 0.0)
-        transit = {}
-        if scenario.transit is not None:
-            n_trip_links = int(inputs["trip_link_offsets"][-1])
-            transit = dict(
-                transit=scenario.transit, ride_wait_start=ride_wait, ride_board=ride_board,
-                ride_alight=ride_alight, ride_trip=ride_trip, stop_arrival=stop_arr,
-                stop_departure=stop_dep,
-                transit_link_enter=(enter[n_plan_links:] if inputs["network_vehicles"]
-                                    else np.full(n_trip_links, np.nan)),
-            )
-        trajectories = Trajectories.build(
-            plans, scenario.network, act_start=act_start, act_end=act_end,
-            leg_departure=dep, leg_arrival=arr, link_enter=enter[:n_plan_links],
-            stuck=np.asarray(stuck, dtype=bool), teleport_distance=distance,
-            network_modes=scenario.modes.network_modes, **transit,
+        return kernel_results(scenario, plans, events, inputs, tele_distance, kernel(**inputs))
+
+
+def kernel_results(scenario: Scenario, plans: PlanBatch, events: EventsManager, inputs: dict,
+                   tele_distance: np.ndarray, out: tuple) -> Trajectories:
+    """Trajectories from a kernel's results (see :func:`run_kernel`), and the
+    recorded events handed to ``events``. Shared by the kernel mobsims."""
+    (act_start, act_end, dep, arr, enter, stuck, ev_time, ev_code, stuck_leg, stuck_link,
+     last_time, ride_wait, ride_board, ride_alight, ride_trip, stop_arr, stop_dep) = out
+    arr, enter = np.asarray(arr), np.asarray(enter)
+    n_plan_links = len(plans.route_links)
+    teleported = ~plans.network_legs(scenario.modes.network_modes)
+    distance = np.where(teleported & ~np.isnan(arr), tele_distance, 0.0)
+    transit = {}
+    if scenario.transit is not None:
+        n_trip_links = int(inputs["trip_link_offsets"][-1])
+        transit = dict(
+            transit=scenario.transit, ride_wait_start=ride_wait, ride_board=ride_board,
+            ride_alight=ride_alight, ride_trip=ride_trip, stop_arrival=stop_arr,
+            stop_departure=stop_dep,
+            transit_link_enter=(enter[n_plan_links:] if inputs["network_vehicles"]
+                                else np.full(n_trip_links, np.nan)),
         )
-        if inputs["event_mask"]:
-            _dispatch(events, scenario, plans, tele_distance, ev_time, ev_code,
-                      trajectories.stuck, stuck_leg, stuck_link, last_time)
-        return trajectories
+    trajectories = Trajectories.build(
+        plans, scenario.network, act_start=act_start, act_end=act_end,
+        leg_departure=dep, leg_arrival=arr, link_enter=enter[:n_plan_links],
+        stuck=np.asarray(stuck, dtype=bool), teleport_distance=distance,
+        network_modes=scenario.modes.network_modes, **transit,
+    )
+    if inputs["event_mask"]:
+        _dispatch(events, scenario, plans, tele_distance, ev_time, ev_code,
+                  trajectories.stuck, stuck_leg, stuck_link, last_time)
+    return trajectories
 
 
 # ---------------------------------------------------------------- inputs
@@ -220,15 +240,6 @@ def _event_mask(events: EventsManager) -> int:
     return mask
 
 
-def round_half_up(x: np.ndarray) -> np.ndarray:
-    return np.floor(np.asarray(x, dtype=float) + 0.5).astype(np.int64)
-
-
-def ceil_steps(x: np.ndarray) -> np.ndarray:
-    """The first whole second at or after each of ``x`` (see :func:`ceil_step`)."""
-    return np.ceil(np.asarray(x, dtype=float) - EPS).astype(np.int64)
-
-
 def kernel_inputs(scenario: Scenario, plans: PlanBatch, cfg: HermesSimParams,
                   event_mask: int) -> tuple[dict, np.ndarray]:
     """The kernel's keyword arguments, plus each leg's teleport distance."""
@@ -236,7 +247,8 @@ def kernel_inputs(scenario: Scenario, plans: PlanBatch, cfg: HermesSimParams,
     free_time, headway, storage = link_parameters(
         net, cfg.flow_capacity_factor, cfg.storage_capacity_factor, cfg.effective_cell_size
     )
-    free_steps = round_half_up(free_time)
+    rounding = getattr(cfg, "rounding", "nearest")
+    free_steps = round_steps(free_time, rounding)
     is_net = plans.network_legs(scenario.modes.network_modes)
     is_transit = (plans.mode_legs(scenario.modes.transit_modes) if scenario.transit is not None
                   else np.zeros(plans.n_legs, dtype=bool))
@@ -268,25 +280,25 @@ def kernel_inputs(scenario: Scenario, plans: PlanBatch, cfg: HermesSimParams,
         act_end_time=plans.act_end_time.astype(float),
         act_duration=plans.act_duration.astype(float),
         leg_network=is_net.astype(np.uint8),
-        leg_teleport_steps=round_half_up(tele_time),
+        leg_teleport_steps=round_steps(tele_time, rounding),
         route_offsets=plans.route_offsets.astype(np.int64),
         route_links=plans.route_links.astype(np.int64),
         stuck_time=float(cfg.stuck_time),
         end_time=math.inf if cfg.end_time is None else float(cfg.end_time),
         event_mask=int(event_mask),
+        junction_delay=int(bool(getattr(cfg, "junction_delays", False))),
     )
-    inputs.update(_transit_inputs(scenario, plans, xy, is_transit, free_steps))
+    inputs.update(_transit_inputs(scenario, plans, xy, is_transit, free_steps, rounding))
     return inputs, tele_distance
 
 
 def _transit_inputs(scenario: Scenario, plans: PlanBatch, xy: np.ndarray,
-                    is_transit: np.ndarray, free_steps: np.ndarray) -> dict:
-    """The kernel's transit arguments (empty without ``scenario.transit``).
-
-    Times become whole seconds: scheduled stop times and trip starts round
-    up (nothing happens before the timetable says), walk, door and
-    per-passenger times round half up, as teleport times do.
-    """
+                    is_transit: np.ndarray, free_steps: np.ndarray,
+                    rounding: str = "nearest") -> dict:
+    """The kernel's transit arguments (empty without ``scenario.transit``),
+    in whole seconds as every mobsim has them (see
+    :func:`~mobslim.mobsim._transit_tables.transit_times`): timetable times
+    round up, durations by ``rounding``."""
     i8, u1, f8 = np.int64, np.uint8, np.float64
     transit = scenario.transit
     n_legs = plans.n_legs
@@ -302,58 +314,39 @@ def _transit_inputs(scenario: Scenario, plans: PlanBatch, xy: np.ndarray,
             trip_links=z, trip_link_steps=z, trip_capacity=np.zeros(0, f8),
             trip_pce=np.zeros(0, f8), trip_access_steps=z, trip_egress_steps=z,
             trip_parallel=np.zeros(0, u1), door_open_steps=0, door_close_steps=0,
+            trip_network=np.zeros(0, u1), rs_network=np.zeros(0, u1),
         )
-    s, v, tc, net = transit.schedule, transit.vehicles, transit.params, scenario.network
-    walks = pt_walks(plans, xy, transit)
-    route = s.dep_route.astype(i8)
-    rso, rlo = s.route_stop_offsets.astype(i8), s.route_link_offsets.astype(i8)
-    k0, k1 = rso[route], rso[route + 1]
-    n_trip_stops = k1 - k0
-    trip_stop_offsets = np.concatenate([[0], np.cumsum(n_trip_stops)]).astype(i8)
-    trip_rs = (np.repeat(k0 - trip_stop_offsets[:-1], n_trip_stops)
-               + np.arange(trip_stop_offsets[-1]))  # global route stop of each trip stop
-    dep = np.repeat(s.dep_time.astype(f8), n_trip_stops)
-    n_trip_links = rlo[route + 1] - rlo[route]
-    trip_link_offsets = np.concatenate([[0], np.cumsum(n_trip_links)]).astype(i8)
-    pos = (np.repeat(rlo[route] - trip_link_offsets[:-1], n_trip_links)
-           + np.arange(trip_link_offsets[-1]))
-    trip_links = s.route_links[pos].astype(i8)
-    # free-speed steps of each trip link, at the vehicle's top speed if lower;
-    # the first link is not traversed (the vehicle appears at its end)
-    vtype = transit.dep_type
-    vmax = np.repeat(v.max_speed[vtype].astype(f8), n_trip_links)
-    slower = vmax < net.freespeed[trip_links]
-    with np.errstate(divide="ignore"):
-        trip_link_steps = np.where(slower, round_half_up(net.length[trip_links] / vmax),
-                                   free_steps[trip_links])
-    trip_link_steps[trip_link_offsets[:-1][n_trip_links > 0]] = 0
+    s = transit.schedule
+    t = transit_times(transit, plans, xy, scenario.network, free_steps, True, rounding)
     return dict(
-        network_vehicles=int(tc.vehicles == "network"),
+        network_vehicles=int(t["trip_network"].any()),  # any trip on the network
         leg_transit=is_transit.astype(u1),
         ride_offsets=plans.ride_offsets.astype(i8),
         ride_board=plans.ride_board_stop.astype(i8),
         ride_alight=plans.ride_alight_stop.astype(i8),
-        walk_before_steps=round_half_up(walks.before_time),
-        walk_after_steps=round_half_up(walks.after_time),
+        walk_before_steps=t["walk_before"].astype(i8),
+        walk_after_steps=t["walk_after"].astype(i8),
         rs_stop=s.rs_stop.astype(i8),
         rs_link_pos=s.rs_link_pos.astype(i8),
         rs_await=s.rs_await.astype(u1),
         stop_blocking=s.stop_blocking.astype(u1),
-        trip_k0=k0, trip_k1=k1,
-        trip_start_step=ceil_steps(s.dep_time),
-        trip_stop_offsets=trip_stop_offsets,
-        trip_stop_arr_step=ceil_steps(dep + s.rs_arrival[trip_rs]),
-        trip_stop_dep_step=ceil_steps(dep + s.rs_departure[trip_rs]),
-        trip_link_offsets=trip_link_offsets,
-        trip_links=trip_links,
-        trip_link_steps=trip_link_steps.astype(i8),
-        trip_capacity=v.capacity[vtype].astype(f8),
-        trip_pce=v.pce[vtype].astype(f8),
-        trip_access_steps=round_half_up(v.access_time[vtype]),
-        trip_egress_steps=round_half_up(v.egress_time[vtype]),
-        trip_parallel=v.door_parallel[vtype].astype(u1),
-        door_open_steps=int(round_half_up(tc.door_open_time)),
-        door_close_steps=int(round_half_up(tc.door_close_time)),
+        trip_k0=t["trip_k0"], trip_k1=t["trip_k1"],
+        trip_start_step=t["trip_start"].astype(i8),
+        trip_stop_offsets=t["trip_stop_offsets"],
+        trip_stop_arr_step=t["trip_stop_arr"].astype(i8),
+        trip_stop_dep_step=t["trip_stop_dep"].astype(i8),
+        trip_link_offsets=t["trip_link_offsets"],
+        trip_links=t["trip_links"],
+        trip_link_steps=t["trip_link_time"].astype(i8),
+        trip_capacity=t["trip_capacity"],
+        trip_pce=t["trip_pce"],
+        trip_access_steps=t["trip_access"].astype(i8),
+        trip_egress_steps=t["trip_egress"].astype(i8),
+        trip_parallel=t["trip_parallel"],
+        door_open_steps=int(t["door_open"]),
+        door_close_steps=int(t["door_close"]),
+        trip_network=t["trip_network"],  # per trip: on the network, else the timetable
+        rs_network=t["rs_network"],
     )
 
 
@@ -461,7 +454,9 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
                stop_blocking, trip_k0, trip_k1, trip_start_step, trip_stop_offsets,
                trip_stop_arr_step, trip_stop_dep_step, trip_link_offsets, trip_links,
                trip_link_steps, trip_capacity, trip_pce, trip_access_steps,
-               trip_egress_steps, trip_parallel, door_open_steps, door_close_steps):
+               trip_egress_steps, trip_parallel, door_open_steps, door_close_steps,
+               trip_network, rs_network,
+               junction_delay=0):
     """The reference kernel. ``rust/mobslim-hermes/src/lib.rs`` is a line-for-line port.
 
     Returns ``(act_start, act_end, leg_departure, leg_arrival, link_enter,
@@ -505,7 +500,8 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
     trip_pce, trip_access_steps = ints(trip_pce), ints(trip_access_steps)
     trip_egress_steps, trip_parallel = ints(trip_egress_steps), ints(trip_parallel)
     finite_stuck = math.isfinite(stuck_time)
-    net_veh = bool(network_vehicles)
+    net_veh = bool(network_vehicles)  # any trip on the network
+    trip_network, rs_network = ints(trip_network), ints(rs_network)
 
     n_plans, n_links = len(act_offsets) - 1, len(free_steps)
     n_trips = len(trip_k0)
@@ -566,7 +562,6 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
     tr_board_busy = [False] * n_trips
     tr_boarding = [-1] * n_trips
     tr_pulled = [False] * n_trips
-    tr_pulled_earliest = [0] * n_trips
     t_stop_arr = [nan] * trip_stop_offsets[-1]
     t_stop_dep = [nan] * trip_stop_offsets[-1]
 
@@ -643,6 +638,12 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
         if rec[EV_ARRIVAL]:
             record(EV_ARRIVAL, p, leg)
         a_leg[p] = -1
+        if junction_delay:  # the activity starts one second later
+            schedule(now + 1, _ACT_START, p)
+        else:
+            start_activity(p)
+
+    def start_activity(p):
         a = a_act[p] = a_act[p] + 1
         t_act_start[a] = now
         if rec[EV_ACT_START]:
@@ -700,10 +701,12 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
             if rec[EV_LINK_ENTER]:
                 record(EV_LINK_ENTER, v, link)
             earliest = now + free_steps[link]
+            if junction_delay and a_rpos[v] + 1 < a_rend[v]:  # crosses a junction after it
+                earliest += 1
         else:
             if rec[EV_VEH_LINK_ENTER]:
                 record(EV_VEH_LINK_ENTER, v - n_plans, link)
-            earliest = now + trip_link_steps[a_rpos[v] - n_plan_links]
+            earliest = now + trip_link_steps[a_rpos[v] - n_plan_links] + jd(v)
         a_link[v] = link
         l_occ[link] += v_pce[v]
         queue = l_queue[link]
@@ -711,12 +714,17 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
         if len(queue) == 1:
             schedule_link(link, head_time(link))
 
+    def jd(v):
+        """The junction delay after vehicle ``v``'s current link (none after its last)."""
+        return junction_delay if a_rpos[v] + 1 < a_rend[v] else 0
+
     def head_time(link):
         """When the head may act: its earliest exit, and also the next flow
         slot unless it is a trip about to serve a stop."""
         v, earliest = l_queue[link][0]
         if v >= n_plans and has_stop_here(v - n_plans):
-            return max(earliest, now)  # it may have queued past its earliest exit
+            # it may have queued past the time it reaches the stop
+            return max(earliest - jd(v), now)
         return max(earliest, ceil_step(l_nft[link]))
 
     def schedule_link(link, t):
@@ -826,7 +834,7 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
         if rec[EV_WAITING]:
             record(EV_WAITING, p, k)
         trips = at_stop[k]
-        if not net_veh:
+        if not rs_network[k]:  # vehicles on the timetable
             if trips:
                 for d in trips:
                     if tr_load[d] < trip_capacity[d]:
@@ -875,7 +883,7 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
     def trip_start(d):
         if rec[EV_DRIVER_START]:
             record(EV_DRIVER_START, d, 0)
-        if net_veh:
+        if trip_network[d]:
             v = n_plans + d
             a_rpos[v] = tr_rstart[d]
             a_rend[v] = tr_rstart[d] + trip_link_offsets[d + 1] - trip_link_offsets[d]
@@ -897,7 +905,7 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
         d, token = item
         if token != tr_token[d]:
             return
-        if net_veh and tr_state[d] != _CLOSED:
+        if trip_network[d] and tr_state[d] != _CLOSED:
             return
         k = tr_next[d]
         j = trip_stop_offsets[d] + k - trip_k0[d]
@@ -908,20 +916,25 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
         tr_next[d] = k + 1
         tr_visit[d] = -1
         tr_state[d] = 0
-        if not net_veh:
+        if not trip_network[d]:
             if k + 1 < trip_k1[d]:
                 schedule(max(now, trip_stop_arr_step[j + 1]), _STOP_ARRIVE, d)
             return
         if has_stop_here(d):  # several stops on one link
             reach_stop(d)
             return
-        link = route_links[a_rpos[n_plans + d]]
+        v = n_plans + d
+        link = route_links[a_rpos[v]]
+        # it leaves the link from now, crossing a junction one second later
+        earliest = now + jd(v)
         if tr_pulled[d]:  # back from the stop into the lane, as its head
             tr_pulled[d] = False
-            l_queue[link].appendleft((n_plans + d, tr_pulled_earliest[d]))
+            l_queue[link].appendleft((v, earliest))
             l_blocked[link] = None
             l_waiting[link] = -1
-        schedule_link(link, max(now, ceil_step(l_nft[link])))
+        else:
+            l_queue[link][0] = (v, earliest)
+        schedule_link(link, max(earliest, ceil_step(l_nft[link])))
 
     # -- trips: schedule mode -----------------------------------------------
     def sched_arrive(d):
@@ -949,14 +962,14 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
             return True
         if not has_stop_here(d):
             return False
-        if now < earliest:
-            schedule_link(link, earliest)
+        reach = earliest - jd(n_plans + d)  # it serves stops on reaching the link's end
+        if now < reach:
+            schedule_link(link, reach)
             return True
         if not stop_blocking[rs_stop[tr_next[d]]]:
             queue = l_queue[link]
             queue.popleft()  # into the stop: off the lane, still in storage
             tr_pulled[d] = True
-            tr_pulled_earliest[d] = earliest
             if queue:
                 schedule_link(link, head_time(link))
         reach_stop(d)
@@ -1069,7 +1082,8 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
 
     handlers = (end_activity, try_leave_event, force_leave, try_depart_event,
                 force_depart, teleport_arrive, trip_start, sched_arrive, stop_depart,
-                door_open, alight_done, board_done, door_close, pax_at_stop, arrive)
+                door_open, alight_done, board_done, door_close, pax_at_stop, arrive,
+                start_activity)
     while seconds:
         if seconds[0] > end_time:
             break

@@ -73,10 +73,13 @@ from mobslim.events import (
 from mobslim.mobsim._agentsim_transit import _TransitMixin
 from mobslim.mobsim._common import (
     EPS,
+    ceil_step,
+    check_timing,
     fire,
     link_parameters,
     none_if_nan,
     planned_end,
+    round_steps,
     validate,
 )
 from mobslim.planbatch import PlanBatch
@@ -97,10 +100,19 @@ class AgentSimParams:
     # tick; "chain" skips ticks at which its blocking chain cannot have
     # moved (same results, far fewer retries under heavy congestion)
     blocked: str = "poll"
+    # timing (see mobslim.mobsim._common.check_timing). Whole seconds give
+    # HermesSim's rules; retry_interval must then be whole seconds too
+    continuous_time: bool = True
+    junction_delays: bool = False
+    rounding: str = "nearest"
 
     def __post_init__(self):
         if not self.retry_interval > 0 or not math.isfinite(self.retry_interval):
             raise ValueError("retry_interval must be a positive, finite number of seconds.")
+        check_timing("AgentSim", self.continuous_time, self.junction_delays, self.rounding,
+                     continuous=True, whole=True)
+        if not self.continuous_time and self.retry_interval != int(self.retry_interval):
+            raise ValueError("with continuous_time=False, retry_interval must be whole seconds.")
         if self.blocked not in ("poll", "chain"):
             raise ValueError(f"blocked must be 'poll' or 'chain', not {self.blocked!r}.")
 
@@ -234,6 +246,12 @@ class _AgentSimRun(_TransitMixin):
         free_time, headway, storage = link_parameters(
             net, cfg.flow_capacity_factor, cfg.storage_capacity_factor, cfg.effective_cell_size
         )
+        # whole seconds: HermesSim's rules (see QSim)
+        self.whole = not cfg.continuous_time
+        if self.whole:
+            free_time = round_steps(free_time, cfg.rounding).astype(float).tolist()
+        self.free_time = free_time
+        self.junction = 1.0 if cfg.junction_delays else 0.0
         links = self.links = [_Link(i, free_time[i], headway[i], storage[i])
                               for i in range(net.n_links)]
 
@@ -292,7 +310,7 @@ class _AgentSimRun(_TransitMixin):
         if since is None:
             since = agent.blocked_since = now
         interval = self.cfg.retry_interval
-        deadline = since + self.cfg.stuck_time
+        deadline = self._deadline(since)
         bound = self._chain_bound(agent, deadline) if self.chain else now
         if bound > now:
             if bound == math.inf:  # permanent gridlock: nothing can ever free the way
@@ -321,7 +339,6 @@ class _AgentSimRun(_TransitMixin):
         itself (a gridlock) frees only at a stuck deadline: never, with
         ``stuck_time=inf``. ``bound`` starts as the agent's own deadline.
         """
-        stuck_time = self.cfg.stuck_time
         route = self.route
         link = route[agent.rpos] if agent.link is None else route[agent.rpos + 1]
         prev = agent
@@ -340,15 +357,33 @@ class _AgentSimRun(_TransitMixin):
                 return self.now if prev is agent else min(bound, prev.retry_at)
             head = link.queue[0]
             if head.blocked_since is None:  # waits on free speed / flow, or arrives
-                nft = link.next_flow_time
+                nft = self._slot(link.next_flow_time)
                 exit_time = head.earliest if head.earliest > nft else nft
                 return bound if bound < exit_time else exit_time
-            deadline = head.blocked_since + stuck_time
+            deadline = self._deadline(head.blocked_since)
             if deadline < bound:
                 bound = deadline
             link = route[head.rpos + 1]
             prev = head
         return min(bound, prev.retry_at)  # chain too long: the last head's retry still bounds it
+
+    def _deadline(self, since: float) -> float:
+        """When a vehicle blocked since ``since`` is pushed on."""
+        t = since + self.cfg.stuck_time
+        return float(ceil_step(t)) if self.whole and math.isfinite(t) else t
+
+    def _slot(self, nft: float) -> float:
+        """When a head may leave as far as flow capacity goes."""
+        return float(ceil_step(nft)) if self.whole else nft
+
+    def _next_flow_time(self, link, agent, pce=1.0) -> float:
+        """The next flow slot after ``agent`` (of ``pce``) leaves ``link`` now
+        (whole seconds: as HermesSim, so fractional headways do not drift)."""
+        now, nft = self.now, link.next_flow_time
+        base = now
+        if self.whole and now == max(agent.earliest, ceil_step(nft)):
+            base = agent.earliest if agent.earliest > nft else nft
+        return base + link.headway * pce
 
     def is_stuck(self, agent: _Agent) -> bool:
         return (agent.blocked_since is not None
@@ -384,7 +419,7 @@ class _AgentSimRun(_TransitMixin):
             agent.transition(self, agent)
 
         if end_time is not None:
-            self.now = max(self.now, end_time)
+            self.now = max(self.now, float(end_time))
         self._abort_unfinished()
         return Trajectories.build(
             self.plans, self.scenario.network,
@@ -408,7 +443,8 @@ class _AgentSimRun(_TransitMixin):
             agent.done = True
 
     def _planned_end(self, act: int, start: float) -> Optional[float]:
-        return planned_end(self.act_end_time[act], self.act_duration[act], start)
+        t = planned_end(self.act_end_time[act], self.act_duration[act], start)
+        return float(ceil_step(t)) if self.whole and t is not None else t
 
     # -- transitions: activities -------------------------------------------
     def _end_activity(self, agent: _Agent) -> None:
@@ -442,6 +478,8 @@ class _AgentSimRun(_TransitMixin):
                 self.leg_mode[leg], self.act_xy[a], self.act_xy[a + 1], self.leg_fixed_time[leg],
                 agent.index,
             )
+            if self.whole:
+                tt = float(round_steps(tt, self.cfg.rounding))
             self.schedule(self.now + tt, agent, _AgentSimRun._end_teleport)
 
     def _start_activity(self, agent: _Agent) -> None:
@@ -471,7 +509,10 @@ class _AgentSimRun(_TransitMixin):
                 self.now, agent.index, self.leg_mode[leg], self.act_node[agent.act + 1]))
         agent.leg = None
         agent.act += 1
-        self._start_activity(agent)
+        if self.junction:  # the activity starts one second later
+            self.schedule(self.now + self.junction, agent, _AgentSimRun._start_activity)
+        else:
+            self._start_activity(agent)
 
     def _enter_route(self, agent: _Agent) -> None:
         """Depart onto the first link of the route. Blocked departers wait
@@ -511,11 +552,13 @@ class _AgentSimRun(_TransitMixin):
         agent.link = link
         agent.transition = _AgentSimRun._leave_link
         earliest = agent.earliest = now + link.free_time
+        if agent.rpos + 1 < agent.rend:  # crosses a junction after it
+            earliest = agent.earliest = earliest + self.junction
         link.occupied += 1.0
         queue = link.queue
         queue.append(agent)
         if len(queue) == 1:  # head of the queue: schedule its exit
-            nft = link.next_flow_time
+            nft = self._slot(link.next_flow_time)
             heapq.heappush(self.heap, (earliest if earliest > nft else nft,
                                        0, next(self.seq), agent))
         # otherwise it is scheduled when the vehicle ahead leaves
@@ -543,13 +586,14 @@ class _AgentSimRun(_TransitMixin):
         if self.on_leave:
             fire(self.on_leave, LinkLeave(now, agent.index, link.index))
         link.occupied -= 1.0
-        nft = link.next_flow_time = now + link.headway
+        nft = link.next_flow_time = self._next_flow_time(link, agent)
         if queue:
             successor = queue[0]
             if successor.is_trip:
                 self._trip_head(successor, link)
             else:
                 earliest = successor.earliest
+                nft = self._slot(nft)
                 heapq.heappush(heap, (earliest if earliest > nft else nft, 0, next(seq), successor))
         # enter the next link (agent.transition stays _leave_link)
         agent.rpos = next_pos
@@ -558,11 +602,13 @@ class _AgentSimRun(_TransitMixin):
             fire(self.on_enter, LinkEnter(now, agent.index, nxt.index))
         agent.link = nxt
         earliest = agent.earliest = now + nxt.free_time
+        if next_pos + 1 < agent.rend:  # crosses a junction after it
+            earliest = agent.earliest = earliest + self.junction
         nxt.occupied += 1.0
         nqueue = nxt.queue
         nqueue.append(agent)
         if len(nqueue) == 1:
-            nft = nxt.next_flow_time
+            nft = self._slot(nxt.next_flow_time)
             heapq.heappush(heap, (earliest if earliest > nft else nft, 0, next(seq), agent))
 
     def _pop_head(self, link: _Link) -> None:
@@ -574,12 +620,13 @@ class _AgentSimRun(_TransitMixin):
             fire(self.on_leave, LinkLeave(now, agent.index, link.index))
         agent.link = None
         link.occupied -= 1.0
-        nft = link.next_flow_time = now + link.headway
+        nft = link.next_flow_time = self._next_flow_time(link, agent)
         if queue:  # the next vehicle becomes the head
             successor = queue[0]
             if successor.is_trip:
                 self._trip_head(successor, link)
             else:
                 earliest = successor.earliest
+                nft = self._slot(nft)
                 heapq.heappush(self.heap, (earliest if earliest > nft else nft,
                                            0, next(self.seq), successor))

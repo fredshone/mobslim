@@ -20,8 +20,10 @@
 //! `route_many` releases the GIL and spreads work over `threads` threads.
 //!
 //! `raptor` holds the least-cost transit router (a port of
-//! `mobslim.transit.raptor.RaptorRouter`).
+//! `mobslim.transit.raptor.RaptorRouter`); `points` the nearest-point index
+//! that snaps activities to links (`mobslim.activity_links`).
 
+mod points;
 mod raptor;
 
 use std::cmp::{Ordering, Reverse};
@@ -711,5 +713,6 @@ impl Router {
 fn _kernel(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Router>()?;
     m.add_class::<raptor::Raptor>()?;
+    m.add_class::<points::PointIndex>()?;
     Ok(())
 }

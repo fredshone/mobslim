@@ -1,0 +1,18 @@
+[package]
+name = "mobslim-parallel"
+version = "0.1.0"
+edition = "2021"
+description = "Compiled kernel for mobslim's ParallelSim (whole-second queue mobsim on several threads)"
+publish = false
+
+[lib]
+name = "mobslim_parallel"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
+numpy = "0.23"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

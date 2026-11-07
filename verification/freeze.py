@@ -43,7 +43,7 @@ GUARDED = {
     "trip_tt_mean_rel_diff_pt": (0.005, False),
 }
 
-GUARDED_MOBSIMS = ("qsim", "hermes")
+GUARDED_MOBSIMS = ("qsim", "hermes", "parallel", "shard")
 
 _INPUTS = [("network", "inputNetworkFile", "network.xml"),
            ("transit", "transitScheduleFile", "transitSchedule.xml"),
@@ -76,7 +76,7 @@ def freeze(names=None) -> list[Path]:
 
         expected = {"case": name, "transit_walk": l2.transit_walk, "vehicles": list(l2.vehicles),
                     "l1": l1_name is not None, "l2": {}}
-        for c in result["comparisons"]:  # QSim and HermesSim (AgentSim: tested against the QSim)
+        for c in result["comparisons"]:  # the kernel sims (AgentSim: tested against the QSim)
             if c["reference"] == "qsim" and c["test"].split("/")[0] in GUARDED_MOBSIMS:
                 expected["l2"][c["test"]] = {k: c["metrics"][k] for k in GUARDED if k in c["metrics"]}
         (out / "expected.json").write_text(json.dumps(expected, indent=2) + "\n")

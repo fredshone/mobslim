@@ -26,6 +26,9 @@ mobslim = "mobslim.cli:main"
 parquet = [
     "pyarrow>=17",
 ]
+metis = [
+    "pymetis>=2025.1",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -91,9 +94,10 @@ docs = [
     "myst-parser>=4",
     "sphinx>=8",
 ]
-# the compiled HermesSim kernel and routers; need cargo. Opt in with
-# `uv sync --group rust` (without them HermesSim and routing run in Python)
-rust = ["mobslim-hermes", "mobslim-router"]
+# the compiled HermesSim, ParallelSim and ShardSim kernels and routers; need cargo.
+# Opt in with `uv sync --group rust` (without them the mobsims and routing run in
+# Python, and ShardSim, which has no Python kernel, is unavailable)
+rust = ["mobslim-hermes", "mobslim-parallel", "mobslim-router", "mobslim-shard"]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
@@ -103,4 +107,6 @@ default-groups = ["dev"]
 
 [tool.uv.sources]
 mobslim-hermes = { path = "rust/mobslim-hermes" }
+mobslim-parallel = { path = "rust/mobslim-parallel" }
 mobslim-router = { path = "rust/mobslim-router" }
+mobslim-shard = { path = "rust/mobslim-shard" }

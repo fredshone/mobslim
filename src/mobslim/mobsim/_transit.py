@@ -23,6 +23,14 @@ the scenario has transit.
   vehicle awaits its departure reopens them. With ``awaitDeparture`` the
   vehicle leaves no earlier than the scheduled departure.
 
+**Timing parameters** apply as to cars: with ``continuous_time=False`` the
+timetable's times round up and walk, door and per-passenger times round by
+``rounding`` (:func:`~mobslim.mobsim._transit_tables.transit_times`); with
+``junction_delays`` a vehicle serves its stops on reaching the end of a link
+and crosses into the next one a second after it could leave (after it
+leaves the stop, if it has one there), as in MATSim, and a passenger's
+activity starts a second after the arrival.
+
 **Passengers** walk to the first ride's board stop, wait in a FIFO per route
 stop, board the first trip of that route with room, ride to the alight stop,
 walk on to the next ride or the destination. Waiting or riding at the end of
@@ -63,8 +71,8 @@ _OPENING, _OPEN, _CLOSING, _CLOSED = 1, 2, 3, 4
 class _Trip:
     __slots__ = ("index", "dep", "k0", "k1", "next_rs", "rstart", "rpos", "rend", "link",
                  "blocked_since", "waiting_on", "onboard", "load", "capacity", "pce",
-                 "access", "egress", "parallel", "max_speed", "visit", "state", "token",
-                 "alight_q", "alight_busy", "board_busy", "boarding", "pulled",
+                 "access", "egress", "parallel", "link_time", "visit", "state", "token",
+                 "alight_q", "alight_busy", "board_busy", "boarding", "pulled", "network",
                  "pulled_earliest")
     is_trip = True
 
@@ -92,8 +100,10 @@ class _Trip:
 class _TransitRun:
     def __init__(self, run, transit, plans, act_xy, events):
         self.run = run
-        tb = self.tables = TransitTables(transit, plans, act_xy, run.scenario.network)
-        self.network_mode = tb.network_mode
+        tb = self.tables = TransitTables(transit, plans, act_xy, run.scenario.network,
+                                         run.free_time, run.whole, run.cfg.rounding)
+        self.network_mode = tb.network_mode  # any trip on the network
+        self.rs_network = tb.rs_network
         self.door_open, self.door_close = tb.door_open, tb.door_close
         self.rs_stop, self.rs_arr, self.rs_dep = tb.rs_stop, tb.rs_arr, tb.rs_dep
         self.rs_await, self.rs_link_pos = tb.rs_await, tb.rs_link_pos
@@ -120,17 +130,19 @@ class _TransitRun:
             trip = _Trip(d, tb.dep_time[d], tb.trip_k0[d], tb.trip_k1[d])
             trip.capacity, trip.pce = tb.trip_capacity[d], tb.trip_pce[d]
             trip.access, trip.egress = tb.trip_access[d], tb.trip_egress[d]
-            trip.parallel, trip.max_speed = tb.trip_parallel[d], tb.trip_max_speed[d]
-            if self.network_mode:  # the trip's links follow the plans' route links
+            trip.parallel, trip.link_time = tb.trip_parallel[d], tb.trip_link_time[d]
+            trip.network = tb.trip_network[d]  # else it keeps the timetable
+            # the trips' links follow the plans' route links (every trip's,
+            # so they line up with the trips; timetable trips never use them)
+            if self.network_mode:
                 trip.rstart = trip.rpos = len(run.route_links)
                 run.route_links.extend(tb.trip_links[d])
                 trip.rend = len(run.route_links)
             self.trips.append(trip)
-            run.schedule(trip.dep, TRIP_START, trip)
+            run.schedule(tb.trip_start[d], TRIP_START, trip)
         self.n_plan_links = len(plans.route_links)
         if self.network_mode:
             run.t_enter.extend([nan] * (len(run.route_links) - self.n_plan_links))
-            self.length, self.freespeed = tb.length, tb.freespeed
         self.t_stop_arr = [nan] * self.trip_stop_offsets[-1]
         self.t_stop_dep = [nan] * self.trip_stop_offsets[-1]
 
@@ -182,7 +194,7 @@ class _TransitRun:
         if self.on_wait:
             _fire(self.on_wait, AgentWaitingForPt(now, agent.index, self.rs_stop[k]))
         trips = self.at_stop.get(k)
-        if not self.network_mode:
+        if not self.rs_network[k]:
             if trips:
                 for trip in trips:
                     if trip.load < trip.capacity:
@@ -230,10 +242,10 @@ class _TransitRun:
         run = self.run
         if self.on_driver:
             _fire(self.on_driver, TransitDriverStarts(run.now, trip.index))
-        if self.network_mode:
+        if trip.network:
             run._try_depart(trip, force=False)
         else:
-            run.schedule(trip.dep + self.rs_arr[trip.k0], STOP_ARRIVE, trip)
+            run.schedule(max(run.now, self.tables.stop_arrival(trip, trip.k0)), STOP_ARRIVE, trip)
 
     def _record_arrival(self, trip, k) -> None:
         now = self.run.now
@@ -247,7 +259,7 @@ class _TransitRun:
         trip, token = item
         if token != trip.token:
             return
-        if self.network_mode and trip.state != _CLOSED:
+        if trip.network and trip.state != _CLOSED:
             return
         run = self.run
         now = run.now
@@ -260,20 +272,25 @@ class _TransitRun:
         trip.next_rs = k + 1
         trip.visit = None
         trip.state = 0
-        if not self.network_mode:
+        if not trip.network:
             if trip.next_rs < trip.k1:
-                run.schedule(trip.dep + self.rs_arr[trip.next_rs], STOP_ARRIVE, trip)
+                t = max(now, self.tables.stop_arrival(trip, trip.next_rs))
+                run.schedule(t, STOP_ARRIVE, trip)
             return
         if self.has_stop_here(trip):  # several stops on one link
             self._reach_stop(trip)
             return
         link = run.links[run.route_links[trip.rpos]]
+        # it leaves the link from now, crossing a junction one second later
+        earliest = now + self._junction(trip)
         if trip.pulled:  # back from the stop into the lane, as its head
             trip.pulled = False
-            link.queue.appendleft((trip, trip.pulled_earliest))
+            link.queue.appendleft((trip, earliest))
             link.blocked_since = None
             link.waiting_on = None
-        run._schedule_link(link, max(now, link.next_flow_time))
+        else:
+            link.queue[0] = (trip, earliest)
+        run._schedule_link(link, max(earliest, run._flow_slot(link)))
 
     # ------------------------------------------------------------ schedule mode
     def _sched_arrive(self, trip) -> None:
@@ -286,20 +303,28 @@ class _TransitRun:
             trip.load += 1
             self._board(trip, q.popleft())
         trip.token += 1
-        self.run.schedule_late(trip.dep + self.rs_dep[k], STOP_DEPART, (trip, trip.token))
+        t = max(self.run.now, self.tables.stop_departure(trip, k))
+        self.run.schedule_late(t, STOP_DEPART, (trip, trip.token))
 
     # ------------------------------------------------------------ network mode
     def has_stop_here(self, trip) -> bool:
         k = trip.next_rs
         return k < trip.k1 and self.rs_link_pos[k] == trip.rpos - trip.rstart
 
+    def _junction(self, trip) -> float:
+        """The junction delay after ``trip``'s current link (none after its last)."""
+        return self.run.junction if trip.rpos + 1 < trip.rend else 0.0
+
     def first_link_earliest(self, trip, link, now) -> float:
-        """Earliest exit of a link entered by ``trip`` (its first link: at once)."""
-        if trip.rpos == trip.rstart:
-            return now
-        if trip.max_speed < self.freespeed[link.index]:
-            return now + self.length[link.index] / trip.max_speed
-        return now + link.free_time
+        """Earliest exit of a link entered by ``trip``: its time on the link
+        (none on its first link: it appears at the end), plus the junction
+        delay if it crosses into a next link."""
+        return now + trip.link_time[trip.rpos - trip.rstart] + self._junction(trip)
+
+    def reach_time(self, trip, earliest) -> float:
+        """When ``trip`` reaches the end of its link, where it serves its stops:
+        its earliest exit without the junction delay."""
+        return earliest - self._junction(trip)
 
     def at_link_end(self, trip, link, earliest) -> bool:
         """``_try_leave`` hook for a trip at the head of ``link``: ``True`` if
@@ -309,8 +334,9 @@ class _TransitRun:
         if not self.has_stop_here(trip):
             return False
         run = self.run
-        if run.now < earliest - EPS:
-            run._schedule_link(link, earliest)
+        reach = self.reach_time(trip, earliest)
+        if run.now < reach - EPS:
+            run._schedule_link(link, reach)
             return True
         if not self.stop_blocking[self.rs_stop[trip.next_rs]]:
             link.queue.popleft()  # into the stop: off the lane, still in storage
@@ -396,7 +422,7 @@ class _TransitRun:
         trip.state = _CLOSED
         k = trip.visit
         now = self.run.now
-        dep = max(now, trip.dep + self.rs_dep[k]) if self.rs_await[k] else now
+        dep = max(now, self.tables.stop_departure(trip, k)) if self.rs_await[k] else now
         trip.token += 1
         self.run.schedule_late(dep, STOP_DEPART, (trip, trip.token))
 

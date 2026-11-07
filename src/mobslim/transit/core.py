@@ -15,7 +15,12 @@ VEHICLE_MODES = ("schedule", "network")
 class TransitParams:
     """How transit is simulated: passenger modes, vehicles on the timetable
     (``"schedule"``) or in the queue network (``"network"``), access/egress walks,
-    door times, and whether transit vehicles feed the learned link travel times."""
+    door times, and whether transit vehicles feed the learned link travel times.
+
+    ``schedule_modes``: route modes (e.g. ``("rail",)``) whose vehicles keep
+    to the timetable even with ``vehicles="network"``, off the network, while
+    the others drive in traffic: MATSim's "deterministic" pt (SBB's
+    ``deterministicServiceModes``)."""
 
     passenger_modes: tuple[str, ...] = ("pt",)
     vehicles: str = "schedule"  # or "network"
@@ -23,11 +28,15 @@ class TransitParams:
     door_open_time: float = 1.0
     door_close_time: float = 1.0
     learn_from_transit: bool = False
+    schedule_modes: tuple[str, ...] = ()
 
     def __post_init__(self):
         if self.vehicles not in VEHICLE_MODES:
             raise ValueError(f"TransitParams.vehicles must be one of {VEHICLE_MODES}.")
+        if isinstance(self.schedule_modes, str):
+            raise ValueError("TransitParams.schedule_modes must be a sequence of modes.")
         object.__setattr__(self, "passenger_modes", tuple(self.passenger_modes))
+        object.__setattr__(self, "schedule_modes", tuple(self.schedule_modes))
 
 
 @dataclass(frozen=True, eq=False)
@@ -55,6 +64,26 @@ class Transit:
     @property
     def trip_capacity(self) -> np.ndarray:
         return self.vehicles.capacity[self.dep_type]
+
+    @property
+    def route_on_network(self) -> np.ndarray:
+        """Per route: whether its vehicles drive the network (``vehicles="network"``
+        and its mode not in ``schedule_modes``), else they keep the timetable."""
+        s, p = self.schedule, self.params
+        if p.vehicles != "network":
+            return np.zeros(s.n_routes, dtype=bool)
+        on = np.array([m not in p.schedule_modes for m in s.modes], dtype=bool)
+        return on[s.route_mode] if s.n_routes else np.zeros(0, dtype=bool)
+
+    @property
+    def rs_on_network(self) -> np.ndarray:
+        """Per route stop: whether its route's vehicles drive the network."""
+        return self.route_on_network[self.schedule.rs_route]
+
+    @property
+    def trip_on_network(self) -> np.ndarray:
+        """Per trip (departure): whether its vehicle drives the network."""
+        return self.route_on_network[self.schedule.dep_route]
 
     def vehicle_id(self, trip: int):
         return self.schedule.vehicle_ids.id(int(self.schedule.dep_vehicle[trip]))

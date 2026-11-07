@@ -27,6 +27,7 @@ from mobslim.config.mobslim import (
     MobslimConfig,
 )
 from mobslim.events import EventsManager
+from mobslim.mobsim import shard
 from mobslim.replanning import PersonStrategyManager, route_scenario
 from mobslim.replanning.context import ReplanningContext
 from mobslim.replanning.modules import routing_groups
@@ -193,7 +194,7 @@ def test_load_collects_every_problem(tmp_path):
                      "scoring.modes.car.constant: expected a number, got 'high'",
                      "scoring.activities.x.typical_duration: required",
                      "scoring.activities.x.priority: expected a value > 0",
-                     "mobsim.type: expected one of qsim, hermes, agentsim",
+                     "mobsim.type: expected one of qsim, hermes, agentsim, parallel, shard",
                      "mobsim.flow_capacity_factor: expected a value > 0",
                      "mobsim.stuck_time: cannot vary by person",
                      "did you mean 'change_exp_beta'?",
@@ -300,6 +301,25 @@ def test_matsim_config_and_translation_run_identically(name, tmp_path):
     b = Controller.from_mobslim_config(MobslimConfig.from_dict(raw, tmp_path), params=cc).run()
     assert a.metrics == b.metrics
     np.testing.assert_array_equal(a.scenario.population.scores, b.scenario.population.scores)
+
+
+def test_deterministic_pt_modes_from_matsim(tmp_path):
+    """SBB's deterministic pt (``SBBPt.deterministicServiceModes``) becomes
+    ``transit.schedule_modes``: pt-tutorial's trains keep the timetable,
+    its buses drive in traffic, from the MATSim config and its translation alike."""
+    cfg = MatsimConfig.load(FIXTURES / "matsim_reference" / "pt-tutorial" / "config.xml")
+    cfg.set("SBBPt", "deterministicServiceModes", "train")
+    raw, unsupported = matsim_to_mobslim(cfg)
+    assert unsupported == [] and raw["transit"]["schedule_modes"] == ["train"]
+    cc = ControllerParams(iterations=1, seed=11, output_dir=None)
+    a = Controller.from_matsim_config(cfg, params=cc)
+    b = Controller.from_mobslim_config(MobslimConfig.from_dict(raw, tmp_path), params=cc)
+    for c in (a, b):
+        t = c.scenario.transit
+        assert t.params.schedule_modes == ("train",)
+        modes = np.array(t.schedule.modes)[t.schedule.route_mode[t.schedule.dep_route]]
+        np.testing.assert_array_equal(t.trip_on_network, modes != "train")
+    assert a.run().metrics == b.run().metrics
 
 
 _SUBPOP_CONFIG = """<?xml version="1.0" ?>
@@ -447,8 +467,25 @@ def test_car_availability_limits_mode_choice(tmp_path):
         assert new_plans and all(leg.mode != "car" for p in new_plans for leg in p.legs)
 
 
-@pytest.mark.parametrize("mobsim", ["qsim", "hermes", "agentsim"])
+def test_mobsim_timing_options(tmp_path):
+    cfg = MobslimConfig.load(_config(tmp_path, """
+        mobsim: {type: qsim, continuous_time: false, junction_delays: true, rounding: down}
+        """))
+    p = cfg.mobsim().params
+    assert (p.continuous_time, p.junction_delays, p.rounding) == (False, True, "down")
+    # null keeps each mobsim's own
+    p = MobslimConfig.load(_config(tmp_path, "mobsim: {type: hermes}")).mobsim().params
+    assert (p.continuous_time, p.junction_delays, p.rounding) == (False, False, "nearest")
+    with pytest.raises(ValueError, match="whole seconds only"):
+        MobslimConfig.load(_config(tmp_path, """
+            mobsim: {type: hermes, continuous_time: true}
+            """)).mobsim()
+
+
+@pytest.mark.parametrize("mobsim", ["qsim", "hermes", "agentsim", "parallel", "shard"])
 def test_per_person_teleport_speed(tmp_path, mobsim):
+    if mobsim == "shard" and not shard.rust_available():
+        pytest.skip("mobslim_shard extension not built")
     cfg = MobslimConfig.load(_config(tmp_path, f"""
         mobsim: {{type: {mobsim}}}
         modes:
@@ -465,7 +502,7 @@ def test_per_person_teleport_speed(tmp_path, mobsim):
     old = scenario.population.attributes["age"][person] > 50
     travel = (tr.leg_arrival - tr.leg_departure)[walk]
     expected = tr.leg_distance[walk] / np.where(old, 0.5, 1.0)
-    tol = 1.0 if mobsim == "hermes" else 1e-6  # hermes runs in whole seconds
+    tol = 1.0 if mobsim in ("hermes", "parallel", "shard") else 1e-6  # whole-second clocks
     np.testing.assert_allclose(travel, expected, atol=tol)
     assert old.any() and (~old).any()
 

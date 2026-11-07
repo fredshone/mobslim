@@ -75,9 +75,10 @@ class _Ticket:
 class _Trip:
     __slots__ = ("index", "dep", "k0", "k1", "next_rs", "rstart", "rpos", "rend", "link",
                  "earliest", "blocked_since", "retry_at", "onboard", "load", "capacity",
-                 "pce", "access", "egress", "parallel", "max_speed", "visit", "state",
+                 "pce", "access", "egress", "parallel", "link_time", "visit", "state",
                  "alight_q", "alight_busy", "board_busy", "boarding", "alight_due",
-                 "board_due", "pulled", "pulled_earliest", "ticket", "ticket_due", "step")
+                 "board_due", "pulled", "pulled_earliest", "ticket", "ticket_due", "step",
+                 "network")
     is_trip = True
 
     def __init__(self, index, dep, k0, k1):
@@ -109,7 +110,8 @@ class _TransitMixin:
     """Transit transitions of ``_AgentSimRun`` (which inherits this)."""
 
     def _init_transit(self, transit, plans, act_xy, events) -> None:
-        tb = self.tt = TransitTables(transit, plans, act_xy, self.scenario.network)
+        tb = self.tt = TransitTables(transit, plans, act_xy, self.scenario.network,
+                                     self.free_time, self.whole, self.cfg.rounding)
         self.pt_network = tb.network_mode
         nan = math.nan
         self.t_wait = [nan] * tb.n_rides
@@ -137,13 +139,16 @@ class _TransitMixin:
             trip = _Trip(d, tb.dep_time[d], tb.trip_k0[d], tb.trip_k1[d])
             trip.capacity, trip.pce = tb.trip_capacity[d], tb.trip_pce[d]
             trip.access, trip.egress = tb.trip_access[d], tb.trip_egress[d]
-            trip.parallel, trip.max_speed = tb.trip_parallel[d], tb.trip_max_speed[d]
-            if self.pt_network:  # the trip's links follow the plans' route links
+            trip.parallel, trip.link_time = tb.trip_parallel[d], tb.trip_link_time[d]
+            trip.network = tb.trip_network[d]  # else it keeps the timetable
+            # the trips' links follow the plans' route links (every trip's,
+            # so they line up with the trips; timetable trips never use them)
+            if self.pt_network:
                 trip.rstart = trip.rpos = len(route)
                 route.extend(links[i] for i in tb.trip_links[d])
                 trip.rend = len(route)
             self.trips.append(trip)
-            self._push_trip(trip.dep, trip, _TransitMixin._trip_start)
+            self._push_trip(tb.trip_start[d], trip, _TransitMixin._trip_start)
         if self.pt_network:
             self.t_enter.extend([nan] * (len(route) - self.n_plan_links))
 
@@ -179,9 +184,10 @@ class _TransitMixin:
         """``trip`` became the head of ``link``: schedule its exit. A trip with a
         stop on this link serves it without waiting for a flow slot."""
         if self._has_stop_here(trip):
-            time = trip.earliest if trip.earliest > self.now else self.now
+            reach = self._reach_time(trip)
+            time = reach if reach > self.now else self.now
         else:
-            nft = link.next_flow_time
+            nft = self._slot(link.next_flow_time)
             time = trip.earliest if trip.earliest > nft else nft
         self._push_trip(time, trip, _TransitMixin._trip_leave_link)
 
@@ -198,7 +204,7 @@ class _TransitMixin:
             if head.has_stale:  # its stale entry comes first and reschedules it
                 return
             head.transition = self._leave_transition
-        nft = link.next_flow_time
+        nft = self._slot(link.next_flow_time)
         earliest = head.earliest
         heapq.heappush(self.heap, (earliest if earliest > nft else nft, 0, next(self.seq), head))
 
@@ -211,7 +217,7 @@ class _TransitMixin:
         if link.queue[0] is not agent:
             return  # still behind the trip
         agent.transition = leave = self._leave_transition
-        nft = link.next_flow_time
+        nft = self._slot(link.next_flow_time)
         time = agent.earliest if agent.earliest > nft else nft
         if self.now >= time:
             leave(self, agent)
@@ -244,7 +250,7 @@ class _TransitMixin:
         if self.on_wait:
             fire(self.on_wait, AgentWaitingForPt(now, agent.index, self.tt.rs_stop[k]))
         trips = self.pt_at_stop.get(k)
-        if not self.pt_network:
+        if not self.tt.rs_network[k]:
             if trips:
                 for trip in trips:
                     if trip.load < trip.capacity:
@@ -292,8 +298,9 @@ class _TransitMixin:
     def _trip_start(self, trip) -> None:
         if self.on_driver:
             fire(self.on_driver, TransitDriverStarts(self.now, trip.index))
-        if not self.pt_network:
-            self._push_trip(trip.dep + self.tt.rs_arr[trip.k0], trip, _TransitMixin._trip_at_stop)
+        if not trip.network:
+            time = max(self.now, self.tt.stop_arrival(trip, trip.k0))
+            self._push_trip(time, trip, _TransitMixin._trip_at_stop)
             return
         waiting = self.route[trip.rpos].departing
         if waiting:  # others are already waiting to depart here: queue behind them
@@ -322,10 +329,11 @@ class _TransitMixin:
         while q and trip.load < trip.capacity:
             trip.load += 1
             self._pt_board(trip, q.popleft())
-        self._push_trip(trip.dep + self.tt.rs_dep[k], trip, _TransitMixin._trip_leave_stop, _LATE)
+        time = max(self.now, self.tt.stop_departure(trip, k))
+        self._push_trip(time, trip, _TransitMixin._trip_leave_stop, _LATE)
 
     def _trip_leave_stop(self, trip) -> None:
-        if self.pt_network and trip.state != _CLOSED:
+        if trip.network and trip.state != _CLOSED:
             return
         now = self.now
         self.last_progress = now
@@ -339,21 +347,32 @@ class _TransitMixin:
         trip.next_rs = k + 1
         trip.visit = None
         trip.state = 0
-        if not self.pt_network:
+        if not trip.network:
             if trip.next_rs < trip.k1:
-                self._push_trip(trip.dep + tb.rs_arr[trip.next_rs], trip,
-                                _TransitMixin._trip_at_stop)
+                time = max(now, tb.stop_arrival(trip, trip.next_rs))
+                self._push_trip(time, trip, _TransitMixin._trip_at_stop)
             return
         if self._has_stop_here(trip):  # several stops on one link
             self._trip_reach_stop(trip)
             return
         link = trip.link
+        # it leaves the link from now, crossing a junction one second later
+        trip.earliest = now + self._trip_junction(trip)
         if trip.pulled:
             self._trip_rejoin(trip, link)
-        nft = link.next_flow_time
-        self._push_trip(now if now > nft else nft, trip, _TransitMixin._trip_leave_link)
+        nft = self._slot(link.next_flow_time)
+        time = trip.earliest if trip.earliest > nft else nft
+        self._push_trip(time, trip, _TransitMixin._trip_leave_link)
 
     # -- trips: on links (network mode) -------------------------------------
+    def _trip_junction(self, trip) -> float:
+        """The junction delay after ``trip``'s current link (none after its last)."""
+        return self.junction if trip.rpos + 1 < trip.rend else 0.0
+
+    def _reach_time(self, trip) -> float:
+        """When ``trip`` reaches the end of its link, where it serves its stops."""
+        return trip.earliest - self._trip_junction(trip)
+
     def _has_stop_here(self, trip) -> bool:
         k = trip.next_rs
         return k < trip.k1 and self.tt.rs_link_pos[k] == trip.rpos - trip.rstart
@@ -381,13 +400,9 @@ class _TransitMixin:
         if self.on_t_link_enter:
             fire(self.on_t_link_enter, TransitVehicleLinkEnter(now, trip.index, link.index))
         trip.link = link
-        i = link.index
-        if trip.rpos == trip.rstart:  # the first link is not traversed
-            trip.earliest = now
-        elif trip.max_speed < self.tt.freespeed[i]:
-            trip.earliest = now + self.tt.length[i] / trip.max_speed
-        else:
-            trip.earliest = now + link.free_time
+        # its time on the link (none on the first: it appears at the end),
+        # plus the junction delay if it crosses into a next link
+        trip.earliest = now + trip.link_time[trip.rpos - trip.rstart] + self._trip_junction(trip)
         link.occupied += trip.pce
         link.queue.append(trip)
         if len(link.queue) == 1:
@@ -400,8 +415,9 @@ class _TransitMixin:
         link = trip.link
         now = self.now
         if self._has_stop_here(trip):
-            if now < trip.earliest - EPS:
-                self._push_trip(trip.earliest, trip, _TransitMixin._trip_leave_link)
+            reach = self._reach_time(trip)
+            if now < reach - EPS:
+                self._push_trip(reach, trip, _TransitMixin._trip_leave_link)
                 return
             if not self.tt.stop_blocking[self.tt.rs_stop[trip.next_rs]]:
                 link.queue.popleft()  # into the stop: off the lane, still in storage
@@ -411,7 +427,7 @@ class _TransitMixin:
                 self._schedule_successor(link)
             self._trip_reach_stop(trip)
             return
-        nft = link.next_flow_time
+        nft = self._slot(link.next_flow_time)
         ready = trip.earliest if trip.earliest > nft else nft
         if now < ready - EPS:
             self._push_trip(ready, trip, _TransitMixin._trip_leave_link)
@@ -437,7 +453,7 @@ class _TransitMixin:
             fire(self.on_t_link_leave, TransitVehicleLinkLeave(now, trip.index, link.index))
         trip.link = None
         link.occupied -= trip.pce
-        link.next_flow_time = now + link.headway * trip.pce
+        link.next_flow_time = self._next_flow_time(link, trip, trip.pce)
         self._schedule_successor(link)
 
     def _trip_rejoin(self, trip, link) -> None:
@@ -454,7 +470,6 @@ class _TransitMixin:
                 head.has_stale = not (head.blocked_since is not None and head.retry_at == math.inf)
                 head.transition = _TransitMixin._displaced
             head.blocked_since = None  # as the QSim: the lane's blocked state restarts
-        trip.earliest = trip.pulled_earliest
         queue.appendleft(trip)
 
     # -- trips: dwell (network mode) ----------------------------------------
@@ -543,7 +558,7 @@ class _TransitMixin:
         k = trip.visit
         now = self.now
         tb = self.tt
-        dep = max(now, trip.dep + tb.rs_dep[k]) if tb.rs_await[k] else now
+        dep = max(now, tb.stop_departure(trip, k)) if tb.rs_await[k] else now
         self._push_trip(dep, trip, _TransitMixin._trip_leave_stop, _LATE)
 
     def _serve_new_boarder(self, trip) -> bool:

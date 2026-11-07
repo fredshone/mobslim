@@ -71,7 +71,7 @@ What one iteration does (`Controller.run`):
 
 | Step | Component (interface) | In → out |
 |---|---|---|
-| 0. prepare (once) | `route_scenario` | un-routed legs → routed at free speed |
+| 0. prepare (once) | `route_scenario` | activities → assigned links (`assign_activity_links`); un-routed legs → routed at free speed |
 | 1. replanning (it ≥ 1) | `StrategyManager` on a `ReplanningRunner` | `Population` + `ReplanningContext` → new `Population` |
 | 2. mobsim | `Mobsim` | `Scenario` → `Trajectories` (arrays); events only for registered handlers |
 | 3. scoring | `Scorer` | `Trajectories` (vectorised) or `ExperiencedPlan` → score of the selected plan |
@@ -113,7 +113,7 @@ Scenario                                    frozen
 │                                           population it is a lazy view of a row
 │           ├── Activity(type, node, end_time, duration, x, y, link)
 │           │                     node ─────────────► node index
-│           │                     link ─────────────► link index (optional; ends at node)
+│           │                     link ─────────────► link index (assigned in prepare; ends at node)
 │           └── Leg(mode, route, travel_time)
 │               └── Route(links, travel_time, distance)
 │                                 links ────────────► link indices
@@ -219,7 +219,10 @@ src/mobslim/
 │   ├── _agentsim_transit.py  AgentSim's transit: trips and passengers as agents (tickets)
 │   ├── _transit.py   the QSim's transit component
 │   ├── _transit_tables.py    transit tables and results shared by the Python sims
-│   └── hermes.py     HermesSim: whole-second queue model, Python reference kernel (+ Rust)
+│   ├── hermes.py     HermesSim: whole-second queue model, Python reference kernel (+ Rust)
+│   ├── parallel.py   ParallelSim: whole-second steps on network partitions, Python reference kernel (+ Rust, threaded)
+│   ├── partition.py  splitting nodes between threads: Morton (traffic-balanced) or METIS (as matsim-rust)
+│   └── shard.py      ShardSim: matsim-rust's parallel design, Rust kernel only (rust/mobslim-shard)
 ├── routing/
 │   ├── base.py       Router, TravelTime, RouterFactory protocols
 │   ├── dijkstra.py   time-dependent DijkstraRouter (Python reference, route_many)
@@ -290,6 +293,7 @@ net.n_links, net.modes            # 1, frozenset({'car'})
 net.length, net.capacity          # numpy arrays indexed by link
 net.out_links("car")              # CSR adjacency (offsets, links) for routing
 net.nearest_node(x, y)            # spatial lookup
+net.link_attribute("type")        # extra link attribute (MATSim: loaded lazily on first use)
 net.to_networkx()                 # MultiDiGraph view for analysis/plotting
 ```
 
@@ -537,7 +541,12 @@ built-in alternative: `Controller(scenario, mobsim=AgentSim(AgentSimParams(retry
 whole-second clock, run by a compiled Rust kernel (`rust/mobslim-hermes`,
 built by `uv sync` when cargo is installed, with a Python fallback):
 `Controller(scenario, mobsim=HermesSim())`. It runs transit too, with
-vehicles on the timetable or in the queue model. The tests in
+vehicles on the timetable or in the queue model. `ParallelSim` runs on
+several threads (`rust/mobslim-parallel`), with results that do not depend
+on their number; it pays off on large networks, and runs transit too:
+`Controller(scenario, mobsim=ParallelSim(ParallelSimParams(threads=4)))`.
+`ShardSim` reimplements matsim-rust's parallel design and queue dynamics to
+compare against it (`docs/design.md` §3.3). The tests in
 `tests/test_qsim.py` serve as the behavioural specification for alternative
 implementations and run against every registered mobsim, and `tests/test_trajectories.py` checks that the arrays and
 the events agree.

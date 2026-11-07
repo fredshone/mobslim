@@ -11,9 +11,12 @@ the selected plan are per-person state that changes every iteration. A
 ``(n_persons, n_slots)`` arrays of plan ids and scores and a ``selected``
 array. Scoring updates one array instead of rebuilding persons and plans.
 
-Locations are network node indices. An activity may also name the link it
-is on (``Activity.link``, as MATSim's activities do; its node is then the
-link's to-node). A car leg then ends by driving through that link, as in
+An activity is a location: its coordinates (``Activity.x, y``) and the
+network node a network leg starts and ends at. Before simulation every
+activity is assigned a link (``Activity.link``, as MATSim's activities have;
+its node is then the link's to-node) by
+:func:`~mobslim.activity_links.assign_activity_links`, unless it already
+has one. A car leg then ends by driving through that link, as in
 MATSim, instead of reaching the node by any way in (see
 :func:`~mobslim.routing.base.route_many_to_links`). An activity may also keep
 the coordinates it had in the plans file (``Activity.x, y``): teleported legs
@@ -697,6 +700,19 @@ class Population:
         for j, plan in enumerate(plans):
             plan._stored_as(store, j)
         return self._derive(plans=store, plan_ids=plan_ids)
+
+    def with_live_batch(self, live: np.ndarray, batch: PlanBatch) -> "Population":
+        """This population with its held plans replaced by ``batch``, row
+        ``i`` of which replaces store row ``live[i]`` (``live`` as
+        :meth:`live_plan_rows` returns it). For vectorised edits of every
+        held plan at once: ``pop.with_live_batch(live, edit(pop.plans.take(live)))``."""
+        live = np.asarray(live, dtype=np.int64)
+        if batch.n_plans != len(live):
+            raise ValueError("with_live_batch: batch must have one plan per live row.")
+        plan_ids = self.plan_ids
+        if len(live) != len(self.plans) or (len(live) and live[-1] != len(live) - 1):
+            plan_ids = _remap(plan_ids, live, len(self.plans))
+        return self._derive(plans=PlanStore.from_batch(batch), plan_ids=plan_ids)
 
     # -- reading --------------------------------------------------------------
     def live_plan_rows(self) -> np.ndarray:

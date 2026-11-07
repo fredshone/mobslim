@@ -70,13 +70,31 @@ T0 = 7 * H  # 25200
 WALK = TeleportedModeParams(speed=1.0, beeline_distance_factor=1.0)
 
 # mobsims that implement transit (all of them)
-TRANSIT_MOBSIMS = (["qsim", "agentsim", "agentsim_chain", "hermes_py"]
-                   + (["hermes"] if conftest.rust_available() else []))
+TRANSIT_MOBSIMS = sorted(conftest.MOBSIMS)
+
+
+# Documented deviations, as in tests/test_qsim.py: ShardSim's default timing
+# is matsim-rust's (a second per junction, road times rounded down), which
+# adds up beyond one second over the corridor. With HermesSim's timing it
+# passes them (tests/test_shard.py::test_transit_close_to_hermes).
+_SHARD = "ShardSim's default timing adds a second per junction crossed: "
+DEVIATIONS = {  # mobsim -> test (with a parameter, if only that case) -> reason
+    "shard": {
+        "test_without_await_departure_early_vehicles_leave[shard-network":
+            _SHARD + "the late bus is 3 s later",
+        "test_stop_blocking_in_mixed_traffic": _SHARD + "the bus enters its last links 2-3 s later",
+        "test_learn_from_transit_adds_vehicle_link_times_without_dwell":
+            _SHARD + "the car is held 1 s longer",
+    },
+}
 
 
 @pytest.fixture(params=TRANSIT_MOBSIMS, autouse=True)
 def mobsim_kind(request, monkeypatch):
     monkeypatch.setattr(conftest, "DEFAULT_MOBSIM", request.param)
+    for test, reason in DEVIATIONS.get(request.param, {}).items():
+        if request.node.name.startswith(test):
+            request.applymarker(pytest.mark.xfail(reason=reason, strict=True))
     return request.param
 
 
@@ -105,7 +123,7 @@ STOP_LINKS = {"S0": "a-0", "S1": "0-1", "S2": "1-2", "S3": "2-3", "S4": "3-4"}
 def corridor_transit(net, *, vehicles="schedule", capacity=10, access=0.0, egress=0.0,
                      doors="serial", door_open=0.0, door_close=0.0, await_departure=True,
                      departures=(T0, T0 + 600, T0 + 1200), extra_routes=None, blocking=False,
-                     stops=None):
+                     stops=None, schedule_modes=()):
     b = TransitBuilder(net)
     b.vehicle_type("bus", seats=capacity, standing=0, access_time=access, egress_time=egress,
                    doors=doors, pce=1.0)
@@ -117,7 +135,7 @@ def corridor_transit(net, *, vehicles="schedule", capacity=10, access=0.0, egres
     if extra_routes:
         extra_routes(b)
     return b.build(TransitParams(vehicles=vehicles, walk=WALK, door_open_time=door_open,
-                                 door_close_time=door_close))
+                                 door_close_time=door_close, schedule_modes=schedule_modes))
 
 
 def node(net, i):
@@ -443,6 +461,113 @@ def test_transfer_is_simulated():
     assert tr.ride_wait_start[r2] == pytest.approx(T0 + 240)  # same stop, 0 s walk
     assert tr.ride_board[r2] == pytest.approx(T0 + 300)
     assert tr.leg_arrival[0] == pytest.approx(T0 + 540)
+
+
+# The bus of test_network_vehicle_follows_queue_model_and_awaits_departure
+# and its rider (S0 -> S3), with junction delays: the bus serves each stop
+# on reaching the end of its link and crosses into the next link one second
+# after it leaves (none after its last link); the rider's activity starts
+# one second after the arrival. timing -> (stop arrivals, departures,
+# alight, activity start), relative to T0.
+TRANSIT_TIMING = {
+    "default": ({}, [0, 100, 220, 340, 460], [0, 120, 240, 360, 480], 340, 340),
+    "junctions": (dict(junction_delays=True),
+                  [0, 101, 221, 341, 461], [0, 120, 240, 360, 480], 341, 342),
+}
+
+
+@pytest.mark.parametrize("timing", sorted(TRANSIT_TIMING))
+def test_transit_timing_options(timing, mobsim_kind):
+    params, arrivals, departures, alight, start = TRANSIT_TIMING[timing]
+    if mobsim_kind == "shard":  # its own default is matsim-rust's timing
+        params = {"junction_delays": False, "rounding": "nearest", **params}
+    log = EventLog()
+    tr = run(routed(pt_scenario(passengers(1, 0, 3), vehicles="network")), [log], **params)
+    arr = [e.time - T0 for e in log.of_type(VehicleArrivesAtFacility) if e.trip == 0]
+    dep = [e.time - T0 for e in log.of_type(VehicleDepartsAtFacility) if e.trip == 0]
+    assert (arr, dep) == (arrivals, departures)
+    (r,) = rides_of(tr, 0)
+    assert (tr.ride_alight[r] - T0, tr.leg_arrival[0] - T0, tr.act_start[1] - T0) == (
+        alight, alight, start)
+
+
+@pytest.mark.parametrize("timing, wait", [
+    (dict(continuous_time=True), 10.6),
+    (dict(continuous_time=False), 11.0),
+    (dict(continuous_time=False, rounding="down"), 10.0),
+])
+def test_transit_walks_round_like_road_times(timing, wait, mobsim_kind):
+    """A 10.6 s access walk: exact, or rounded by ``rounding`` in whole seconds."""
+    if timing["continuous_time"] and conftest.time_step(mobsim_kind):
+        pytest.skip("whole seconds only")
+    if mobsim_kind == "shard":
+        timing = {"junction_delays": False, "rounding": "nearest", **timing}
+
+    def population(net):
+        return Population.from_plans({0: Plan.builder()
+                                      .act("home", node(net, 0), xy=(-10.6, 0.0), end_time=25000.0)
+                                      .leg("pt").act("work", node(net, 3)).build()})
+    tr = run(routed(pt_scenario(population)), **timing)
+    (r,) = rides_of(tr, 0)
+    assert tr.ride_wait_start[r] - 25000.0 == pytest.approx(wait)
+    assert tr.ride_board[r] == T0
+
+
+def rail_and_bus(schedule_modes, n_cars=30):
+    """A rail line R (mode ``rail``, 07:01) and the bus line L (07:00) on the
+    same corridor, behind a queue of cars on a road that lets one car through
+    every 100 s; one passenger on each, S0 -> S3."""
+    net = corridor_network()
+
+    def rail(b):
+        b.route("R", "r", mode="rail", links=["a-0", "0-1", "1-2", "2-3", "3-4"],
+                stops=[(f"S{i}", 120.0 * i, 120.0 * i, True) for i in range(5)])
+        b.departures("R", "r", times=[T0 + 60], vehicle_type="bus")
+
+    transit = corridor_transit(net, vehicles="network", departures=(T0,), extra_routes=rail,
+                               schedule_modes=schedule_modes)
+    s = transit.schedule
+    plans = {i: Plan.builder().act("home", node(net, 0), end_time=T0 - 300 + i).leg("car")
+             .act("work", node(net, 4)).build() for i in range(n_cars)}
+    for line, route, p in (("L", "r", n_cars), ("R", "r", n_cars + 1)):
+        pt = TransitPassengerRoute([(s.route_stop(line, route, "S0"), s.route_stop(line, route, "S3"))],
+                                   360.0, 3000.0)
+        plans[p] = (Plan.builder().act("home", node(net, 0), end_time=T0 - 10).leg("pt", route=pt)
+                    .act("work", node(net, 3)).build())
+    return routed(Scenario(net, Population.from_plans(plans), teleported_modes={"walk": WALK},
+                           transit=transit))
+
+
+def test_schedule_modes_keep_to_the_timetable_in_congestion():
+    """Rail in ``schedule_modes`` keeps its timetable exactly while the bus,
+    in traffic, queues behind the cars; without it, the train queues too."""
+    log = EventLog()
+    tr = run(rail_and_bus(("rail",)), [log], flow_capacity_factor=1 / 36)
+    (bus_ride,), (rail_ride,) = rides_of(tr, 30), rides_of(tr, 31)
+    assert tr.ride_board[rail_ride] == T0 + 60
+    assert tr.ride_alight[rail_ride] == T0 + 60 + 360  # on time
+    assert tr.ride_alight[bus_ride] > T0 + 360 + 600  # stuck in the queue
+    v = tr.transit
+    rail_links = v.link_enter[v.trip_link_offsets[1]:v.trip_link_offsets[2]]
+    assert np.isnan(rail_links).all()  # off the network
+    assert not np.isnan(v.link_enter[v.trip_link_offsets[0]:v.trip_link_offsets[1]]).any()
+    assert not [e for e in log.events if getattr(e, "trip", None) == 1
+                and type(e).__name__.startswith("TransitVehicleLink")]
+
+    tr = run(rail_and_bus(()), flow_capacity_factor=1 / 36)
+    (rail_ride,) = rides_of(tr, 31)
+    assert tr.ride_alight[rail_ride] > T0 + 60 + 360 + 600  # queues like the bus
+
+
+def test_schedule_modes_need_vehicles_on_the_network():
+    """With ``vehicles="schedule"`` every vehicle keeps the timetable anyway."""
+    net = corridor_network()
+    transit = corridor_transit(net, vehicles="schedule", schedule_modes=("rail",))
+    assert not transit.trip_on_network.any()
+    transit = corridor_transit(net, vehicles="network", schedule_modes=("rail",))
+    assert transit.trip_on_network.all()  # the corridor's buses are not rail
+    with pytest.raises(ValueError):
+        TransitParams(schedule_modes="rail")
 
 
 def car_behind_bus(blocking):

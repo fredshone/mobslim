@@ -17,8 +17,12 @@ from mobslim.mobsim import (
     AgentSimParams,
     HermesSim,
     HermesSimParams,
+    ParallelSim,
+    ParallelSimParams,
     QSim,
     QSimParams,
+    ShardSim,
+    ShardSimParams,
 )
 from mobslim.modes import Modes
 from mobslim.network import (
@@ -64,6 +68,10 @@ __all__ = [
     "ExperiencedPlan",
     "HermesSim",
     "HermesSimParams",
+    "ParallelSim",
+    "ParallelSimParams",
+    "ShardSim",
+    "ShardSimParams",
     "IterationState",
     "Modes",
     "Leg",

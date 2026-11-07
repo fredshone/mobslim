@@ -9,6 +9,7 @@ files are described in the
 :maxdepth: 2
 
 developer
+mobsims
 design
 api
 testing

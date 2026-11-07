@@ -60,6 +60,7 @@ const BOARD_DONE: u64 = 11;
 const DOOR_CLOSE: u64 = 12;
 const PAX_AT_STOP: u64 = 13;
 const PAX_ARRIVE: u64 = 14;
+const ACT_START: u64 = 15;
 const TOKEN_MASK: u64 = (1 << 24) - 1;
 
 // doors of a trip in network mode
@@ -124,7 +125,12 @@ struct Inputs {
     trip_parallel: Vec<u8>,
     door_open_steps: i64,
     door_close_steps: i64,
+    trip_network: Vec<u8>, // per trip: 1 on the network, 0 on the timetable
+    rs_network: Vec<u8>,   // per route stop: its route's trips' mode
     v_pce: Vec<f64>, // per vehicle: persons 1, then the trips' PCE
+    // 1: a vehicle leaves a link one second later if it crosses a junction
+    // after it, and an activity starts one second after the arrival
+    junction_delay: i64,
 }
 
 #[derive(Default)]
@@ -227,7 +233,6 @@ struct Sim<'a> {
     tr_board_busy: Vec<bool>,
     tr_boarding: Vec<i64>,
     tr_pulled: Vec<bool>,
-    tr_pulled_earliest: Vec<i64>,
 }
 
 impl<'a> Sim<'a> {
@@ -326,7 +331,6 @@ impl<'a> Sim<'a> {
             tr_board_busy: vec![false; n_trips],
             tr_boarding: vec![-1; n_trips],
             tr_pulled: vec![false; n_trips],
-            tr_pulled_earliest: vec![0; n_trips],
         }
     }
 
@@ -425,6 +429,7 @@ impl<'a> Sim<'a> {
             DOOR_CLOSE => self.door_close(index),
             PAX_AT_STOP => self.pax_at_stop(index),
             PAX_ARRIVE => self.arrive(index),
+            ACT_START => self.start_activity(index),
             _ => unreachable!(),
         }
     }
@@ -488,6 +493,16 @@ impl<'a> Sim<'a> {
             self.record(EV_ARRIVAL, p, leg);
         }
         self.a_leg[p] = -1;
+        if self.inp.junction_delay != 0 {
+            // the activity starts one second later
+            self.schedule(self.now + 1, ACT_START, p);
+        } else {
+            self.start_activity(p);
+        }
+    }
+
+    fn start_activity(&mut self, p: usize) {
+        let now = self.now as f64;
         let a = self.a_act[p] + 1;
         self.a_act[p] = a;
         self.out.act_start[a] = now;
@@ -618,20 +633,23 @@ impl<'a> Sim<'a> {
     fn enter_link(&mut self, v: usize, link: usize) {
         let rpos = self.vh[v].rpos;
         self.out.enter[rpos] = self.now as f64;
+        let nx = self.next_of(v);
         let earliest = if v < self.n_plans {
             if self.rec[EV_LINK_ENTER as usize] {
                 self.record(EV_LINK_ENTER, v, link);
             }
-            self.now + (self.lk[link].free as i64)
+            // a junction delay when it crosses into a next link
+            let delay = if nx != END { self.inp.junction_delay } else { 0 };
+            self.now + (self.lk[link].free as i64) + delay
         } else {
             if self.rec[EV_VEH_LINK_ENTER as usize] {
                 self.record(EV_VEH_LINK_ENTER, v - self.n_plans, link);
             }
-            self.now + self.inp.trip_link_steps[rpos - self.inp.n_plan_links]
+            let delay = if nx != END { self.inp.junction_delay } else { 0 };
+            self.now + self.inp.trip_link_steps[rpos - self.inp.n_plan_links] + delay
         };
         self.vh[v].link = link as i64;
         self.lk[link].occ += self.vh[v].pce;
-        let nx = self.next_of(v);
         if self.q_push_back(link, v, nx, earliest) {
             let t = self.head_time(link);
             self.schedule_link(link, t);
@@ -644,9 +662,16 @@ impl<'a> Sim<'a> {
         let v = self.lk[link].head as usize;
         let earliest = self.vh[v].qearliest;
         if v >= self.n_plans && self.has_stop_here(v - self.n_plans) {
-            return earliest.max(self.now); // it may have queued past its earliest exit
+            // it may have queued past the time it reaches the stop
+            return (earliest - self.jd(v)).max(self.now);
         }
         earliest.max(ceil_step(self.lk[link].nft))
+    }
+
+    /// The junction delay after vehicle `v`'s current link (none after its last).
+    #[inline]
+    fn jd(&self, v: usize) -> i64 {
+        if self.vh[v].rpos + 1 < self.vh[v].rend { self.inp.junction_delay } else { 0 }
     }
 
     #[inline]
@@ -806,7 +831,7 @@ impl<'a> Sim<'a> {
             self.record(EV_WAITING, p, k);
         }
         let n = self.at_stop[k].len();
-        if !self.inp.network_vehicles {
+        if self.inp.rs_network[k] == 0 {
             for i in 0..n {
                 let d = self.at_stop[k][i] as usize;
                 if (self.tr_load[d] as f64) < self.inp.trip_capacity[d] {
@@ -875,7 +900,7 @@ impl<'a> Sim<'a> {
         if self.rec[EV_DRIVER_START as usize] {
             self.record(EV_DRIVER_START, d, 0);
         }
-        if self.inp.network_vehicles {
+        if self.inp.trip_network[d] != 0 {
             let v = self.n_plans + d;
             let n = (self.inp.trip_link_offsets[d + 1] - self.inp.trip_link_offsets[d]) as usize;
             self.vh[v].rpos = self.tr_rstart[d];
@@ -901,7 +926,7 @@ impl<'a> Sim<'a> {
         if token != self.tr_token[d] & TOKEN_MASK {
             return;
         }
-        let net = self.inp.network_vehicles;
+        let net = self.inp.trip_network[d] != 0;
         if net && self.tr_state[d] != CLOSED {
             return;
         }
@@ -931,16 +956,19 @@ impl<'a> Sim<'a> {
         }
         let v = self.n_plans + d;
         let link = self.inp.route_links[self.vh[v].rpos] as usize;
+        // it leaves the link from now, crossing a junction one second later
+        let earliest = self.now + self.jd(v);
         if self.tr_pulled[d] {
             // back from the stop into the lane, as its head
             self.tr_pulled[d] = false;
-            let e = self.tr_pulled_earliest[d];
             let nx = self.next_of(v);
-            self.q_push_front(link, v, nx, e);
+            self.q_push_front(link, v, nx, earliest);
             self.lk[link].blocked = NONE;
             self.lk[link].waiting = -1;
+        } else {
+            self.vh[v].qearliest = earliest;
         }
-        let t = self.now.max(ceil_step(self.lk[link].nft));
+        let t = earliest.max(ceil_step(self.lk[link].nft));
         self.schedule_link(link, t);
     }
 
@@ -978,15 +1006,16 @@ impl<'a> Sim<'a> {
         if !self.has_stop_here(d) {
             return false;
         }
-        if self.now < earliest {
-            self.schedule_link(link, earliest);
+        // it serves stops on reaching the link's end
+        let reach = earliest - self.jd(self.n_plans + d);
+        if self.now < reach {
+            self.schedule_link(link, reach);
             return true;
         }
         let stop = self.inp.rs_stop[self.tr_next[d]] as usize;
         if self.inp.stop_blocking[stop] == 0 {
             self.q_pop_front(link); // into the stop: off the lane, still in storage
             self.tr_pulled[d] = true;
-            self.tr_pulled_earliest[d] = earliest;
             if self.lk[link].head != NIL {
                 let t = self.head_time(link);
                 self.schedule_link(link, t);
@@ -1207,7 +1236,9 @@ fn err(msg: &str) -> PyErr {
                     stop_blocking, trip_k0, trip_k1, trip_start_step, trip_stop_offsets,
                     trip_stop_arr_step, trip_stop_dep_step, trip_link_offsets, trip_links,
                     trip_link_steps, trip_capacity, trip_pce, trip_access_steps,
-                    trip_egress_steps, trip_parallel, door_open_steps, door_close_steps))]
+                    trip_egress_steps, trip_parallel, door_open_steps, door_close_steps,
+                    trip_network, rs_network,
+                    junction_delay=0))]
 #[allow(clippy::too_many_arguments)]
 fn run<'py>(
     py: Python<'py>,
@@ -1251,6 +1282,9 @@ fn run<'py>(
     trip_parallel: PyReadonlyArray1<'py, u8>,
     door_open_steps: i64,
     door_close_steps: i64,
+    trip_network: PyReadonlyArray1<'py, u8>,
+    rs_network: PyReadonlyArray1<'py, u8>,
+    junction_delay: i64,
 ) -> PyResult<Bound<'py, PyTuple>> {
     let n_links = free_steps.as_array().len();
     let net = network_vehicles != 0;
@@ -1326,7 +1360,10 @@ fn run<'py>(
         trip_parallel: trip_parallel.as_array().to_vec(),
         door_open_steps,
         door_close_steps,
+        trip_network: trip_network.as_array().to_vec(),
+        rs_network: rs_network.as_array().to_vec(),
         v_pce,
+        junction_delay,
     };
     let o = py.allow_threads(|| Sim::new(&inp).run());
     let items: Vec<Bound<'py, PyAny>> = vec![

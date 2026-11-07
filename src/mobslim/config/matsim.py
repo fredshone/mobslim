@@ -521,8 +521,16 @@ def read_scenario(cfg: MatsimConfig):
         passenger_modes = tuple((cfg.get("transit", "transitModes") or "pt").split(","))
         transit = read_transit(cfg.input_path("transit", "transitScheduleFile"),
                                cfg.input_path("transit", "vehiclesFile"), network,
-                               TransitParams(passenger_modes=passenger_modes, vehicles="network"))
+                               TransitParams(passenger_modes=passenger_modes, vehicles="network",
+                                             schedule_modes=deterministic_modes(cfg)))
     return Scenario(network, population, teleported_modes=modes, transit=transit), unsupported
+
+
+def deterministic_modes(cfg: "MatsimConfig") -> tuple:
+    """The transit modes MATSim runs to the timetable ("deterministic" pt:
+    SBB's ``SBBPt.deterministicServiceModes``, if its simulation is on)."""
+    modes = cfg.get("SBBPt", "deterministicServiceModes") or ""
+    return tuple(m.strip() for m in modes.split(",") if m.strip())
 
 
 # -------------------------------------------------------------- controller

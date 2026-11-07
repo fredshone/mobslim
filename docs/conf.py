@@ -19,7 +19,7 @@ autodoc_member_order = "bysource"
 autodoc_default_options = {"members": True, "undoc-members": False, "show-inheritance": False}
 autodoc_typehints = "description"
 # optional extras: document the API even when they are not installed
-autodoc_mock_imports = ["pyarrow", "mobslim_router", "mobslim_hermes"]
+autodoc_mock_imports = ["pyarrow", "mobslim_router", "mobslim_hermes", "mobslim_parallel", "mobslim_shard", "pymetis"]
 default_role = "code"
 suppress_warnings = ["myst.xref_missing"]
 

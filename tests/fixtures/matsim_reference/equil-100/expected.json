@@ -25,6 +25,26 @@
       "leg_tt_quantile_dist_s": 0.4752475247524752,
       "veh_hours_rel_diff": 0.0021142022047688463,
       "veh_km_rel_diff": 0.0
+    },
+    "parallel": {
+      "geh_lt5_share": 1.0,
+      "volume_r2": 0.9999564706394463,
+      "volume_abs_diff_rel": 0.002857142857142857,
+      "link_time_mae_s": 0.4691283973758196,
+      "leg_tt_mean_rel_diff": 0.0002817695125388154,
+      "leg_tt_quantile_dist_s": 0.4752475247524752,
+      "veh_hours_rel_diff": 0.0021142022047688463,
+      "veh_km_rel_diff": 0.0
+    },
+    "shard": {
+      "geh_lt5_share": 1.0,
+      "volume_r2": 0.9999564706394463,
+      "volume_abs_diff_rel": 0.002857142857142857,
+      "link_time_mae_s": 0.2068556701030931,
+      "leg_tt_mean_rel_diff": -0.0005312529350990963,
+      "leg_tt_quantile_dist_s": 0.900990099009901,
+      "veh_hours_rel_diff": 0.0012996903678828666,
+      "veh_km_rel_diff": 0.0
     }
   }
 }

@@ -5,6 +5,8 @@ means the two simulations cannot drift apart on the queue model itself, only
 on how they schedule it.
 """
 
+import math
+
 import numpy as np
 
 from mobslim.mobsim.base import SimulationError
@@ -13,6 +15,49 @@ from mobslim.planbatch import PlanBatch
 from mobslim.scenario import Scenario
 
 EPS = 1e-9
+
+# How whole-second mobsims round road (free-speed) and teleport times.
+ROUNDINGS = ("nearest", "down")
+
+
+def check_timing(sim: str, continuous_time: bool, junction_delays: bool, rounding: str, *,
+                 continuous: bool, whole: bool) -> None:
+    """Validate a mobsim's timing parameters (``ValueError`` if ``sim`` cannot
+    run them).
+
+    * ``continuous_time``: exact (fractional) times, or whole seconds;
+    * ``junction_delays``: a vehicle crosses into its next link one second
+      after it could leave its link, and an activity starts one second after
+      the arrival (MATSim's QSim and matsim-rust step this way);
+    * ``rounding``: how road and teleport times become whole seconds,
+      ``"nearest"`` (half up) or ``"down"``; whole seconds only.
+    """
+    if rounding not in ROUNDINGS:
+        raise ValueError(f"rounding must be one of {ROUNDINGS}, not {rounding!r}.")
+    if continuous_time and not continuous:
+        raise ValueError(f"{sim} runs in whole seconds only (continuous_time=False); "
+                         "QSim and AgentSim run in continuous time.")
+    if not continuous_time and not whole:
+        raise ValueError(f"{sim} runs in continuous time only (continuous_time=True); "
+                         "QSim, AgentSim, HermesSim, ParallelSim and ShardSim run in whole seconds.")
+    if continuous_time and rounding != "nearest":
+        raise ValueError("rounding applies to whole seconds only (continuous_time=False).")
+    if not isinstance(junction_delays, bool) or not isinstance(continuous_time, bool):
+        raise ValueError("continuous_time and junction_delays must be True or False.")
+
+
+def round_steps(x, rounding: str) -> np.ndarray:
+    """Times in seconds as whole seconds: ``"nearest"`` rounds half up,
+    ``"down"`` rounds down."""
+    x = np.asarray(x, dtype=float)
+    if rounding == "nearest":
+        return np.floor(x + 0.5).astype(np.int64)
+    return np.floor(x + EPS).astype(np.int64)
+
+
+def ceil_step(t: float) -> int:
+    """The first whole second at or after ``t`` (tolerating float noise)."""
+    return math.ceil(t - EPS)
 
 
 def link_parameters(

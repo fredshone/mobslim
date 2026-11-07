@@ -88,7 +88,7 @@ Per iteration (`Controller.run`):
 |---|---|---|
 | `IdMap` | `ids` | External id ↔ dense `int` index |
 | `Network` | `network` | Arrays: `from_node`, `to_node`, `length` [m], `freespeed` [m/s], `capacity` [veh/h, per link], `lanes`, `link_modes`. Links are keyed by link id, so **parallel links are supported**. Derived, cached views: per-mode CSR adjacency (`out_links`), free-speed times, spatial index, `to_networkx()` |
-| `Activity(type, node, end_time, duration, x, y, link)` | `population` | Free-string types. Located at a node; optionally also on a link (its to-node is the node), as MATSim's activities are |
+| `Activity(type, node, end_time, duration, x, y, link)` | `population` | Free-string types. A location (`x, y`) on a link (its to-node is `node`), as MATSim's activities are. Activities with coordinates but no link are assigned the link with the nearest midpoint before the first iteration (`activity_links`, 3.1a); activities placed at a node without coordinates stay there |
 | `Leg(mode, route, travel_time)` | `population` | `route` is a `Route(links, travel_time, distance)` for network modes and `None` for teleported modes. A route stores its links as packed native int32 `bytes` (`data`); `links` decodes a tuple, `link_array` is a zero-copy numpy view |
 | `Plan(elements)` | `population` | Validated alternating `Activity, Leg, …, Activity`. Content only: no score. Immutable; a plan read from a population is a lazy view of a `PlanStore` row (elements built on first access), compared by content |
 | `Person(id, plans, selected, scores)` | `population` | Plan memory as a value; `scores[i]` belongs to `plans[i]` (`None` = unscored). What strategies and selectors work on |
@@ -128,6 +128,41 @@ strategies still see `Person` values whose plans are lazy views, so
 `mobslim.formats` reads and writes MATSim XML and a Parquet population
 directory (persons, plans, activities, legs tables) by path.
 
+### 3.1a Activity locations and links (`activity_links`)
+
+Activities are locations, not nodes. Plans usually give coordinates only,
+so `route_scenario` (MATSim's `PrepareForSim`, run once by
+`Controller.prepare`) assigns every activity that has coordinates but no
+link to a link, as MATSim's `XY2Links` does. The activity's node becomes
+the link's to-node and its coordinates are kept. Network legs leave from
+the end of the link and arrive by driving through it; teleported legs and
+pt walks use the coordinates. Routes of legs next to a newly assigned
+activity are dropped and routed again.
+
+**Rule.** The link whose *midpoint* (the average of its two nodes; links
+are straight lines) is nearest. It is found with a static k-d tree in
+`rust/mobslim-router` (`PointIndex`), queried in batches over
+`$MOBSLIM_ROUTER_THREADS` threads (about 0.1 µs per activity with 8
+threads), or else one query at a time with a `fastquadtree` point quadtree
+(about 2 µs). Between equally near links, the k-d tree takes the lowest
+link index; the quadtree may take any one of them. The rule is simple and
+fast, but approximate next to long links: a point beside the middle of a
+long link can be nearer another link's midpoint.
+
+**Preferences.** `ActivityLinkParams(modes, tiers)`: only links allowing
+one of `modes` (default car) are eligible. Ordered tiers exclude links by
+attribute filters up to a distance; e.g. `ActivityLinkParams.avoiding(
+LinkFilter("type", values=("motorway",)), unless_beyond=1000)` keeps
+activities off motorways unless no other link is within 1 km. Config: the
+`activity_links` section. `ControllerParams(activity_links=None)` turns
+assignment off.
+
+**Link attributes.** `Network.link_attribute(name)` returns one column per
+attribute (`None`/`NaN` where missing; the built-in `length`, `freespeed`,
+`capacity`, `lanes` too). `read_network_xml` does not parse extra
+attributes up front: a picklable `MatsimLinkAttributes(path)` source parses
+the file on first use (a link's `type`/`origid` and its `<attributes>`).
+
 ### 3.2 Trajectories and events (`trajectories`, `events`)
 
 **Trajectories are the primary output.** They hold the same information as
@@ -160,6 +195,42 @@ event-based collectors.
 class Mobsim(Protocol):
     def run(self, scenario: Scenario, events: EventsManager) -> Trajectories: ...
 ```
+
+How the mobsims differ from each other and from their MATSim equivalents,
+in plain terms and with measured effects, is in [The mobsims compared](mobsims.md).
+
+**Timing parameters, shared by every mobsim** (`mobsim._common.check_timing`):
+`continuous_time` (exact times or whole seconds), `junction_delays` (a
+vehicle that could leave a link and crosses into a next one does so one
+second later, and an activity starts one second after the arrival:
+MATSim's and matsim-rust's step order) and `rounding` (`nearest` or `down`,
+for road and teleport times in whole seconds; activity ends always round
+up). QSim and AgentSim do both clocks; the others whole seconds only, and
+reject `continuous_time=True`. In whole seconds QSim and AgentSim follow
+HermesSim's rules (rounded road and teleport times, activity ends and forced
+moves at the next whole second, exits at the first whole second at or after
+the unrounded flow slot), so QSim equals HermesSim move for move, and
+AgentSim does until spillback (`test_hermes.py`). Junction delays are an
+extra second on the earliest exit of every link but a route's last, plus a
+delayed activity start. In ShardSim they are its tick order instead (nodes
+before links, as matsim-rust); without them it runs links before nodes, and
+a vehicle reaching the end of a link crosses in the same tick.
+
+Transit vehicles keep the timetable or drive the network per route:
+`TransitParams.vehicles` sets the default and `schedule_modes` lists the
+route modes that keep the timetable anyway (MATSim's deterministic pt,
+`Transit.trip_on_network`). The kernels branch per trip and per route stop,
+so the two kinds of line run side by side in one run. Transit takes the
+same timing parameters in every mobsim
+(`mobsim._transit_tables.transit_times` computes its times for all of them):
+in whole seconds the timetable's times round up and walk, door and
+per-passenger times round by `rounding`; with junction delays a transit
+vehicle serves its stops on reaching the end of a link and crosses into the
+next one a second after it could leave (after leaving the stop, if it has
+one there), which is MATSim's order, and a passenger's activity starts a
+second after the arrival. With whole seconds the QSim equals HermesSim on
+transit move for move too, and AgentSim equals the QSim without spillback
+(`test_hermes.py`, `test_agentsim_transit.py`).
 
 `QSim.run` encodes the selected plans (`PlanBatch.from_plans`) and calls
 `QSim.run_batch(scenario, plans, events)`, which is the array-in, array-out
@@ -269,6 +340,161 @@ This replaces the original instruction-stream `Sim`. That sim had the same
 agent-driven loop, but whole-second rounding, per-lane flow, storage in metres, no
 stuck time, and an exit that popped the queue head whoever was leaving, which
 broke FIFO.
+
+#### ParallelSim: whole seconds on several threads
+
+`ParallelSim` (`mobsim/parallel.py`, Rust kernel `rust/mobslim-parallel`)
+runs HermesSim's queue model with the network split across threads. HermesSim
+cannot be split this way and keep its results: within one second its moves
+chain through any number of links and nodes in one global order (that order
+is what makes it equal the QSim), so threads would have to take turns at
+every partition boundary. ParallelSim changes the rules instead, so that
+**results are identical for any number of threads and any partition**, and
+between its Python reference kernel and the Rust kernel:
+
+* **Each second is one synchronous step.** A node decides every move through
+  it: vehicles leaving its incoming links, and persons departing onto its
+  outgoing links, best first, while the target link has storage. A refused
+  head stops its source for the step (FIFO).
+* **State has one owner.** A link's queue and flow slot belong to its
+  to-node, its storage and departure line to its from-node; a person belongs
+  to whichever queue, line or agenda it is in.
+* **Effects elsewhere are messages**, applied at the end of the step, even
+  inside one partition: a vehicle entering a link, space freed on a link, an
+  activity or teleport ending later. A node step reads only state its node
+  owns.
+* **Who goes first** at a node: the vehicle that has waited longest (since it
+  was first refused, else since it could first leave), ties broken by a hash
+  of the second and the source.
+
+What that costs, against HermesSim: each link takes at least 1 s, freed
+space is reused one second later, teleports take at least 1 s, and merging
+traffic is ordered differently. A late arrival still departs at once when its
+next leg starts at the node it arrived at (the usual case).
+
+Measured on the mobsim sweep's grids (4-core laptop, Rust kernels):
+
+| | HermesSim | ParallelSim 1 thread | 4 threads | 8 threads |
+|---|---|---|---|---|
+| grid 40, 1.4 M link traversals, free flow | 0.18 s | 0.36 s | 0.13 s | 0.15 s |
+| grid 80, 10.9 M link traversals, free flow | 4.7 s | 6.6 s | **2.0 s** | 1.8 s |
+| grid 40, capacity ×0.05, no stuck time (travel times ×26) | 0.23 s | 0.41 s | 0.29 s | 0.48 s |
+
+* It pays off on large scenarios: 3.4× from 1 to 4 threads on grid 80, 2.4×
+  faster than HermesSim. On one thread it is 1.4–2× slower than HermesSim
+  (a priority queue per node step and messages instead of direct writes).
+* Under heavy congestion each second has little work, and the per-second
+  barrier dominates: threads barely help.
+* Free-flow trajectories equal HermesSim's (tested). On MATSim's equil
+  references (`tests/fixtures/matsim_reference`) it is as close to MATSim
+  as HermesSim. With the default stuck time it also agrees under heavy
+  congestion (within 0.2% of the QSim at capacity ×0.05 on grids 20 and
+  40). **With the stuck time switched off it differs**: total travel time
+  is 15% (grid 20) to 33% (grid 40) above the QSim's and HermesSim's, which
+  agree within 1%. The cause is the merge
+  order: when a full link frees a slot, HermesSim gives it to a vehicle that
+  becomes ready in that same second before waking the longest waiter, which
+  keeps streams moving; ParallelSim gives it to the longest waiter. Neither
+  is MATSim's rule (a random choice weighted by capacity), and in gridlock
+  regimes small changes to it move results this much.
+
+**Transit** keeps those rules. A route stop (its waiting passengers and the
+trips there) belongs to the to-node of its link, which runs the trips' stop
+tasks (doors, boarding, alighting, departures) at the start of its node step
+and again whenever a step creates tasks due now, so a bus that leaves a stop
+crosses the node in the same step. A trip in network mode appears at the end
+of its first link at its departure time and takes its storage from the next
+second (it is never refused there, as in MATSim, where departing vehicles
+enter the buffer without storage). Passengers and trips that move to
+another node or a later second are messages; a walk of 0 s on the spot
+happens at once. Trajectories and events with transit do not depend on the
+thread count or the partition either (`test_parallel.py`, on a grid of bus
+lines crossing the partitions), and on MATSim's pt-tutorial ParallelSim
+gives HermesSim's results.
+
+#### ShardSim: matsim-rust's design, for comparison
+
+`ShardSim` (`mobsim/shard.py`, Rust kernel `rust/mobslim-shard`, no Python
+kernel) reimplements the parallel design of
+[matsim-rust](https://github.com/matsim-vsp/matsim-rust) from its
+documentation (no code taken: it is GPL-3.0), so the two designs can be
+compared on the same plans:
+
+* **Workers own their state.** Each partition's worker owns its nodes, the
+  exit side of the links into them (queue, buffer, flow capacity), the entry
+  side of the links out of them (storage, departures) and the persons there.
+  Moves inside a partition take effect at once. A link between partitions is
+  *split*: entering vehicles go downstream in a message, freed space comes
+  back upstream.
+* **Neighbour synchronisation.** Every second, a worker exchanges one message
+  with each partition it shares a link with and waits for those only. Persons
+  that change worker go in messages at least one second ahead; for workers
+  that are not neighbours, a lookahead gate keeps the receiver from running
+  ahead of them.
+* **Every second is simulated** from the first activity end; idle links sleep
+  until their first vehicle is due.
+* **matsim-rust's queue dynamics**, which are closer to MATSim's QSim than
+  HermesSim's: queue and buffer per link, flow capacity accumulated per
+  second and consumed on entering the buffer, free-speed times floored to whole seconds, nodes serving
+  in-links at random weighted by capacity (one seeded stream per node),
+  arrivals using no flow capacity, stuck after waiting *more* than
+  `stuck_time`, and activities starting one second after arrival.
+* **Its default timing is matsim-rust's:** `junction_delays=True`,
+  `rounding="down"`; both can be changed like any mobsim's.
+* **One deviation from matsim-rust, by default:** a buffered vehicle keeps
+  its storage until it crosses the node, as in the other mobsims, so a link
+  never holds more than its storage. matsim-rust frees it on entering the
+  buffer (`buffer_in_storage=False`), so a link holds about one second's
+  flow more.
+* **Partitioning by METIS**, as matsim-rust (unit weights, 3% imbalance,
+  contiguous, few neighbours; `pymetis`, the `metis` extra), or Morton
+  (`partitioner=`, also available to ParallelSim). See
+  `mobsim/partition.py`.
+
+Trajectories (and the canonical event order) do not depend on the worker
+count or the partition (`tests/test_shard.py`, including random partitions);
+they depend on `seed`. The shared mobsim spec runs it with seven documented
+deviations (strict xfails in `tests/test_qsim.py`), all from the rules above.
+
+Kernel times on the same laptop and day (ParallelSim / ShardSim, Morton
+partitions, no stuck time, ShardSim with matsim-rust's buffer storage;
+best of 2–3):
+
+| | 1 thread | 2 | 4 | 8 |
+|---|---|---|---|---|
+| grid 40, free flow | 0.72 / 1.28 s | 0.40 / 0.63 s | 0.26 / 0.36 s | 0.96 / 1.43 s |
+| grid 80, free flow | 9.2 / 15.6 s | 5.3 / 8.1 s | 3.0 / 4.7 s | 8.4 / 8.8 s |
+| grid 40, capacity ×0.05 | 0.83 / 7.65 s | 0.47 / 3.87 s | 0.47 / 2.14 s | 1.24 / 4.23 s |
+
+* Both designs scale about equally (≈3× from 1 to 4 threads on grid 80);
+  ShardSim's kernel is 1.5–1.8× slower under free flow and 4–9× under heavy
+  congestion, where it steps every second and serves every full buffer.
+* METIS cuts fewer links than Morton but, with unit node weights, balances
+  nodes rather than traffic, and was slower on 4 threads on grid 80
+  (ShardSim 6.9 s against 4.7 s).
+* Results: free flow is about 5% slower than HermesSim (one second per
+  link from buffer over the node). At capacity ×0.05 with the default stuck
+  time, total travel time is 3–7% below the QSim's (grids 40 and 20); with
+  the stuck time switched off, 25–40% below. matsim-rust's buffer storage
+  changes either by at most 2 points. On MATSim's equil references it is
+  the closest to MATSim's link times (mean absolute error 0.21 s against
+  HermesSim's 0.47 s on equil-100; 1.03 s, or 0.48 s with matsim-rust's
+  buffer storage, against 1.18 s on equil-2000-cap0.5); leg times are within
+  0.05% for all. See [The mobsims compared](mobsims.md).
+
+**Transit**, as MATSim does it: a transit vehicle serves a stop when it
+reaches the front of its link's queue, before it moves to the buffer (at a
+blocking stop it holds the queue; at a non-blocking one it leaves the queue
+and rejoins at its front when it departs), so with junction delays it
+crosses the node one tick after leaving the stop. A link runs its stops'
+tasks in the links step, so everything a stop does stays on its link or goes
+into a message for a later tick, and a trip's state travels with its
+vehicle. Trips appear at the end of their first link as in ParallelSim.
+Passengers can walk to any stop, so with transit workers that are not
+neighbours stay within one tick of each other (`gate` = 1). Results do not
+depend on the worker count or partition (`test_shard.py`). On MATSim's
+pt-tutorial, with its default timing, it is the closest to MATSim of all
+the mobsims (see [The mobsims compared](mobsims.md)).
 
 ### 3.4 Routing (`routing`)
 
@@ -581,8 +807,8 @@ next step lazily (`_depart`, `_try_leave`), which is where such a hook would go.
   by default `CharyparNagelScorer` gives each subpopulation its scoring
   params' weights (MATSim's `DefaultRaptorParametersForPerson`). Reroute,
   the runners' batch routing and `route_scenario` honour them; a stored
-  plan shared by persons with different weights is split. All three mobsims (QSim,
-  AgentSim, HermesSim) run transit.
+  plan shared by persons with different weights is split. Every mobsim
+  runs transit, with every timing setting.
 * Car-type vehicles are 1 PCU; transit vehicles use their type's PCE.
 * Scoring omits money events (see 3.5).
 * Blocked departures onto a full link wait in a FIFO line per link, and only
@@ -593,12 +819,14 @@ next step lazily (`_depart`, `_try_leave`), which is where such a hook would go.
 
 1. RL environment adapter (4.3).
 2. A Rust `QSim` behind the existing protocols (the router is done).
+   `ParallelSim` runs a variant of HermesSim's queue model on several threads;
+   open: single-thread speed, and its merge order under heavy congestion (3.3).
 3. Vectorised selection for selection-only strategies (most replanning),
    over the population's score array, so only innovating persons become
    `Person` objects.
-4. Transit: done in the QSim and HermesSim (both kernels), with RAPTOR in
-   Python and Rust, and checked against Java MATSim on pt-tutorial
-   (`verification/`).
+4. Transit: done in every mobsim (and every kernel), with every timing
+   setting, with RAPTOR in Python and Rust, and checked against Java MATSim
+   on pt-tutorial (`verification/`).
 5. Money events in scoring, and `SubtourModeChoice`.
 6. Validation against Java MATSim: done for equil and pt-tutorial
    (`verification/`); open gaps are listed in `verification/reports/latest.md`.

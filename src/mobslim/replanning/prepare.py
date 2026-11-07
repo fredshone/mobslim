@@ -4,6 +4,7 @@ from typing import Optional
 
 import numpy as np
 
+from mobslim.activity_links import ActivityLinkParams, assign_activity_links
 from mobslim.population import locate_activities
 from mobslim.replanning.context import ReplanningContext, default_transit_router
 from mobslim.replanning.modules import route_plans, routing_groups
@@ -19,10 +20,13 @@ def route_scenario(
     router_factory: RouterFactory = default_router,
     transit_router_factory=default_transit_router,
     transit_weights=None,
+    activity_links: Optional[ActivityLinkParams] = ActivityLinkParams(),
 ) -> Scenario:
     """Validate leg modes, give every activity coordinates (its node's where
-    the plans had none, as MATSim's ``PrepareForSim`` does), and route every
-    network and transit leg that has no route.
+    the plans had none, as MATSim's ``PrepareForSim`` does), assign every
+    activity without a link to one (:func:`~mobslim.activity_links.assign_activity_links`
+    with ``activity_links``; ``None``: leave activities without links), and
+    route every network and transit leg that has no route.
 
     Applies to every stored plan (once per plan, however many persons share
     it), all in one batch (:func:`route_plans`). Scores and selection are
@@ -36,6 +40,8 @@ def route_scenario(
     teleported legs and so the departures of the legs after them.
     """
     scenario.validate_modes()
+    if activity_links is not None:
+        scenario = assign_activity_links(scenario, activity_links)
     if travel_time is None:
         travel_time = TravelTimeTable.free_speed(scenario.network)
     ctx = ReplanningContext.from_scenario(scenario, travel_time, 0, router_factory,

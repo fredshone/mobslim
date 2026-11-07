@@ -11,11 +11,17 @@ modes allowed on it; per-mode views (e.g. adjacency for routing) are derived
 lazily and cached.
 
 Units: length [m], freespeed [m/s], capacity [veh/h], lanes [-].
+
+Further link attributes (e.g. MATSim's ``type`` or ``osm:way:highway``)
+are optional columns, read with :meth:`Network.link_attribute`. A loader
+can supply them lazily: :func:`~mobslim.formats.matsim_network.read_network_xml`
+does not parse them until one is first asked for, so runs that never use
+them pay nothing.
 """
 
 import math
 from dataclasses import dataclass, field, fields
-from typing import Hashable, Iterable, Optional
+from typing import Any, Callable, Hashable, Iterable, Mapping, Optional, Union
 
 import numpy as np
 
@@ -38,6 +44,9 @@ class Network:
     capacity: np.ndarray  # (n_links,) float, vehicles per hour
     lanes: np.ndarray  # (n_links,) float
     link_modes: tuple[frozenset[str], ...]
+    # extra link attributes: {name: column}, or a picklable callable returning
+    # one, called on first use (lazy loading); None: no extra attributes
+    link_attribute_source: Union[None, Mapping[str, Any], Callable[[], Mapping[str, Any]]] = None
     _cache: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self):
@@ -80,6 +89,46 @@ class Network:
 
     def link_index(self, link_id: Hashable) -> int:
         return self.link_ids.index(link_id)
+
+    # -- link attributes --
+    _BUILTIN_ATTRIBUTES = ("length", "freespeed", "capacity", "lanes")
+
+    def _link_attributes(self) -> dict:
+        if "link_attrs" not in self._cache:
+            from mobslim.attributes import column_array
+
+            src = self.link_attribute_source
+            if callable(src):
+                src = src()
+            cols = {}
+            for name, values in (src or {}).items():
+                col = values if isinstance(values, np.ndarray) else column_array(values)
+                if len(col) != self.n_links:
+                    raise ValueError(f"Link attribute {name!r} has {len(col)} values "
+                                     f"for {self.n_links} links.")
+                cols[name] = col
+            self._cache["link_attrs"] = cols
+        return self._cache["link_attrs"]
+
+    def link_attribute_names(self) -> tuple[str, ...]:
+        """Names of the extra link attributes (loads them if lazy)."""
+        return tuple(self._link_attributes())
+
+    def has_link_attribute(self, name: str) -> bool:
+        return name in self._BUILTIN_ATTRIBUTES or name in self._link_attributes()
+
+    def link_attribute(self, name: str) -> np.ndarray:
+        """One value per link: an extra attribute (``None``/``NaN`` where a
+        link lacks it), or one of the built-in columns ``length``,
+        ``freespeed``, ``capacity``, ``lanes``. Extra attributes are loaded
+        on the first call if the network was read lazily."""
+        if name in self._BUILTIN_ATTRIBUTES:
+            return getattr(self, name)
+        attrs = self._link_attributes()
+        if name not in attrs:
+            raise KeyError(f"Network has no link attribute {name!r} "
+                           f"(has: {sorted(attrs) + list(self._BUILTIN_ATTRIBUTES)}).")
+        return attrs[name]
 
     def mode_mask(self, mode: str) -> np.ndarray:
         """Boolean array: is ``mode`` allowed on each link."""
@@ -168,6 +217,7 @@ class NetworkBuilder:
         self._xy: list[tuple[float, float]] = []
         self._links = IdMap()
         self._rows: list[tuple] = []
+        self._attrs: dict[str, dict[int, Any]] = {}
 
     def add_node(self, node_id: Hashable, x: float, y: float) -> int:
         if node_id in self._nodes:
@@ -185,8 +235,10 @@ class NetworkBuilder:
         capacity: float,
         lanes: float = 1.0,
         modes: Iterable[str] = (DEFAULT_MODE,),
+        attributes: Optional[Mapping[str, Any]] = None,
     ) -> int:
-        """Add a link between two existing nodes. ``capacity`` is veh/h."""
+        """Add a link between two existing nodes. ``capacity`` is veh/h;
+        ``attributes`` are extra link attributes (e.g. ``{"type": "primary"}``)."""
         if link_id in self._links:
             raise ValueError(f"Duplicate link id {link_id!r}.")
         if length <= 0 or freespeed <= 0 or capacity <= 0 or lanes <= 0:
@@ -198,7 +250,10 @@ class NetworkBuilder:
         if not modes:
             raise ValueError(f"Link {link_id!r} has no modes.")
         self._rows.append((u, v, float(length), float(freespeed), float(capacity), float(lanes), modes))
-        return self._links.add(link_id)
+        k = self._links.add(link_id)
+        for name, value in (attributes or {}).items():
+            self._attrs.setdefault(name, {})[k] = value
+        return k
 
     def build(self) -> Network:
         cols = list(zip(*self._rows)) if self._rows else [()] * 7
@@ -213,6 +268,8 @@ class NetworkBuilder:
             capacity=np.array(cols[4], dtype=float),
             lanes=np.array(cols[5], dtype=float),
             link_modes=tuple(cols[6]),
+            link_attribute_source={name: [vals.get(k) for k in range(len(self._rows))]
+                                   for name, vals in self._attrs.items()} or None,
         )
 
 

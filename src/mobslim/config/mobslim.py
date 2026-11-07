@@ -464,7 +464,8 @@ class MobslimConfig:
 
             transit = read_transit(t["schedule"], t["vehicles"], network,
                                    TransitParams(passenger_modes=tuple(t["passenger_modes"]),
-                                                 vehicles=t["vehicles_on"]))
+                                                 vehicles=t["vehicles_on"],
+                                                 schedule_modes=tuple(t["schedule_modes"])))
         population = read_population(v["inputs"]["plans"], network, keep_routes=True,
                                      attributes_file=v["inputs"]["person_attributes"],
                                      transit_schedule=transit)
@@ -610,8 +611,12 @@ class MobslimConfig:
             AgentSimParams,
             HermesSim,
             HermesSimParams,
+            ParallelSim,
+            ParallelSimParams,
             QSim,
             QSimParams,
+            ShardSim,
+            ShardSimParams,
         )
 
         m = self.values["mobsim"]
@@ -619,10 +624,21 @@ class MobslimConfig:
                       storage_capacity_factor=m["storage_capacity_factor"],
                       stuck_time=m["stuck_time"], end_time=m["end_time"],
                       effective_cell_size=m["effective_cell_size"])
+        common.update({k: m[k] for k in ("continuous_time", "junction_delays", "rounding")
+                       if m[k] is not None})
         if m["type"] == "hermes":
             return HermesSim(HermesSimParams(**common, backend=m["hermes_backend"]))
         if m["type"] == "agentsim":
             return AgentSim(AgentSimParams(**common, blocked=m["agentsim_blocked"]))
+        if m["type"] == "parallel":
+            return ParallelSim(ParallelSimParams(**common, backend=m["parallel_backend"],
+                                                 threads=m["parallel_threads"],
+                                                 partitioner=m["parallel_partitioner"]))
+        if m["type"] == "shard":
+            return ShardSim(ShardSimParams(**common, threads=m["shard_threads"],
+                                           partitioner=m["shard_partitioner"],
+                                           seed=self.values["run"]["seed"] % 2**64,
+                                           buffer_in_storage=m["shard_buffer_in_storage"]))
         return QSim(QSimParams(**common))
 
     def strategies(self, attributes=None):
@@ -655,7 +671,23 @@ class MobslimConfig:
             iterations=run["iterations"], seed=run["seed"],
             learning_rate=self.values["scoring"]["learning_rate"],
             travel_time_bin_size=tt["bin_size"], travel_time_horizon=tt["horizon"],
-            output_dir=run["output_dir"], write_events_interval=run["write_events_interval"])
+            output_dir=run["output_dir"], write_events_interval=run["write_events_interval"],
+            activity_links=self.activity_link_params())
+
+    def activity_link_params(self):
+        """The ``activity_links`` section as :class:`~mobslim.activity_links.ActivityLinkParams`."""
+        from mobslim.activity_links import ActivityLinkParams, LinkFilter, SnapTier
+
+        a = self.values["activity_links"]
+        av = a["avoid"]
+        tiers = ()
+        if av["attribute"] is not None:
+            if not av["values"] and av["min_value"] is None:
+                raise ValueError("activity_links.avoid needs values or min_value with attribute.")
+            tiers = (SnapTier((LinkFilter(av["attribute"], tuple(av["values"]), av["min_value"]),),
+                              av["unless_beyond"]),)
+        return ActivityLinkParams(modes=tuple(a["modes"]), tiers=tiers,
+                                  snap_node_activities=a["snap_node_activities"])
 
     def transit_router_factory(self, scenario, params):
         from mobslim.replanning.context import (

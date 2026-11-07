@@ -177,11 +177,14 @@ def test_xml_round_trip(tmp_path, equil):
             for pa_, pb in zip(a.plans, b.plans):
                 assert [(x.type, x.node, x.end_time, x.duration) for x in pa_.activities] == \
                        [(x.type, x.node, x.end_time, x.duration) for x in pb.activities]
-                # equil's activities have nodes, no links: MATSim routes need them
-                assert all(x.link is None for x in pa_.activities)
+                # equil's activities have coordinates, so preparing the plans
+                # assigned them links; their routes then round-trip too
+                assert all(x.link is not None for x in pa_.activities)
+                assert [x.link for x in pa_.activities] == [x.link for x in pb.activities]
                 assert [(leg.mode, leg.travel_time) for leg in pa_.legs] == \
                        [(leg.mode, leg.travel_time) for leg in pb.legs]
-                assert all(leg.route is None for leg in pb.legs)
+                assert [None if leg.route is None else leg.route.links for leg in pa_.legs] == \
+                       [None if leg.route is None else leg.route.links for leg in pb.legs]
 
 
 def test_xml_writes_routes_only_between_activity_links(tmp_path):

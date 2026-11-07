@@ -27,13 +27,16 @@ uv sync                                   # pure Python
 uv run --with jupyter jupyter lab         # demos are in demos/
 ```
 
-**Optional compiled kernels.** `HermesSim`'s kernel (`rust/mobslim-hermes`)
-and the routers (`rust/mobslim-router`: Dijkstra/ALT and RAPTOR) are Rust
+**Optional compiled kernels.** The kernels of `HermesSim`
+(`rust/mobslim-hermes`) and `ParallelSim` (`rust/mobslim-parallel`) and the routers (`rust/mobslim-router`: Dijkstra/ALT and RAPTOR, plus activity-to-link snapping) are Rust
 extensions. They give the same results as the Python code, only faster.
+`ShardSim` (`rust/mobslim-shard`, matsim-rust's parallel design, for
+comparison) exists only as a Rust kernel; its METIS partitioning needs the
+`metis` extra (`pymetis`).
 They need [cargo](https://rustup.rs):
 
 ```bash
-uv sync --group rust                      # builds and installs both
+uv sync --group rust                      # builds and installs them
 ```
 
 Later `uv run` commands keep them; a plain `uv sync` removes them again, so
@@ -118,7 +121,7 @@ modules:
 | `inputs` | network, plans and person attribute files (paths relative to the config) | `network`, `plans` |
 | `transit` | transit schedule and vehicles, passenger modes | `transit` |
 | `modes` | teleported modes: `max_speed`, `beeline_distance_factor` | `routing` |
-| `mobsim` | `qsim`, `hermes` or `agentsim`, capacity factors, stuck time, end time | `qsim`, `hermes` |
+| `mobsim` | `qsim`, `hermes`, `agentsim`, `parallel` or `shard`, capacity factors, stuck time, end time, clock (`continuous_time`, `junction_delays`, `rounding`) | `qsim`, `hermes` |
 | `travel_time` | travel-time bins learned between iterations | `travelTimeCalculator` |
 | `routing` | transit router search radii and transfers | `swissRailRaptor` |
 | `scoring` | utilities, per mode and per activity type | `scoring` |
@@ -233,6 +236,8 @@ listed in a comment at the top of the file.
   benchmarks and verification against MATSim.
 * [Design](docs/design.md): the reasoning behind the design, and how
   MobSlim differs from MATSim.
+* [The mobsims compared](docs/mobsims.md): how the five mobsims differ from
+  each other and from their MATSim equivalents, in plain terms.
 * API reference: build it with
   `uv run --group docs sphinx-build docs docs/_build`, then open
   `docs/_build/index.html`.
@@ -246,9 +251,14 @@ MobSlim keeps MATSim's names so MATSim users feel at home:
 | equil | MATSim's classic small test scenario (`scenarios/equil`) |
 | QSim | the queue-model traffic simulation (MATSim's default mobsim) |
 | HermesSim | a faster queue model on a whole-second clock (after MATSim's Hermes) |
+| ParallelSim | a whole-second queue model on several threads, same results for any number of threads (MobSlim's own) |
+| ShardSim | matsim-rust's parallel design (workers per network partition, neighbour messages) and queue dynamics, reimplemented to compare with ParallelSim |
 | AgentSim | the same queue model, written agent by agent (MobSlim's own) |
 | Charypar-Nagel scoring | MATSim's default utility function: activities earn, travel costs |
 | ExpBeta / ChangeExpBeta | choose among remembered plans with logit probabilities over their scores |
 | Reroute, TimeAllocationMutator, ChangeTripMode | innovation: new route, shifted end times, new mode |
 | RAPTOR | the transit router (as MATSim's SwissRailRaptor) |
 | `seed=4711` | MATSim's default random seed |
+
+How the five mobsims differ from each other and from MATSim, in plain
+terms, is in [`docs/mobsims.md`](docs/mobsims.md).

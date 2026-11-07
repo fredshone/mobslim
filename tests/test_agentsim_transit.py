@@ -129,6 +129,33 @@ def test_mixed_traffic_matches_qsim_without_spillback(doors, blocking, checked_h
     assert (a.ride_board > a.ride_wait_start).any()  # some passengers waited
 
 
+@pytest.mark.parametrize("timing", [
+    dict(junction_delays=True),
+    dict(continuous_time=False),
+    dict(continuous_time=False, junction_delays=True),
+    dict(continuous_time=False, junction_delays=True, rounding="down"),
+])
+@pytest.mark.parametrize("blocking", [False, True])
+def test_mixed_traffic_matches_qsim_with_timing_options(timing, blocking, checked_heads):
+    """With every timing setting, AgentSim's transit still equals the QSim's
+    without spillback."""
+    scenario = mixed_corridor(doors="serial", blocking=blocking)
+    (q, _), (a, _) = run_both(scenario, storage_capacity_factor=1e6, flow_capacity_factor=0.05,
+                              **timing)
+    assert_same(q, a)
+    assert not a.stuck.any()
+    assert (a.ride_board > a.ride_wait_start).any()
+
+
+@pytest.mark.parametrize("vehicles", ["schedule", "network"])
+@pytest.mark.parametrize("timing", [dict(junction_delays=True), dict(continuous_time=False)])
+def test_pt_tutorial_matches_qsim_with_timing_options(vehicles, timing):
+    (q, _), (a, _) = run_both(routed(load("pt_tutorial", vehicles)), storage_capacity_factor=1e6,
+                              **timing)
+    assert_same(q, a)
+    assert np.isfinite(a.ride_board).sum() > 100
+
+
 def test_displaced_car_leaves_after_the_bus(checked_heads):
     """A bus finishes its dwell at a non-blocking stop while a car is still on
     the link: it rejoins ahead of the car, which leaves after it (one flow
