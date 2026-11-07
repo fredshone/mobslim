@@ -1053,10 +1053,11 @@ docs = [
     { name = "sphinx", version = "9.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
 ]
 rust = [
+    { name = "mobslim-dsim" },
     { name = "mobslim-hermes" },
+    { name = "mobslim-io" },
     { name = "mobslim-psim" },
     { name = "mobslim-router" },
-    { name = "mobslim-dsim" },
 ]
 
 [package.metadata]
@@ -1087,16 +1088,39 @@ docs = [
     { name = "sphinx", specifier = ">=8" },
 ]
 rust = [
+    { name = "mobslim-dsim", directory = "rust/mobslim-dsim" },
     { name = "mobslim-hermes", directory = "rust/mobslim-hermes" },
+    { name = "mobslim-io", directory = "rust/mobslim-io" },
     { name = "mobslim-psim", directory = "rust/mobslim-psim" },
     { name = "mobslim-router", directory = "rust/mobslim-router" },
-    { name = "mobslim-dsim", directory = "rust/mobslim-dsim" },
 ]
+
+[[package]]
+name = "mobslim-dsim"
+version = "0.1.0"
+source = { directory = "rust/mobslim-dsim" }
+dependencies = [
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=2.0" }]
 
 [[package]]
 name = "mobslim-hermes"
 version = "0.1.0"
 source = { directory = "rust/mobslim-hermes" }
+dependencies = [
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=2.0" }]
+
+[[package]]
+name = "mobslim-io"
+version = "0.1.0"
+source = { directory = "rust/mobslim-io" }
 dependencies = [
     { name = "numpy" },
 ]
@@ -1119,17 +1143,6 @@ requires-dist = [{ name = "numpy", specifier = ">=2.0" }]
 name = "mobslim-router"
 version = "0.1.0"
 source = { directory = "rust/mobslim-router" }
-dependencies = [
-    { name = "numpy" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "numpy", specifier = ">=2.0" }]
-
-[[package]]
-name = "mobslim-dsim"
-version = "0.1.0"
-source = { directory = "rust/mobslim-dsim" }
 dependencies = [
     { name = "numpy" },
 ]

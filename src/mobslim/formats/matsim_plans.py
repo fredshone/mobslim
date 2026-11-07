@@ -30,12 +30,13 @@ from xml.sax.saxutils import escape, quoteattr
 
 import numpy as np
 
+from mobslim.formats._xmlstream import iter_root_children
 from mobslim.formats.matsim_attributes import (
     read_attributes_element,
     read_person_attributes_xml,
 )
 from mobslim.network import Network
-from mobslim.planbatch import PlanBatchBuilder
+from mobslim.planbatch import PlanBatch, PlanBatchBuilder
 from mobslim.planstore import PlanStore
 from mobslim.population import Population, validate_batch
 from mobslim.timeutils import parse_time
@@ -228,81 +229,174 @@ def read_population_xml(path: str, network: Network, *, keep_routes: bool = Fals
     Plans that already contain MATSim stage activities (``pt interaction``,
     as in MATSim's output plans) are collapsed into one leg per trip, whose
     mode is the trip's ``routingMode`` attribute (or its main mode).
+
+    The file is read by the compiled ``mobslim_io`` extension when it is
+    installed (``uv sync --group rust``), else streamed one ``<person>`` at
+    a time in Python; both give the same population, and the Python reader
+    reads (and reports the errors of) every file the compiled one does not.
+    Either way memory is about the returned population plus one person's
+    XML, so a malformed file is only reported when the parser reaches the
+    fault.
     """
-    records = {}
-    with _open_xml(path) as f:
-        root = ET.parse(f).getroot()
-    b = PlanBatchBuilder()
-    ids, rows, scores, selected = [], [], [], []
-    nan = math.nan
-    for xml_person in root.findall("person"):
-        pid = xml_person.get("id")
-        ids.append(pid)
-        if attrs := _person_attributes(xml_person):
-            records[pid] = attrs
-        person_rows, person_scores, sel = [], [], 0
-        for p, xml_plan in enumerate(xml_person.findall("plan")):
-            if xml_plan.get("selected") == "yes":
-                sel = p
-            acts, legs = [], []
-            trip: list = []  # legs (and stage activities) of the current trip
-            last_act = None
-            for el in xml_plan:
-                if el.tag in ("act", "activity"):
-                    if is_stage_activity(el.get("type", "")):
-                        trip.append(None)
-                        continue
-                    if trip:
-                        leg = _trip_leg(trip)
-                        if isinstance(leg, _FileLeg):  # the activity links, for v4 node routes
-                            leg = _FileLeg(leg.mode, leg.travel_time, leg.xml,
-                                           last_act.get("link"), el.get("link"))
-                        legs.append(leg)
-                        trip = []
-                    elif acts:
-                        raise ValueError(f"Person {pid!r}: two activities without a leg between.")
-                    acts.append(_read_activity(el, network))
-                    last_act = el
-                elif el.tag == "leg":
-                    if not acts:
-                        raise ValueError(f"Person {pid!r}: a plan must start with an activity.")
-                    trip.append(el)
-            if not acts:
-                raise ValueError(f"Person {pid!r}: a plan needs at least one activity.")
-            b.act(*acts[0])
-            for leg, act in zip(legs, acts[1:]):
-                if isinstance(leg, _FileLeg):
-                    b.leg(*(_file_route(leg, network) if keep_routes else (leg.mode, leg.travel_time)))
-                else:
-                    b.leg(leg, nan)
-                b.act(*act)
-            b.end_plan()
-            person_rows.append(b.n_plans - 1)
-            score = xml_plan.get("score")
-            person_scores.append(float(score) if score else nan)
-        if not person_rows:
-            raise ValueError(f"Person {pid!r} has no plans.")
-        rows.append(person_rows)
-        scores.append(person_scores)
-        selected.append(sel)
+    read = _read_compiled(path, network, keep_routes) or _read_python(path, network, keep_routes)
+    batch, ids, n_plans, scores, selected, records = read
     if attributes_file is not None:
         for pid, attrs in read_person_attributes_xml(attributes_file).items():
             records[pid] = {**records.get(pid, {}), **attrs}
-    batch = b.build()
     validate_batch(batch)
-    width = max(map(len, rows), default=1)
+    n_plans = np.asarray(n_plans, dtype=np.int64)
+    width = int(n_plans.max()) if len(n_plans) else 1
+    person = np.repeat(np.arange(len(ids)), n_plans)
+    slot = np.arange(len(person)) - np.repeat(np.cumsum(n_plans) - n_plans, n_plans)
     plan_ids = np.full((len(ids), width), -1, dtype=np.int32)
-    score_table = np.full((len(ids), width), nan)
-    for i, (r, sc) in enumerate(zip(rows, scores)):
-        plan_ids[i, :len(r)] = r
-        score_table[i, :len(sc)] = sc
+    score_table = np.full((len(ids), width), math.nan)
+    plan_ids[person, slot] = np.arange(len(person))
+    score_table[person, slot] = scores
     return Population.from_tables(ids, PlanStore.from_batch(batch), plan_ids, score_table,
                                   selected, records)
 
 
+def _read_python(path, network: Network, keep_routes: bool) -> tuple:
+    """``(batch, ids, plans per person, scores of the plans in order,
+    selected, attribute records)`` of a population file, streamed in Python."""
+    records = {}
+    b = PlanBatchBuilder()
+    ids, rows, scores, selected = [], [], [], []
+    with _open_xml(path) as f:
+        for xml_person in iter_root_children(f, "person"):
+            _read_person(xml_person, network, keep_routes, b, ids, rows, scores, selected,
+                         records)
+    # each person's plans are the next rows of the batch
+    return (b.build(), ids, [len(r) for r in rows], [s for sc in scores for s in sc],
+            selected, records)
+
+
+def _read_compiled(path, network: Network, keep_routes: bool, **options) -> Optional[tuple]:
+    """What :func:`_read_python` returns, read by the ``mobslim_io``
+    extension; ``None`` if it is not installed or leaves the file to
+    :func:`_read_python` (anything it does not read exactly as that does,
+    including every error). ``options``: ``threads``, ``chunk_bytes``."""
+    try:
+        import mobslim_io
+    except ImportError:
+        return None
+    try:
+        c = mobslim_io.read_population_columns(
+            str(path),
+            [i if isinstance(i, str) else None for i in network.link_ids],
+            [i if isinstance(i, str) else None for i in network.node_ids],
+            np.asarray(network.to_node).tolist(),
+            np.asarray(network.free_speed_travel_times(), dtype=float).tolist(),
+            np.asarray(network.length, dtype=float).tolist(),
+            keep_routes,
+            **options,
+        )
+    except mobslim_io.FallBack:
+        return None
+    try:
+        return _from_columns(c, network)
+    except Exception:  # e.g. an attribute Python cannot convert: let it report
+        return None
+
+
+def _from_columns(c: dict, network: Network) -> tuple:
+    ids = c["ids"]
+    records = {}
+    for i, v4, entries in c["attributes"]:
+        out = {}
+        for key, value in v4:
+            name, conv = _V4_PERSON_ATTRS[key]
+            out[name] = conv(value)
+        out.update(entries)  # (name, value) pairs, typed as parse_matsim_attribute does
+        records[ids[i]] = out
+    node, x, y = c["act_node"], c["act_x"], c["act_y"]
+    near = np.flatnonzero(node < 0)
+    if near.size:  # activities placed on the node nearest their coordinates (once per place)
+        xy, inverse = np.unique(x[near] + 1j * y[near], return_inverse=True)
+        nodes = [network.nearest_node(p.real, p.imag) for p in xy.tolist()]
+        node[near] = np.asarray(nodes, dtype=np.int32)[inverse]
+    n_legs = len(c["leg_mode"])
+    batch = PlanBatch(
+        act_offsets=c["act_offsets"], act_type=c["act_type"], act_node=node,
+        act_end_time=c["act_end_time"], act_duration=c["act_duration"],
+        leg_mode=c["leg_mode"], leg_travel_time=c["leg_travel_time"],
+        leg_routed=c["leg_routed"], route_offsets=c["route_offsets"],
+        route_links=c["route_links"], act_types=tuple(c["act_types"]), modes=tuple(c["modes"]),
+        act_xy=np.column_stack([x, y]).reshape(-1, 2),
+        leg_pt_route=np.zeros(n_legs, dtype=bool),
+        ride_offsets=np.zeros(n_legs + 1, dtype=np.int64),
+        ride_board_stop=np.zeros(0, dtype=np.int32), ride_alight_stop=np.zeros(0, dtype=np.int32),
+        act_link=c["act_link"], leg_route_time=c["leg_route_time"],
+        leg_route_distance=c["leg_route_distance"],
+    )
+    return batch, ids, c["n_plans"], c["scores"], c["selected"].tolist(), records
+
+
+def _read_person(xml_person, network, keep_routes, b, ids, rows, scores, selected,
+                 records) -> None:
+    """Add one ``<person>``'s plans to ``b`` and its id, plan rows, scores,
+    selected plan and attributes to the lists. Everything read from the
+    element (including each kept route, see :class:`_FileLeg`) is used
+    before returning: the caller then clears it."""
+    nan = math.nan
+    pid = xml_person.get("id")
+    ids.append(pid)
+    if attrs := _person_attributes(xml_person):
+        records[pid] = attrs
+    person_rows, person_scores, sel = [], [], 0
+    for p, xml_plan in enumerate(xml_person.findall("plan")):
+        if xml_plan.get("selected") == "yes":
+            sel = p
+        acts, legs = [], []
+        trip: list = []  # legs (and stage activities) of the current trip
+        last_act = None
+        for el in xml_plan:
+            if el.tag in ("act", "activity"):
+                if is_stage_activity(el.get("type", "")):
+                    trip.append(None)
+                    continue
+                if trip:
+                    leg = _trip_leg(trip)
+                    if isinstance(leg, _FileLeg):  # the activity links, for v4 node routes
+                        leg = _FileLeg(leg.mode, leg.travel_time, leg.xml,
+                                       last_act.get("link"), el.get("link"))
+                    legs.append(leg)
+                    trip = []
+                elif acts:
+                    raise ValueError(f"Person {pid!r}: two activities without a leg between.")
+                acts.append(_read_activity(el, network))
+                last_act = el
+            elif el.tag == "leg":
+                if not acts:
+                    raise ValueError(f"Person {pid!r}: a plan must start with an activity.")
+                trip.append(el)
+        if not acts:
+            raise ValueError(f"Person {pid!r}: a plan needs at least one activity.")
+        b.act(*acts[0])
+        for leg, act in zip(legs, acts[1:]):
+            if isinstance(leg, _FileLeg):
+                b.leg(*(_file_route(leg, network) if keep_routes else (leg.mode, leg.travel_time)))
+            else:
+                b.leg(leg, nan)
+            b.act(*act)
+        b.end_plan()
+        person_rows.append(b.n_plans - 1)
+        score = xml_plan.get("score")
+        person_scores.append(float(score) if score else nan)
+    if not person_rows:
+        raise ValueError(f"Person {pid!r} has no plans.")
+    rows.append(person_rows)
+    scores.append(person_scores)
+    selected.append(sel)
+
+
 @dataclass(frozen=True)
 class _FileLeg:
-    """A single-leg trip as read, before deciding whether to keep its route."""
+    """A single-leg trip as read, before deciding whether to keep its route.
+
+    ``xml`` is the ``<leg>`` element of a streamed person: it is only valid
+    until that person has been read (the reader clears it after).
+    """
 
     mode: str
     travel_time: float  # NaN: none

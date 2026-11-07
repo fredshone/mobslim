@@ -94,10 +94,10 @@ docs = [
     "myst-parser>=4",
     "sphinx>=8",
 ]
-# the compiled HermesSim, PSim and DSim kernels and routers; need cargo.
-# Opt in with `uv sync --group rust` (without them the mobsims and routing run in
-# Python, and DSim, which has no Python kernel, is unavailable)
-rust = ["mobslim-hermes", "mobslim-psim", "mobslim-router", "mobslim-dsim"]
+# the compiled HermesSim, PSim and DSim kernels, routers and file readers; need cargo.
+# Opt in with `uv sync --group rust` (without them the mobsims, routing and file
+# reading run in Python, and DSim, which has no Python kernel, is unavailable)
+rust = ["mobslim-hermes", "mobslim-io", "mobslim-psim", "mobslim-router", "mobslim-dsim"]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
@@ -107,6 +107,7 @@ default-groups = ["dev"]
 
 [tool.uv.sources]
 mobslim-hermes = { path = "rust/mobslim-hermes" }
+mobslim-io = { path = "rust/mobslim-io" }
 mobslim-psim = { path = "rust/mobslim-psim" }
 mobslim-router = { path = "rust/mobslim-router" }
 mobslim-dsim = { path = "rust/mobslim-dsim" }

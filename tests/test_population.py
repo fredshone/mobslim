@@ -212,6 +212,310 @@ def test_read_population_keep_routes_checks_endpoints(equil_scenario, tmp_path):
         read_population_xml(xml, equil_scenario.network, keep_routes=True)
 
 
+# A small population of each format with everything the reader handles:
+# person attributes (typed, plans_v4 fields, an attributes file), several
+# plans with scores and selection, kept routes (links and v4 nodes), pt trips
+# with stage activities, and root children that are not persons.
+_RM = '<attributes><attribute name="routingMode" class="java.lang.String">{}</attribute></attributes>'
+_V6 = f'''<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">
+<population>
+  <attributes><attribute name="coordinateReferenceSystem" class="java.lang.String">EPSG:0</attribute></attributes>
+  <!-- persons follow -->
+  <person id="a">
+    <attributes>
+      <attribute name="age" class="java.lang.Integer">31</attribute>
+      <attribute name="car" class="java.lang.Boolean">true</attribute>
+      <attribute name="income" class="java.lang.Double">1.5</attribute>
+      <attribute name="subpopulation" class="java.lang.String">x</attribute>
+    </attributes>
+    <plan score="12.5" selected="no">
+      <activity type="h" link="1" x="-25000.0" y="0.0" end_time="06:00:00"/>
+      <leg mode="car" trav_time="00:20:00">{_RM.format("car")}
+        <route type="links" start_link="1" end_link="20" trav_time="00:20:00" distance="25000.0">1 6 15 20</route>
+      </leg>
+      <activity type="w" link="20" max_dur="08:00:00"/>
+      <leg mode="car"><route type="links" start_link="20" end_link="1">20 21 22 23 1</route></leg>
+      <activity type="h" link="1"/>
+    </plan>
+    <plan score="-3.25" selected="yes">
+      <activity type="h" link="1" end_time="07:00:00"/>
+      <leg mode="walk" trav_time="00:05:00">{_RM.format("pt")}<route type="generic" start_link="1" end_link="6"/></leg>
+      <activity type="pt interaction" link="6" x="1.0" y="2.0" max_dur="00:00:00"/>
+      <leg mode="pt" trav_time="00:15:00">{_RM.format("pt")}<route type="default_pt" start_link="6" end_link="20">{{"transitLineId":"l"}}</route></leg>
+      <activity type="pt interaction" link="20" max_dur="00:00:00"/>
+      <leg mode="walk" trav_time="00:02:00">{_RM.format("pt")}<route type="generic" start_link="20" end_link="20"/></leg>
+      <activity type="w" link="20" end_time="17:00:00"/>
+      <leg mode="walk" trav_time="00:30:00">{_RM.format("pt")}<route type="generic" start_link="20" end_link="1"/></leg>
+      <activity type="h" link="1"/>
+    </plan>
+  </person>
+  <person id="b">
+    <plan>
+      <activity type="h" x="-25000.0" y="0.0" end_time="08:00:00"/>
+      <leg mode="bike" trav_time="00:40:00"/>
+      <activity type="w" link="20" max_dur="01:00:00"/>
+      <leg mode="car"><route type="links" start_link="20" end_link="20">20</route></leg>
+      <activity type="w2" link="20"/>
+    </plan>
+  </person>
+</population>
+'''
+_OBJ = '''<?xml version="1.0" encoding="utf-8"?>
+<objectAttributes>
+  <object id="a"><attribute name="age" class="java.lang.Integer">32</attribute></object>
+  <object id="b"><attribute name="carAvail" class="java.lang.String">never</attribute></object>
+  <object id="c"><attribute name="age" class="java.lang.Long">5</attribute></object>
+</objectAttributes>
+'''
+_V4 = '''<?xml version="1.0" ?>
+<!DOCTYPE plans SYSTEM "http://www.matsim.org/files/dtd/plans_v4.dtd">
+<plans>
+  <person id="p1" sex="f" age="40" license="yes" car_avail="always" employed="yes">
+    <plan score="5" selected="yes">
+      <act type="h" link="1" x="-25000" y="0" end_time="06:00"/>
+      <leg mode="car" trav_time="00:10"><route>2 7 12</route></leg>
+      <act type="w" link="20" dur="00:10"/>
+      <leg mode="car"><route>13 14 15 1</route></leg>
+      <act type="h" link="1"/>
+    </plan>
+    <plan selected="no">
+      <act type="h" node="2" end_time="06:00"/>
+      <leg mode="walk"/>
+      <act type="w" node="13"/>
+    </plan>
+  </person>
+  <person id="p2" employed="no"><plan><act type="h" link="1"/></plan></person>
+</plans>
+'''
+
+
+def _summary(pop, net):
+    """Everything a read population holds, with node and link ids."""
+    out = []
+    for i, person in enumerate(pop):
+        plans = []
+        for plan in person.plans:
+            els = []
+            for e in plan.elements:
+                if isinstance(e, Leg):
+                    r = e.route
+                    els.append(("leg", e.mode, e.travel_time, None if r is None else (
+                        [net.link_ids.id(k) for k in r.links], round(r.travel_time, 3), round(r.distance, 3))))
+                else:
+                    els.append(("act", e.type, net.node_ids.id(e.node),
+                                None if e.link is None else net.link_ids.id(e.link),
+                                e.end_time, e.duration, e.x, e.y))
+            plans.append(els)
+        out.append((person.id, person.selected, person.scores, pop.attributes.row(i), plans))
+    return out
+
+
+def _act(type, node, link=None, end=None, dur=None, x=None, y=None):
+    return ("act", type, node, link, end, dur, x, y)
+
+
+# What the reader produced before it streamed the file (whole-document
+# ElementTree), with keep_routes=True.
+_EXPECTED_V6 = [
+    ("a", 1, (12.5, -3.25), {"age": 32.0, "car": True, "income": 1.5, "subpopulation": "x"},
+     [[_act("h", "2", "1", end=21600.0, x=-25000.0, y=0.0),
+       ("leg", "car", 1200.0, (["6", "15", "20"], 899.928, 25000.0)),
+       _act("w", "13", "20", dur=28800.0),
+       ("leg", "car", None, (["21", "22", "23", "1"], 2339.813, 65000.0)),
+       _act("h", "2", "1")],
+      [_act("h", "2", "1", end=25200.0),
+       ("leg", "pt", None, None),  # walk, pt interaction, pt, pt interaction, walk
+       _act("w", "13", "20", end=61200.0),
+       ("leg", "pt", None, None),  # a pt trip walked entirely
+       _act("h", "2", "1")]]),
+    ("b", 0, (None,), {"carAvail": "never"},
+     [[_act("h", "1", end=28800.0, x=-25000.0, y=0.0),
+       ("leg", "bike", 2400.0, None),
+       _act("w", "13", "20", dur=3600.0),
+       ("leg", "car", None, ([], 0.0, 0.0)),
+       _act("w2", "13", "20")]]),
+]
+_EXPECTED_V4 = [
+    ("p1", 0, (5.0, None),
+     {"age": 40.0, "carAvail": "always", "employed": True, "hasLicense": "yes", "sex": "f"},
+     [[_act("h", "2", "1", end=21600.0, x=-25000.0, y=0.0),
+       ("leg", "car", 600.0, (["6", "15", "20"], 899.928, 25000.0)),
+       _act("w", "13", "20", dur=600.0),
+       ("leg", "car", None, (["21", "22", "23", "1"], 2339.813, 65000.0)),
+       _act("h", "2", "1")],
+      [_act("h", "2", end=21600.0), ("leg", "walk", None, None), _act("w", "13")]]),
+    ("p2", 0, (None,), {"employed": False}, [[_act("h", "2", "1")]]),
+]
+
+
+def _without_routes(expected):
+    return [(*person[:4], [[e[:3] + (None,) if e[0] == "leg" else e for e in plan]
+                           for plan in person[4]])
+            for person in expected]
+
+
+@pytest.fixture(params=["python", "compiled"])
+def plans_reader(request, monkeypatch):
+    """Runs a test with the Python reader, then with the compiled one
+    (``mobslim_io``, skipped if it is not installed)."""
+    from mobslim.formats import matsim_plans
+
+    if request.param == "python":
+        monkeypatch.setattr(matsim_plans, "_read_compiled", lambda *args, **kwargs: None)
+    else:
+        pytest.importorskip("mobslim_io")
+    return request.param
+
+
+@pytest.mark.parametrize("gz", [False, True])
+@pytest.mark.parametrize("keep_routes", [False, True])
+def test_read_population_streamed_matches_whole_document_reader(equil_scenario, tmp_path,
+                                                                 keep_routes, gz, plans_reader):
+    """Both readers give what the whole-document reader gave."""
+    import gzip
+
+    from mobslim.formats.matsim_plans import _read_compiled
+
+    net = equil_scenario.network
+    paths = {}
+    for name, text in (("v6.xml", _V6), ("v4.xml", _V4), ("attrs.xml", _OBJ)):
+        path = tmp_path / (name + ".gz" if gz else name)
+        (gzip.open if gz else open)(path, "wt", encoding="utf-8").write(text)
+        paths[name] = path
+    v6 = read_population_xml(paths["v6.xml"], net, keep_routes=keep_routes,
+                             attributes_file=paths["attrs.xml"])
+    v4 = read_population_xml(paths["v4.xml"], net, keep_routes=keep_routes)
+    fix = (lambda e: e) if keep_routes else _without_routes
+    assert _summary(v6, net) == fix(_EXPECTED_V6)
+    assert _summary(v4, net) == fix(_EXPECTED_V4)
+    if plans_reader == "compiled":  # read by it, not handed to the Python reader
+        assert _read_compiled(paths["v6.xml"], net, keep_routes) is not None
+        # plans_v4 node routes are only kept by the Python reader
+        assert (_read_compiled(paths["v4.xml"], net, keep_routes) is None) == keep_routes
+
+
+def _same_read(a: tuple, b: tuple) -> None:
+    """Two readers' ``(batch, ids, n_plans, scores, selected, records)``."""
+    import dataclasses
+
+    import numpy as np
+
+    for f in dataclasses.fields(a[0]):
+        x, y = getattr(a[0], f.name), getattr(b[0], f.name)
+        if isinstance(x, np.ndarray):
+            assert x.dtype == y.dtype and np.array_equal(x, y, equal_nan=x.dtype.kind == "f"), f.name
+        else:
+            assert x == y, f.name
+    assert list(a[1]) == list(b[1])
+    assert np.asarray(a[2]).tolist() == np.asarray(b[2]).tolist()
+    assert np.array_equal(np.asarray(a[3], dtype=float), np.asarray(b[3], dtype=float), equal_nan=True)
+    assert list(a[4]) == list(b[4])
+    assert a[5] == b[5] and [list(r.items()) for r in a[5].values()] == \
+        [list(r.items()) for r in b[5].values()] and list(a[5]) == list(b[5])
+    for r, s in zip(a[5].values(), b[5].values()):
+        assert [type(v) for v in r.values()] == [type(v) for v in s.values()]
+
+
+_FIXTURE_PLANS = ["equil/plans100.xml", "pt_simple/population.xml",
+                  "pt_lineswitch/population.xml", "pt_tutorial/population.xml.gz",
+                  "matsim_reference/equil-100/output_plans.xml.gz",
+                  "matsim_reference/pt-tutorial/output_plans.xml.gz",
+                  "matsim_reference/equil-2000-cap0.5/output_plans.xml.gz"]
+
+
+@pytest.mark.parametrize("chunk_bytes", [None, 1])
+@pytest.mark.parametrize("keep_routes", [False, True])
+@pytest.mark.parametrize("plans", _FIXTURE_PLANS)
+def test_compiled_plans_reader_matches_python(plans, keep_routes, chunk_bytes):
+    """The compiled reader reads MATSim plans files as the Python reader does,
+    also cut into many chunks (``chunk_bytes=1``: one per person)."""
+    pytest.importorskip("mobslim_io")
+    from mobslim import read_network_xml
+    from mobslim.formats.matsim_plans import _read_compiled, _read_python
+    from tests.conftest import FIXTURES
+
+    path = FIXTURES / plans
+    net = read_network_xml(path.parent / "network.xml")
+    options = {} if chunk_bytes is None else {"chunk_bytes": chunk_bytes, "threads": 3}
+    compiled = _read_compiled(path, net, keep_routes, **options)
+    if keep_routes and plans == "equil/plans100.xml":
+        assert compiled is None  # plans_v4 node routes: left to the Python reader
+        return
+    assert compiled is not None
+    _same_read(compiled, _read_python(path, net, keep_routes))
+
+
+@pytest.mark.parametrize("text, falls_back", [
+    # a cut before "<person" in a comment leaves a chunk that does not parse
+    ('<!-- <person id="no"> --><person id="b">{plan}</person>', True),
+    ('<![CDATA[ <person id="no"> ]]><person id="b">{plan}</person>', True),
+    ('<person id="b"><attributes><attribute name="n" class="java.lang.String">'
+     '&lt;person id="no"&gt;</attribute></attributes>{plan}</person>', False),
+    ('<person id="b">{plan}</person></population><!-- after -->', True),
+    ('<person id="b"><attributes><attribute name="n" class="java.lang.Integer">1_000</attribute>'
+     '</attributes>{plan}</person>', True),  # an int only Python reads
+])
+def test_compiled_plans_reader_falls_back(equil_scenario, tmp_path, text, falls_back):
+    """Whatever the compiled reader hands over, the Python reader reads."""
+    pytest.importorskip("mobslim_io")
+    from mobslim.formats.matsim_plans import _read_compiled, _read_python
+
+    plan = '<plan><act type="h" link="1" end_time="06:00"/><leg mode="car"/><act type="w" link="20"/></plan>'
+    body = f'<person id="a">{plan}</person>' + text.format(plan=plan)
+    if "</population>" not in body:
+        body += "</population>"
+    path = tmp_path / "plans.xml"
+    path.write_text('<?xml version="1.0" encoding="utf-8"?>\n<population>' + body)
+    net = equil_scenario.network
+    compiled = _read_compiled(path, net, False, chunk_bytes=1)
+    assert (compiled is None) == falls_back
+    pop = read_population_xml(path, net)
+    assert list(pop.ids) == ["a", "b"]
+    if compiled is not None:
+        _same_read(compiled, _read_python(path, net, False))
+
+
+def test_compiled_plans_reader_latin1(equil_scenario, tmp_path):
+    """Other encodings are left to the Python reader."""
+    pytest.importorskip("mobslim_io")
+    from mobslim.formats.matsim_plans import _read_compiled
+
+    path = tmp_path / "plans.xml"
+    path.write_bytes('<?xml version="1.0" encoding="ISO-8859-1"?>\n<plans><person id="\u00e9">'
+                     '<plan><act type="h" link="1"/></plan></person></plans>'.encode("latin-1"))
+    assert _read_compiled(path, equil_scenario.network, False) is None
+    assert list(read_population_xml(path, equil_scenario.network).ids) == ["\u00e9"]
+
+
+def test_read_person_attributes_xml_streamed(tmp_path):
+    from mobslim.formats.matsim_attributes import read_person_attributes_xml
+
+    (tmp_path / "attrs.xml").write_text(_OBJ)
+    assert read_person_attributes_xml(tmp_path / "attrs.xml") == {
+        "a": {"age": 32}, "b": {"carAvail": "never"}, "c": {"age": 5}}
+
+
+def test_iter_root_children_streams(tmp_path):
+    """Only the root's own children of the tag; each is cleared and dropped
+    from the root once the next is asked for."""
+    import io
+    import xml.etree.ElementTree as ET
+
+    from mobslim.formats._xmlstream import iter_root_children
+
+    xml = (b'<population><attributes><person id="nested"/></attributes>'
+           b'<person id="1"><plan/></person><!-- c --><other/><person id="2"/></population>')
+    seen = []
+    for el in iter_root_children(io.BytesIO(xml), "person"):
+        if seen:
+            assert len(seen[-1][0]) == 0 and seen[-1][0].get("id") is None  # cleared
+        seen.append((el, el.get("id"), len(el)))
+    assert [s[1:] for s in seen] == [("1", 1), ("2", 0)]
+    with pytest.raises(ET.ParseError):
+        list(iter_root_children(io.BytesIO(b""), "person"))
+
+
 def test_with_elements_is_validated():
     plan = Plan.builder().act("h", 0, end_time=1).leg("walk").act("w", 1).build()
     assert plan.with_elements(plan.elements) == plan
