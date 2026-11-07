@@ -1,0 +1,21 @@
+[package]
+name = "mobslim-io"
+version = "0.1.0"
+edition = "2021"
+description = "Compiled file readers for mobslim (MATSim population XML)"
+publish = false
+
+[lib]
+name = "mobslim_io"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
+numpy = "0.23"
+quick-xml = "0.37"
+memchr = "2"
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

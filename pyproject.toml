@@ -94,10 +94,10 @@ docs = [
     "myst-parser>=4",
     "sphinx>=8",
 ]
-# the compiled HermesSim, ParallelSim and ShardSim kernels and routers; need cargo.
+# the compiled HermesSim, ParallelSim and ShardSim kernels, routers and file readers; need cargo.
 # Opt in with `uv sync --group rust` (without them the mobsims and routing run in
 # Python, and ShardSim, which has no Python kernel, is unavailable)
-rust = ["mobslim-hermes", "mobslim-parallel", "mobslim-router", "mobslim-shard"]
+rust = ["mobslim-hermes", "mobslim-io", "mobslim-parallel", "mobslim-router", "mobslim-shard"]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
@@ -107,6 +107,7 @@ default-groups = ["dev"]
 
 [tool.uv.sources]
 mobslim-hermes = { path = "rust/mobslim-hermes" }
+mobslim-io = { path = "rust/mobslim-io" }
 mobslim-parallel = { path = "rust/mobslim-parallel" }
 mobslim-router = { path = "rust/mobslim-router" }
 mobslim-shard = { path = "rust/mobslim-shard" }

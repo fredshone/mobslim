@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import gzip
 import json
-import xml.etree.ElementTree as ET
 
 import numpy as np
 
+from mobslim.formats._xmlstream import iter_root_children
 from mobslim.population import (
     Leg,
     Person,
@@ -75,14 +75,11 @@ def apply_matsim_pt_routes(population: Population, plans_path, schedule,
     transit_modes = set(transit_modes)
     by_person = {}
     with gzip.open(plans_path, "rb") as f:
-        for _, el in ET.iterparse(f, events=("end",)):
-            if el.tag != "person":
-                continue
+        for el in iter_root_children(f, "person"):  # streamed, one person at a time
             plans = el.findall("plan")
             plan = next((p for p in plans if p.get("selected") == "yes"), plans[0] if plans else None)
             if plan is not None:
                 by_person[el.get("id")] = _trips(plan, transit_modes)
-            el.clear()
 
     persons = []
     for i in range(len(population)):

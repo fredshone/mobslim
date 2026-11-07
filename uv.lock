@@ -1054,6 +1054,7 @@ docs = [
 ]
 rust = [
     { name = "mobslim-hermes" },
+    { name = "mobslim-io" },
     { name = "mobslim-parallel" },
     { name = "mobslim-router" },
     { name = "mobslim-shard" },
@@ -1088,6 +1089,7 @@ docs = [
 ]
 rust = [
     { name = "mobslim-hermes", directory = "rust/mobslim-hermes" },
+    { name = "mobslim-io", directory = "rust/mobslim-io" },
     { name = "mobslim-parallel", directory = "rust/mobslim-parallel" },
     { name = "mobslim-router", directory = "rust/mobslim-router" },
     { name = "mobslim-shard", directory = "rust/mobslim-shard" },
@@ -1097,6 +1099,17 @@ rust = [
 name = "mobslim-hermes"
 version = "0.1.0"
 source = { directory = "rust/mobslim-hermes" }
+dependencies = [
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=2.0" }]
+
+[[package]]
+name = "mobslim-io"
+version = "0.1.0"
+source = { directory = "rust/mobslim-io" }
 dependencies = [
     { name = "numpy" },
 ]

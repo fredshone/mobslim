@@ -33,10 +33,11 @@ def read_person_attributes_xml(path) -> dict[str, dict[str, Any]]:
     """A MATSim ``objectAttributes`` file (``plans.inputPersonAttributesFile``,
     ``.gz`` allowed) -> ``{person_id: {name: value}}``."""
     import gzip
-    import xml.etree.ElementTree as ET
+
+    from mobslim.formats._xmlstream import iter_root_children
 
     path = str(path)
     opener = gzip.open if path.endswith(".gz") else open
-    with opener(path, "rb") as f:
-        root = ET.parse(f).getroot()
-    return {obj.get("id"): read_attributes_element(obj) for obj in root.findall("object")}
+    with opener(path, "rb") as f:  # streamed: one <object> at a time
+        return {obj.get("id"): read_attributes_element(obj)
+                for obj in iter_root_children(f, "object")}
