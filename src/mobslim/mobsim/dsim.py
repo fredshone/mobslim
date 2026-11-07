@@ -1,6 +1,6 @@
-"""ShardSim: matsim-rust's parallel design, on mobslim's plans.
+"""DSim: matsim-rust's parallel design, on mobslim's plans.
 
-A second parallel mobsim, next to :mod:`mobslim.mobsim.parallel`, built to
+A second parallel mobsim, next to :mod:`mobslim.mobsim.psim`, built to
 compare the two designs. It follows matsim-rust
 (https://github.com/matsim-vsp/matsim-rust): reimplemented from its
 documentation and design, no code taken (that project is GPL-3.0).
@@ -42,10 +42,10 @@ link holds about one second's flow more; ``buffer_in_storage=False`` does
 that.
 
 **Determinism.** Trajectories do not depend on the number of threads or
-the partition (``tests/test_shard.py`` checks it); events come in a
+the partition (``tests/test_dsim.py`` checks it); events come in a
 canonical order (by second, person, step). They depend on ``seed``.
 
-Only the compiled kernel exists (``rust/mobslim-shard``; ``uv sync --group
+Only the compiled kernel exists (``rust/mobslim-dsim``; ``uv sync --group
 rust``).
 
 **Transit** follows the shared rules (``tests/test_transit.py``) on the
@@ -76,26 +76,26 @@ from mobslim.mobsim._common import (
     validate,
 )
 from mobslim.mobsim.hermes import _event_mask, kernel_results
-from mobslim.mobsim.parallel import parallel_inputs
 from mobslim.mobsim.partition import METHODS as PARTITIONERS
 from mobslim.mobsim.partition import partition
+from mobslim.mobsim.psim import psim_inputs
 from mobslim.planbatch import PlanBatch
 from mobslim.scenario import Scenario
 from mobslim.trajectories import Trajectories
 
-try:  # the compiled kernel (rust/mobslim-shard); optional
-    import mobslim_shard as _rust
+try:  # the compiled kernel (rust/mobslim-dsim); optional
+    import mobslim_dsim as _rust
 except ImportError:  # pragma: no cover - depends on the build
     _rust = None
 
 
 def rust_available() -> bool:
-    """Whether the compiled kernel (``mobslim_shard``) is installed."""
+    """Whether the compiled kernel (``mobslim_dsim``) is installed."""
     return _rust is not None
 
 
 @dataclass(frozen=True)
-class ShardSimParams:
+class DSimParams:
     flow_capacity_factor: float = 1.0
     storage_capacity_factor: float = 1.0
     stuck_time: float = 10.0
@@ -124,19 +124,19 @@ class ShardSimParams:
             raise ValueError(f"partitioner must be one of {PARTITIONERS}, not {self.partitioner!r}.")
         if not 0 <= self.seed < 2**64:
             raise ValueError("seed must be in [0, 2**64).")
-        check_timing("ShardSim", self.continuous_time, self.junction_delays, self.rounding,
+        check_timing("DSim", self.continuous_time, self.junction_delays, self.rounding,
                      continuous=False, whole=True)
 
 
-class ShardSim:
+class DSim:
     """matsim-rust's parallel queue mobsim (see the module docstring).
     Stateless between runs."""
 
-    def __init__(self, params: ShardSimParams = ShardSimParams()):
+    def __init__(self, params: DSimParams = DSimParams()):
         self.params = params
         if _rust is None:
             raise ImportError(
-                "ShardSim needs the mobslim_shard extension (rust/mobslim-shard; "
+                "DSim needs the mobslim_dsim extension (rust/mobslim-dsim; "
                 "`uv sync --group rust` builds it when cargo is installed)."
             )
 
@@ -163,7 +163,7 @@ class ShardSim:
         cfg = self.params
         if cfg.validate_routes:
             validate(scenario, plans)
-        inputs, tele_distance = shard_inputs(scenario, plans, cfg, _event_mask(events))
+        inputs, tele_distance = dsim_inputs(scenario, plans, cfg, _event_mask(events))
         net = scenario.network
         if node_part is None:
             node_part = partition(net, plans, self.threads, cfg.partitioner)
@@ -174,11 +174,11 @@ class ShardSim:
         return kernel_results(scenario, plans, events, inputs, tele_distance, out)
 
 
-def shard_inputs(scenario: Scenario, plans: PlanBatch, cfg: ShardSimParams,
+def dsim_inputs(scenario: Scenario, plans: PlanBatch, cfg: DSimParams,
                  event_mask: int) -> tuple[dict, np.ndarray]:
     """The kernel's keyword arguments (without the partition and seed), plus
     each leg's teleport distance."""
-    inputs, tele_distance = parallel_inputs(scenario, plans, cfg, event_mask)
+    inputs, tele_distance = psim_inputs(scenario, plans, cfg, event_mask)
     free_time, headway, _ = link_parameters(
         scenario.network, cfg.flow_capacity_factor, cfg.storage_capacity_factor,
         cfg.effective_cell_size)

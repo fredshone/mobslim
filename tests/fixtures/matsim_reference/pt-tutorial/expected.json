@@ -66,7 +66,7 @@
       "boardings_abs_diff_rel": 0.03864734299516908,
       "trip_tt_mean_rel_diff_pt": -0.006364346832855668
     },
-    "parallel/network": {
+    "psim/network": {
       "geh_lt5_share": 1.0,
       "volume_r2": 0.9999624997271436,
       "volume_abs_diff_rel": 0.0013698630136986301,
@@ -80,7 +80,7 @@
       "boardings_abs_diff_rel": 0.0,
       "trip_tt_mean_rel_diff_pt": -0.0005715087269301902
     },
-    "shard/network": {
+    "dsim/network": {
       "geh_lt5_share": 1.0,
       "volume_r2": 1.0,
       "volume_abs_diff_rel": 0.0,
@@ -94,7 +94,7 @@
       "boardings_abs_diff_rel": 0.00322061191626409,
       "trip_tt_mean_rel_diff_pt": -0.00014107368294489256
     },
-    "parallel/schedule": {
+    "psim/schedule": {
       "geh_lt5_share": 1.0,
       "volume_r2": 0.9999624997271436,
       "volume_abs_diff_rel": 0.0013698630136986301,
@@ -108,7 +108,7 @@
       "boardings_abs_diff_rel": 0.03864734299516908,
       "trip_tt_mean_rel_diff_pt": -0.006366751497905875
     },
-    "shard/schedule": {
+    "dsim/schedule": {
       "geh_lt5_share": 1.0,
       "volume_r2": 1.0,
       "volume_abs_diff_rel": 0.0,

@@ -5,7 +5,7 @@ and plans and the inputs mobslim reads; ``python -m verification freeze``
 writes them (see ``verification/freeze.py`` and ``verification/README.md``).
 
 * Layer 1: mobslim's scorer, on MATSim's events, gives MATSim's scores exactly.
-* Layer 2: the QSim, HermesSim, ParallelSim and ShardSim, on MATSim's plans and routes, are no further
+* Layer 2: the QSim, HermesSim, PSim and DSim, on MATSim's plans and routes, are no further
   from MATSim than when frozen (link volumes, link and trip times, transit).
 """
 

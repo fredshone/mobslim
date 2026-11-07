@@ -1,9 +1,9 @@
-"""ParallelSim: the Rust kernel equals the Python reference, and results do
+"""PSim: the Rust kernel equals the Python reference, and results do
 not depend on the number of threads or how the nodes are partitioned.
 
 Its queue-model behaviour is checked by the shared mobsim spec
-(``tests/test_qsim.py``, which runs against ``parallel_py`` and, when built,
-``parallel``).
+(``tests/test_qsim.py``, which runs against ``psim_py`` and, when built,
+``psim``).
 """
 
 import math
@@ -21,18 +21,18 @@ from mobslim.events import EventLog, EventsManager
 from mobslim.mobsim import (
     HermesSim,
     HermesSimParams,
-    ParallelSim,
-    ParallelSimParams,
+    PSim,
+    PSimParams,
     SimulationError,
-    parallel,
+    psim,
 )
-from mobslim.mobsim.parallel import partition_nodes
+from mobslim.mobsim.psim import partition_nodes
 from mobslim.population import Plan, Population
 from mobslim.scenario import Scenario
 from tests.conftest import FIXTURES, commuters
 
-needs_rust = pytest.mark.skipif(not parallel.rust_available(),
-                                reason="mobslim_parallel extension not built")
+needs_rust = pytest.mark.skipif(not psim.rust_available(),
+                                reason="mobslim_psim extension not built")
 
 FIELDS = ("act_start", "act_end", "leg_departure", "leg_arrival", "link_enter", "stuck")
 
@@ -58,7 +58,7 @@ def grid():
 
 def run(scenario, node_part=None, **params):
     log = EventLog()
-    sim = ParallelSim(ParallelSimParams(**params))
+    sim = PSim(PSimParams(**params))
     tr = sim.run_batch(scenario, scenario.population.selected_batch(), EventsManager([log]),
                        node_part=node_part)
     return tr, [repr(e) for e in log.events]
@@ -219,15 +219,15 @@ def test_transit_close_to_hermes(transit_grid):
 
 def test_rejects_bad_params():
     with pytest.raises(ValueError):
-        ParallelSimParams(threads=0)
+        PSimParams(threads=0)
     with pytest.raises(ValueError):
-        ParallelSimParams(backend="gpu")
+        PSimParams(backend="gpu")
     with pytest.raises(ValueError):
-        ParallelSimParams(stuck_time=0)
+        PSimParams(stuck_time=0)
 
 
 def test_unrouted_leg_raises(grid):
     plan = Plan.builder().act("h", 0, end_time=0).leg("car").act("w", 5).build()
     with pytest.raises(SimulationError):
-        ParallelSim(ParallelSimParams(backend="python")).run(
+        PSim(PSimParams(backend="python")).run(
             Scenario(grid.network, Population.from_plans({"x": plan})), EventsManager([]))

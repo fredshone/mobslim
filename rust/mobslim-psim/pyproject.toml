@@ -3,15 +3,15 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [project]
-name = "mobslim-parallel"
+name = "mobslim-psim"
 version = "0.1.0"
-description = "Compiled kernel for mobslim's ParallelSim (whole-second queue mobsim on several threads)"
+description = "Compiled kernel for mobslim's PSim (whole-second queue mobsim on several threads)"
 requires-python = ">=3.12"
 dependencies = ["numpy>=2.0"]
 
 [tool.maturin]
 python-source = "python"
-module-name = "mobslim_parallel._kernel"
+module-name = "mobslim_psim._kernel"
 
 [tool.uv]
 # rebuild when the Rust sources change

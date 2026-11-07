@@ -212,7 +212,7 @@ moves at the next whole second, exits at the first whole second at or after
 the unrounded flow slot), so QSim equals HermesSim move for move, and
 AgentSim does until spillback (`test_hermes.py`). Junction delays are an
 extra second on the earliest exit of every link but a route's last, plus a
-delayed activity start. In ShardSim they are its tick order instead (nodes
+delayed activity start. In DSim they are its tick order instead (nodes
 before links, as matsim-rust); without them it runs links before nodes, and
 a vehicle reaching the end of a link crosses in the same tick.
 
@@ -341,14 +341,14 @@ agent-driven loop, but whole-second rounding, per-lane flow, storage in metres, 
 stuck time, and an exit that popped the queue head whoever was leaving, which
 broke FIFO.
 
-#### ParallelSim: whole seconds on several threads
+#### PSim: whole seconds on several threads
 
-`ParallelSim` (`mobsim/parallel.py`, Rust kernel `rust/mobslim-parallel`)
+`PSim` (`mobsim/psim.py`, Rust kernel `rust/mobslim-psim`)
 runs HermesSim's queue model with the network split across threads. HermesSim
 cannot be split this way and keep its results: within one second its moves
 chain through any number of links and nodes in one global order (that order
 is what makes it equal the QSim), so threads would have to take turns at
-every partition boundary. ParallelSim changes the rules instead, so that
+every partition boundary. PSim changes the rules instead, so that
 **results are identical for any number of threads and any partition**, and
 between its Python reference kernel and the Rust kernel:
 
@@ -374,7 +374,7 @@ next leg starts at the node it arrived at (the usual case).
 
 Measured on the mobsim sweep's grids (4-core laptop, Rust kernels):
 
-| | HermesSim | ParallelSim 1 thread | 4 threads | 8 threads |
+| | HermesSim | PSim 1 thread | 4 threads | 8 threads |
 |---|---|---|---|---|
 | grid 40, 1.4 M link traversals, free flow | 0.18 s | 0.36 s | 0.13 s | 0.15 s |
 | grid 80, 10.9 M link traversals, free flow | 4.7 s | 6.6 s | **2.0 s** | 1.8 s |
@@ -394,7 +394,7 @@ Measured on the mobsim sweep's grids (4-core laptop, Rust kernels):
   agree within 1%. The cause is the merge
   order: when a full link frees a slot, HermesSim gives it to a vehicle that
   becomes ready in that same second before waking the longest waiter, which
-  keeps streams moving; ParallelSim gives it to the longest waiter. Neither
+  keeps streams moving; PSim gives it to the longest waiter. Neither
   is MATSim's rule (a random choice weighted by capacity), and in gridlock
   regimes small changes to it move results this much.
 
@@ -408,13 +408,13 @@ second (it is never refused there, as in MATSim, where departing vehicles
 enter the buffer without storage). Passengers and trips that move to
 another node or a later second are messages; a walk of 0 s on the spot
 happens at once. Trajectories and events with transit do not depend on the
-thread count or the partition either (`test_parallel.py`, on a grid of bus
-lines crossing the partitions), and on MATSim's pt-tutorial ParallelSim
+thread count or the partition either (`test_psim.py`, on a grid of bus
+lines crossing the partitions), and on MATSim's pt-tutorial PSim
 gives HermesSim's results.
 
-#### ShardSim: matsim-rust's design, for comparison
+#### DSim: matsim-rust's design, for comparison
 
-`ShardSim` (`mobsim/shard.py`, Rust kernel `rust/mobslim-shard`, no Python
+`DSim` (`mobsim/dsim.py`, Rust kernel `rust/mobslim-dsim`, no Python
 kernel) reimplements the parallel design of
 [matsim-rust](https://github.com/matsim-vsp/matsim-rust) from its
 documentation (no code taken: it is GPL-3.0), so the two designs can be
@@ -448,16 +448,16 @@ compared on the same plans:
   flow more.
 * **Partitioning by METIS**, as matsim-rust (unit weights, 3% imbalance,
   contiguous, few neighbours; `pymetis`, the `metis` extra), or Morton
-  (`partitioner=`, also available to ParallelSim). See
+  (`partitioner=`, also available to PSim). See
   `mobsim/partition.py`.
 
 Trajectories (and the canonical event order) do not depend on the worker
-count or the partition (`tests/test_shard.py`, including random partitions);
+count or the partition (`tests/test_dsim.py`, including random partitions);
 they depend on `seed`. The shared mobsim spec runs it with seven documented
 deviations (strict xfails in `tests/test_qsim.py`), all from the rules above.
 
-Kernel times on the same laptop and day (ParallelSim / ShardSim, Morton
-partitions, no stuck time, ShardSim with matsim-rust's buffer storage;
+Kernel times on the same laptop and day (PSim / DSim, Morton
+partitions, no stuck time, DSim with matsim-rust's buffer storage;
 best of 2–3):
 
 | | 1 thread | 2 | 4 | 8 |
@@ -467,11 +467,11 @@ best of 2–3):
 | grid 40, capacity ×0.05 | 0.83 / 7.65 s | 0.47 / 3.87 s | 0.47 / 2.14 s | 1.24 / 4.23 s |
 
 * Both designs scale about equally (≈3× from 1 to 4 threads on grid 80);
-  ShardSim's kernel is 1.5–1.8× slower under free flow and 4–9× under heavy
+  DSim's kernel is 1.5–1.8× slower under free flow and 4–9× under heavy
   congestion, where it steps every second and serves every full buffer.
 * METIS cuts fewer links than Morton but, with unit node weights, balances
   nodes rather than traffic, and was slower on 4 threads on grid 80
-  (ShardSim 6.9 s against 4.7 s).
+  (DSim 6.9 s against 4.7 s).
 * Results: free flow is about 5% slower than HermesSim (one second per
   link from buffer over the node). At capacity ×0.05 with the default stuck
   time, total travel time is 3–7% below the QSim's (grids 40 and 20); with
@@ -489,10 +489,10 @@ and rejoins at its front when it departs), so with junction delays it
 crosses the node one tick after leaving the stop. A link runs its stops'
 tasks in the links step, so everything a stop does stays on its link or goes
 into a message for a later tick, and a trip's state travels with its
-vehicle. Trips appear at the end of their first link as in ParallelSim.
+vehicle. Trips appear at the end of their first link as in PSim.
 Passengers can walk to any stop, so with transit workers that are not
 neighbours stay within one tick of each other (`gate` = 1). Results do not
-depend on the worker count or partition (`test_shard.py`). On MATSim's
+depend on the worker count or partition (`test_dsim.py`). On MATSim's
 pt-tutorial, with its default timing, it is the closest to MATSim of all
 the mobsims (see [The mobsims compared](mobsims.md)).
 
@@ -819,7 +819,7 @@ next step lazily (`_depart`, `_try_leave`), which is where such a hook would go.
 
 1. RL environment adapter (4.3).
 2. A Rust `QSim` behind the existing protocols (the router is done).
-   `ParallelSim` runs a variant of HermesSim's queue model on several threads;
+   `PSim` runs a variant of HermesSim's queue model on several threads;
    open: single-thread speed, and its merge order under heavy congestion (3.3).
 3. Vectorised selection for selection-only strategies (most replanning),
    over the population's score array, so only innovating persons become

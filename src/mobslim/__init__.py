@@ -15,14 +15,14 @@ from mobslim.listeners import ControllerListener, EventRecorder, IterationState
 from mobslim.mobsim import (
     AgentSim,
     AgentSimParams,
+    DSim,
+    DSimParams,
     HermesSim,
     HermesSimParams,
-    ParallelSim,
-    ParallelSimParams,
+    PSim,
+    PSimParams,
     QSim,
     QSimParams,
-    ShardSim,
-    ShardSimParams,
 )
 from mobslim.modes import Modes
 from mobslim.network import (
@@ -68,10 +68,10 @@ __all__ = [
     "ExperiencedPlan",
     "HermesSim",
     "HermesSimParams",
-    "ParallelSim",
-    "ParallelSimParams",
-    "ShardSim",
-    "ShardSimParams",
+    "PSim",
+    "PSimParams",
+    "DSim",
+    "DSimParams",
     "IterationState",
     "Modes",
     "Leg",

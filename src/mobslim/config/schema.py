@@ -238,7 +238,7 @@ SCHEMA = Section({
                    "Teleported modes. walk and bike are always present (MATSim's defaults).",
                    key="mode"),
     "mobsim": Section({
-        "type": Param("str", "qsim", "the mobsim", choices=("qsim", "hermes", "agentsim", "parallel", "shard"),
+        "type": Param("str", "qsim", "the mobsim", choices=("qsim", "hermes", "agentsim", "psim", "dsim"),
                       matsim="controller.mobsim"),
         "flow_capacity_factor": Param("float", 1.0, "link flow capacity scale", min=0,
                                       min_exclusive=True, matsim="flowCapacityFactor"),
@@ -257,25 +257,25 @@ SCHEMA = Section({
         "junction_delays": Param("bool", None, "a vehicle crosses into its next link one "
                                  "second after it could leave, and an activity starts one "
                                  "second after the arrival, as MATSim steps; null: the "
-                                 "mobsim's own (shard: true; others: false)", nullable=True),
+                                 "mobsim's own (dsim: true; others: false)", nullable=True),
         "rounding": Param("str", None, "with whole seconds, road and teleport times round to "
-                          "the nearest second or down; null: the mobsim's own (shard: down; "
+                          "the nearest second or down; null: the mobsim's own (dsim: down; "
                           "others: nearest)", nullable=True, choices=("nearest", "down")),
         "hermes_backend": Param("str", "auto", "hermes only: kernel",
                                 choices=("auto", "rust", "python")),
         "agentsim_blocked": Param("str", "poll", "agentsim only: blocked agents",
                                   choices=("poll", "chain")),
-        "parallel_backend": Param("str", "auto", "parallel only: kernel",
+        "psim_backend": Param("str", "auto", "psim only: kernel",
                                   choices=("auto", "rust", "python")),
-        "parallel_threads": Param("int", None, "parallel only: threads (null: one per CPU); "
+        "psim_threads": Param("int", None, "psim only: threads (null: one per CPU); "
                                   "results do not depend on it", nullable=True, min=1),
-        "parallel_partitioner": Param("str", "morton", "parallel only: how nodes are split "
+        "psim_partitioner": Param("str", "morton", "psim only: how nodes are split "
                                       "between threads", choices=("morton", "metis")),
-        "shard_threads": Param("int", None, "shard only: worker threads (null: one per CPU); "
+        "dsim_threads": Param("int", None, "dsim only: worker threads (null: one per CPU); "
                                "trajectories do not depend on it", nullable=True, min=1),
-        "shard_partitioner": Param("str", "metis", "shard only: how nodes are split between "
+        "dsim_partitioner": Param("str", "metis", "dsim only: how nodes are split between "
                                    "workers (metis needs pymetis)", choices=("metis", "morton")),
-        "shard_buffer_in_storage": Param("bool", True, "shard only: a vehicle waiting to "
+        "dsim_buffer_in_storage": Param("bool", True, "dsim only: a vehicle waiting to "
                                          "cross a node still fills its link (false: it frees "
                                          "its space, as matsim-rust)"),
     }, "The mobility simulation (MATSim qsim / hermes modules)."),

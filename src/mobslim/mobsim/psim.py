@@ -1,10 +1,10 @@
-"""ParallelSim: a whole-second queue mobsim that runs on several threads.
+"""PSim: a whole-second queue mobsim that runs on several threads.
 
 The network's nodes are split into partitions, one per thread. Each second
 is one *synchronous step*, and the rules are written so that no decision
 depends on how the nodes are partitioned. **Results are identical for any
 number of threads**, including one, and between the Python reference kernel
-in this module and the Rust kernel (``rust/mobslim-parallel``), which runs
+in this module and the Rust kernel (``rust/mobslim-psim``), which runs
 the partitions in parallel.
 
 The queue model is MATSim's (and the QSim's): free-speed time, flow capacity
@@ -101,8 +101,8 @@ from mobslim.planbatch import PlanBatch
 from mobslim.scenario import Scenario
 from mobslim.trajectories import Trajectories
 
-try:  # the compiled kernel (rust/mobslim-parallel); optional
-    import mobslim_parallel as _rust
+try:  # the compiled kernel (rust/mobslim-psim); optional
+    import mobslim_psim as _rust
 except ImportError:  # pragma: no cover - depends on the build
     _rust = None
 
@@ -123,12 +123,12 @@ _MASK64 = (1 << 64) - 1
 
 
 def rust_available() -> bool:
-    """Whether the compiled kernel (``mobslim_parallel``) is installed."""
+    """Whether the compiled kernel (``mobslim_psim``) is installed."""
     return _rust is not None
 
 
 @dataclass(frozen=True)
-class ParallelSimParams:
+class PSimParams:
     flow_capacity_factor: float = 1.0
     storage_capacity_factor: float = 1.0
     stuck_time: float = 10.0
@@ -158,20 +158,20 @@ class ParallelSimParams:
             raise ValueError("threads must be at least 1.")
         if self.partitioner not in PARTITIONERS:
             raise ValueError(f"partitioner must be one of {PARTITIONERS}, not {self.partitioner!r}.")
-        check_timing("ParallelSim", self.continuous_time, self.junction_delays, self.rounding,
+        check_timing("PSim", self.continuous_time, self.junction_delays, self.rounding,
                      continuous=False, whole=True)
 
 
-class ParallelSim:
+class PSim:
     """Whole-second queue mobsim on several threads, with results that do
     not depend on the number of threads. Stateless between runs."""
 
-    def __init__(self, params: ParallelSimParams = ParallelSimParams()):
+    def __init__(self, params: PSimParams = PSimParams()):
         self.params = params
         if params.backend == "rust" and _rust is None:
             raise ImportError(
-                "ParallelSim backend='rust' needs the mobslim_parallel extension "
-                "(rust/mobslim-parallel; `uv sync --group rust` builds it when cargo is installed)."
+                "PSim backend='rust' needs the mobslim_psim extension "
+                "(rust/mobslim-psim; `uv sync --group rust` builds it when cargo is installed)."
             )
 
     @property
@@ -204,7 +204,7 @@ class ParallelSim:
         cfg = self.params
         if cfg.validate_routes:
             validate(scenario, plans)
-        inputs, tele_distance = parallel_inputs(scenario, plans, cfg, _event_mask(events))
+        inputs, tele_distance = psim_inputs(scenario, plans, cfg, _event_mask(events))
         net = scenario.network
         if self.backend == "rust":
             if node_part is None:
@@ -218,7 +218,7 @@ class ParallelSim:
 
 # ---------------------------------------------------------------- inputs
 
-# the transit arguments of HermesSim's kernel, which ParallelSim's take too
+# the transit arguments of HermesSim's kernel, which PSim's take too
 TRANSIT_KEYS = (
     "network_vehicles", "leg_transit", "ride_offsets", "ride_board", "ride_alight",
     "walk_before_steps", "walk_after_steps", "rs_stop", "rs_link_pos", "rs_await",
@@ -228,7 +228,7 @@ TRANSIT_KEYS = (
     "trip_parallel", "door_open_steps", "door_close_steps", "trip_network", "rs_network")
 
 
-def parallel_inputs(scenario: Scenario, plans: PlanBatch, cfg: ParallelSimParams,
+def psim_inputs(scenario: Scenario, plans: PlanBatch, cfg: PSimParams,
                     event_mask: int) -> tuple[dict, np.ndarray]:
     """The kernel's keyword arguments (without the partition), plus each
     leg's teleport distance."""
@@ -244,7 +244,7 @@ def parallel_inputs(scenario: Scenario, plans: PlanBatch, cfg: ParallelSimParams
     inputs["act_owner"] = activity_owners(plans, net, h["leg_network"])
     inputs["rs_node"] = stop_nodes(scenario)
     if max(net.n_nodes, plans.n_acts) >= MAX_INDEX:
-        raise ValueError(f"ParallelSim supports fewer than {MAX_INDEX} nodes and activities.")
+        raise ValueError(f"PSim supports fewer than {MAX_INDEX} nodes and activities.")
     return inputs, tele_distance
 
 
@@ -293,7 +293,7 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
                trip_egress_steps, trip_parallel, door_open_steps, door_close_steps,
                trip_network, rs_network,
                rs_node, junction_delay=0):
-    """The reference kernel, on one thread. ``rust/mobslim-parallel/src/lib.rs``
+    """The reference kernel, on one thread. ``rust/mobslim-psim/src/lib.rs``
     implements the same rules on partitions in parallel, with identical results.
 
     Arguments and results are HermesSim's (:func:`mobslim.mobsim.hermes.run_kernel`),

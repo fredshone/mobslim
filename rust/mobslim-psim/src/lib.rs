@@ -1,9 +1,9 @@
-//! Compiled kernel for mobslim's `ParallelSim`.
+//! Compiled kernel for mobslim's `PSim`.
 //!
-//! The rules are those of `run_kernel` in `src/mobslim/mobsim/parallel.py`
+//! The rules are those of `run_kernel` in `src/mobslim/mobsim/psim.py`
 //! (the reference, with the model documented there); both must give
 //! identical results, and the results must not depend on the partitioning.
-//! `tests/test_parallel.py` checks both.
+//! `tests/test_psim.py` checks both.
 //!
 //! The nodes are split into partitions (`node_part`), one thread each. Every
 //! piece of state has one owner at a time:
@@ -1609,8 +1609,8 @@ fn err(msg: &str) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(msg.to_string())
 }
 
-/// Run the ParallelSim kernel on `n_parts` threads. Same arguments and
-/// results as `mobslim.mobsim.parallel.run_kernel`, plus the partition of
+/// Run the PSim kernel on `n_parts` threads. Same arguments and
+/// results as `mobslim.mobsim.psim.run_kernel`, plus the partition of
 /// each node (`node_part`, in `0 .. n_parts`).
 #[pyfunction]
 #[pyo3(signature = (*, free_steps, headway, storage, act_offsets, act_end_time, act_duration,

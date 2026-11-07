@@ -220,9 +220,9 @@ src/mobslim/
 │   ├── _transit.py   the QSim's transit component
 │   ├── _transit_tables.py    transit tables and results shared by the Python sims
 │   ├── hermes.py     HermesSim: whole-second queue model, Python reference kernel (+ Rust)
-│   ├── parallel.py   ParallelSim: whole-second steps on network partitions, Python reference kernel (+ Rust, threaded)
+│   ├── psim.py       PSim: whole-second steps on network partitions, Python reference kernel (+ Rust, threaded)
 │   ├── partition.py  splitting nodes between threads: Morton (traffic-balanced) or METIS (as matsim-rust)
-│   └── shard.py      ShardSim: matsim-rust's parallel design, Rust kernel only (rust/mobslim-shard)
+│   └── dsim.py       DSim: matsim-rust's parallel design, Rust kernel only (rust/mobslim-dsim)
 ├── routing/
 │   ├── base.py       Router, TravelTime, RouterFactory protocols
 │   ├── dijkstra.py   time-dependent DijkstraRouter (Python reference, route_many)
@@ -541,11 +541,11 @@ built-in alternative: `Controller(scenario, mobsim=AgentSim(AgentSimParams(retry
 whole-second clock, run by a compiled Rust kernel (`rust/mobslim-hermes`,
 built by `uv sync` when cargo is installed, with a Python fallback):
 `Controller(scenario, mobsim=HermesSim())`. It runs transit too, with
-vehicles on the timetable or in the queue model. `ParallelSim` runs on
-several threads (`rust/mobslim-parallel`), with results that do not depend
+vehicles on the timetable or in the queue model. `PSim` runs on
+several threads (`rust/mobslim-psim`), with results that do not depend
 on their number; it pays off on large networks, and runs transit too:
-`Controller(scenario, mobsim=ParallelSim(ParallelSimParams(threads=4)))`.
-`ShardSim` reimplements matsim-rust's parallel design and queue dynamics to
+`Controller(scenario, mobsim=PSim(PSimParams(threads=4)))`.
+`DSim` reimplements matsim-rust's parallel design and queue dynamics to
 compare against it (`docs/design.md` §3.3). The tests in
 `tests/test_qsim.py` serve as the behavioural specification for alternative
 implementations and run against every registered mobsim, and `tests/test_trajectories.py` checks that the arrays and

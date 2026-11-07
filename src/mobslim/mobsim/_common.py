@@ -39,7 +39,7 @@ def check_timing(sim: str, continuous_time: bool, junction_delays: bool, roundin
                          "QSim and AgentSim run in continuous time.")
     if not continuous_time and not whole:
         raise ValueError(f"{sim} runs in continuous time only (continuous_time=True); "
-                         "QSim, AgentSim, HermesSim, ParallelSim and ShardSim run in whole seconds.")
+                         "QSim, AgentSim, HermesSim, PSim and DSim run in whole seconds.")
     if continuous_time and rounding != "nearest":
         raise ValueError("rounding applies to whole seconds only (continuous_time=False).")
     if not isinstance(junction_delays, bool) or not isinstance(continuous_time, bool):

@@ -1054,9 +1054,9 @@ docs = [
 ]
 rust = [
     { name = "mobslim-hermes" },
-    { name = "mobslim-parallel" },
+    { name = "mobslim-psim" },
     { name = "mobslim-router" },
-    { name = "mobslim-shard" },
+    { name = "mobslim-dsim" },
 ]
 
 [package.metadata]
@@ -1088,9 +1088,9 @@ docs = [
 ]
 rust = [
     { name = "mobslim-hermes", directory = "rust/mobslim-hermes" },
-    { name = "mobslim-parallel", directory = "rust/mobslim-parallel" },
+    { name = "mobslim-psim", directory = "rust/mobslim-psim" },
     { name = "mobslim-router", directory = "rust/mobslim-router" },
-    { name = "mobslim-shard", directory = "rust/mobslim-shard" },
+    { name = "mobslim-dsim", directory = "rust/mobslim-dsim" },
 ]
 
 [[package]]
@@ -1105,9 +1105,9 @@ dependencies = [
 requires-dist = [{ name = "numpy", specifier = ">=2.0" }]
 
 [[package]]
-name = "mobslim-parallel"
+name = "mobslim-psim"
 version = "0.1.0"
-source = { directory = "rust/mobslim-parallel" }
+source = { directory = "rust/mobslim-psim" }
 dependencies = [
     { name = "numpy" },
 ]
@@ -1127,9 +1127,9 @@ dependencies = [
 requires-dist = [{ name = "numpy", specifier = ">=2.0" }]
 
 [[package]]
-name = "mobslim-shard"
+name = "mobslim-dsim"
 version = "0.1.0"
-source = { directory = "rust/mobslim-shard" }
+source = { directory = "rust/mobslim-dsim" }
 dependencies = [
     { name = "numpy" },
 ]

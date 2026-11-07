@@ -73,14 +73,14 @@ WALK = TeleportedModeParams(speed=1.0, beeline_distance_factor=1.0)
 TRANSIT_MOBSIMS = sorted(conftest.MOBSIMS)
 
 
-# Documented deviations, as in tests/test_qsim.py: ShardSim's default timing
+# Documented deviations, as in tests/test_qsim.py: DSim's default timing
 # is matsim-rust's (a second per junction, road times rounded down), which
 # adds up beyond one second over the corridor. With HermesSim's timing it
-# passes them (tests/test_shard.py::test_transit_close_to_hermes).
-_SHARD = "ShardSim's default timing adds a second per junction crossed: "
+# passes them (tests/test_dsim.py::test_transit_close_to_hermes).
+_SHARD = "DSim's default timing adds a second per junction crossed: "
 DEVIATIONS = {  # mobsim -> test (with a parameter, if only that case) -> reason
-    "shard": {
-        "test_without_await_departure_early_vehicles_leave[shard-network":
+    "dsim": {
+        "test_without_await_departure_early_vehicles_leave[dsim-network":
             _SHARD + "the late bus is 3 s later",
         "test_stop_blocking_in_mixed_traffic": _SHARD + "the bus enters its last links 2-3 s later",
         "test_learn_from_transit_adds_vehicle_link_times_without_dwell":
@@ -479,7 +479,7 @@ TRANSIT_TIMING = {
 @pytest.mark.parametrize("timing", sorted(TRANSIT_TIMING))
 def test_transit_timing_options(timing, mobsim_kind):
     params, arrivals, departures, alight, start = TRANSIT_TIMING[timing]
-    if mobsim_kind == "shard":  # its own default is matsim-rust's timing
+    if mobsim_kind == "dsim":  # its own default is matsim-rust's timing
         params = {"junction_delays": False, "rounding": "nearest", **params}
     log = EventLog()
     tr = run(routed(pt_scenario(passengers(1, 0, 3), vehicles="network")), [log], **params)
@@ -500,7 +500,7 @@ def test_transit_walks_round_like_road_times(timing, wait, mobsim_kind):
     """A 10.6 s access walk: exact, or rounded by ``rounding`` in whole seconds."""
     if timing["continuous_time"] and conftest.time_step(mobsim_kind):
         pytest.skip("whole seconds only")
-    if mobsim_kind == "shard":
+    if mobsim_kind == "dsim":
         timing = {"junction_delays": False, "rounding": "nearest", **timing}
 
     def population(net):

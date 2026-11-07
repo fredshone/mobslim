@@ -1,12 +1,12 @@
 [package]
-name = "mobslim-shard"
+name = "mobslim-psim"
 version = "0.1.0"
 edition = "2021"
-description = "Compiled kernel for mobslim's ShardSim (partitioned workers exchanging messages with neighbours, as matsim-rust)"
+description = "Compiled kernel for mobslim's PSim (whole-second queue mobsim on several threads)"
 publish = false
 
 [lib]
-name = "mobslim_shard"
+name = "mobslim_psim"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

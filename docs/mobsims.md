@@ -26,8 +26,8 @@ changes the results. How fast each mobsim runs is covered in
 | QSim | MATSim's QSim (its standard mobsim) | exact times, to fractions of a second | first come, first served | no |
 | AgentSim | none (MobSlim's own) | exact times | the first to try again (blocked cars check about once a second) | no |
 | HermesSim | MATSim's Hermes | whole seconds | first come, first served | no |
-| ParallelSim | none (MobSlim's own) | whole seconds | whoever has waited longest | no |
-| ShardSim | matsim-rust (an experimental Rust port of MATSim) | whole seconds | a lottery weighted by road size | yes, a fixed seed |
+| PSim | none (MobSlim's own) | whole seconds | whoever has waited longest | no |
+| DSim | matsim-rust (an experimental Rust port of MATSim) | whole seconds | a lottery weighted by road size | yes, a fixed seed |
 
 "Random" means that changing the random seed changes who wins at busy
 junctions, and so changes the results slightly. With the same seed, every
@@ -42,13 +42,13 @@ This is the difference you are most likely to see.
 spends 10.5 seconds on it, and a departure at 08:00:00.2 happens at
 08:00:00.2.
 
-**HermesSim and ParallelSim** tick once per second. Everything happens on a
+**HermesSim and PSim** tick once per second. Everything happens on a
 whole second: a road's free-flow time is rounded to the nearest second,
 and a planned departure is rounded up to the next second. Capacity is kept
 exact over time: a road that lets one car through every 1.8 seconds lets
 cars go at 2, 2, 2, 2, 1, ... second gaps, which average 1.8.
 
-**ShardSim** also ticks once per second, but it follows MATSim's and
+**DSim** also ticks once per second, but it follows MATSim's and
 matsim-rust's way of handling a second. A car first reaches the end of the
 road, and only in the *next* second crosses the junction onto the next road.
 So each road costs about one second more. Road times are rounded *down* first.
@@ -61,22 +61,22 @@ of equal length, then starts an activity.
 |---|---|---|---|---|
 | **Roads of exactly 10 s** | | | | |
 | QSim, AgentSim | 110 | 120 | 130 | 130 |
-| HermesSim, ParallelSim | 110 | 120 | 130 | 130 |
-| ShardSim | 111 | 122 | 132 | 133 |
+| HermesSim, PSim | 110 | 120 | 130 | 130 |
+| DSim | 111 | 122 | 132 | 133 |
 | **Roads of 10.5 s** | | | | |
 | QSim, AgentSim | 110.5 | 121 | 131.5 | 131.5 |
-| HermesSim, ParallelSim | 111 | 122 | 133 | 133 |
-| ShardSim | 111 | 122 | 132 | 133 |
+| HermesSim, PSim | 111 | 122 | 133 | 133 |
+| DSim | 111 | 122 | 132 | 133 |
 
 What this means for results:
 
-* With whole-second road times, QSim, AgentSim, HermesSim and ParallelSim
+* With whole-second road times, QSim, AgentSim, HermesSim and PSim
   give the same free-flow times. Otherwise the whole-second sims are up to
   half a second per road off, in either direction. Over a trip of many roads
   the errors mostly cancel.
-* ShardSim's trips are slower by up to a second per road, about 5% on
+* DSim's trips are slower by up to a second per road, about 5% on
   MobSlim's test grids. That is MATSim's own behaviour, and it makes
-  ShardSim's road times the closest to real MATSim runs (see below).
+  DSim's road times the closest to real MATSim runs (see below).
 
 ### Choosing the clock
 
@@ -97,8 +97,8 @@ the configuration file under `mobsim:`:
 | QSim | true (default) or false | false (default) or true | nearest (default) or down |
 | AgentSim | true (default) or false | false (default) or true | nearest (default) or down |
 | HermesSim | false only | false (default) or true | nearest (default) or down |
-| ParallelSim | false only | false (default) or true | nearest (default) or down |
-| ShardSim | false only | true (default) or false | down (default) or nearest |
+| PSim | false only | false (default) or true | nearest (default) or down |
+| DSim | false only | true (default) or false | down (default) or nearest |
 
 Asking a mobsim for something it cannot do (exact times in a whole-second
 mobsim, or rounding with exact times) stops with an error that says so.
@@ -111,10 +111,10 @@ on roads of 10.5 s:
 |---|---|---|---|---|
 | true, false (QSim, AgentSim) | 110.5 | 121 | 131.5 | 131.5 |
 | true, true | 111.5 | 123 | 133.5 | 134.5 |
-| false, false, nearest (HermesSim, ParallelSim) | 111 | 122 | 133 | 133 |
+| false, false, nearest (HermesSim, PSim) | 111 | 122 | 133 | 133 |
 | false, true, nearest | 112 | 124 | 135 | 136 |
 | false, false, down | 110 | 120 | 130 | 130 |
-| false, true, down (ShardSim, as matsim-rust) | 111 | 122 | 132 | 133 |
+| false, true, down (DSim, as matsim-rust) | 111 | 122 | 132 | 133 |
 
 The last road has no junction delay: the car arrives as it reaches its end.
 Every mobsim gives exactly these times (`tests/test_qsim.py`).
@@ -168,11 +168,11 @@ A bus on a 100 s road with stops at its end, timetabled to leave each stop
 | with junction delays | 101 | 120 | 221 |
 
 The mobsims differ only in their usual rules (who goes first when queues
-merge; ShardSim's queue and holding area), plus two things in the parallel
+merge; DSim's queue and holding area), plus two things in the parallel
 ones, which keep their results independent of the number of processor
 cores: a bus starts at the end of its first road without waiting for room
 there, and when a bus and a car want the same gap in the same second,
-ParallelSim's tie-breaking rule decides, not the order they arrived in.
+PSim's tie-breaking rule decides, not the order they arrived in.
 
 Against a real MATSim run of its "pt-tutorial" (900 people, a grid of roads
 and a train line), with the vehicles in the traffic:
@@ -180,9 +180,9 @@ and a train line), with the vehicles in the traffic:
 | | average error in time spent on a road | average error in a train's stop arrival | error in boardings | error in average pt trip time |
 |---|---|---|---|---|
 | QSim, AgentSim | 0.79 s | 2.0 s | 0% | −0.05% |
-| HermesSim, ParallelSim | 0.79 s | 2.1 s | 0% | −0.06% |
-| ShardSim (MATSim's clock, its default) | 0.002 s | 0.76 s | 0.3% | −0.01% |
-| QSim, HermesSim or ParallelSim on MATSim's clock | 0.015 s | 0.76 s | 0.3% | −0.01% |
+| HermesSim, PSim | 0.79 s | 2.1 s | 0% | −0.06% |
+| DSim (MATSim's clock, its default) | 0.002 s | 0.76 s | 0.3% | −0.01% |
+| QSim, HermesSim or PSim on MATSim's clock | 0.015 s | 0.76 s | 0.3% | −0.01% |
 
 On the same clock, all of them give practically the same results: what is
 left is MATSim's one-second steps, which MATSim's clock (`continuous_time:
@@ -206,11 +206,11 @@ same road, something must decide who goes first.
   traffic and keeps streams of cars flowing.
 * AgentSim: blocked cars check again about once a second, and the first to
   check after a gap opens gets it. That is close to first come, first served.
-* ParallelSim: whoever has waited longest gets the gap, judged once per
+* PSim: whoever has waited longest gets the gap, judged once per
   second. A car that only just reached the junction never jumps ahead of one
   that was already waiting, which breaks up streams of cars in heavy
   congestion.
-* ShardSim (like MATSim and matsim-rust): a lottery, where bigger roads get
+* DSim (like MATSim and matsim-rust): a lottery, where bigger roads get
   more tickets. A main road wins more often than a side street, but not
   always.
 
@@ -220,18 +220,18 @@ counts towards its road until it has crossed the junction at the end.
 matsim-rust differs: a car that has reached the end and is only waiting to
 cross the junction moves into a small holding area there (about one
 second's worth of the road's capacity, usually one car) and no longer
-counts, so each road holds about one car more. ShardSim can do the same
+counts, so each road holds about one car more. DSim can do the same
 (`buffer_in_storage=False`), but by default it counts those cars like the
 other mobsims. In practice this changes results little (see below).
 
-**Arriving at the destination.** In QSim, AgentSim, HermesSim and ParallelSim,
+**Arriving at the destination.** In QSim, AgentSim, HermesSim and PSim,
 a car on the last road of its trip still has to wait its turn to leave it,
-like through traffic. In ShardSim (following matsim-rust), arriving cars
+like through traffic. In DSim (following matsim-rust), arriving cars
 simply leave, so a busy last road does not slow them down.
 
 **Being stuck.** All mobsims push a car on after it has waited `stuck_time`.
-QSim and AgentSim do it at exactly that time; HermesSim and ParallelSim at
-the next whole second. ShardSim does it only once the car has waited
+QSim and AgentSim do it at exactly that time; HermesSim and PSim at
+the next whole second. DSim does it only once the car has waited
 *longer* than `stuck_time`, in whole seconds, so with 10 seconds it waits 11.
 
 How much this changes results, measured on MobSlim's test grids (commuters
@@ -239,7 +239,7 @@ on a square street grid) at 5% of normal road capacity, so that queues
 spread across much of the network. The numbers are total travel time
 compared with QSim's.
 
-| | QSim's average trip | AgentSim | HermesSim | ParallelSim | ShardSim | ShardSim, matsim-rust's holding area |
+| | QSim's average trip | AgentSim | HermesSim | PSim | DSim | DSim, matsim-rust's holding area |
 |---|---|---|---|---|---|---|
 | **stuck time 10 s (the default)** | | | | | | |
 | 20 × 20 grid | 30 min | 0.0% | −0.1% | −0.2% | −7.1% | −7.1% |
@@ -251,17 +251,17 @@ compared with QSim's.
 * **With the usual stuck time, the mobsims agree closely**, even this
   congested. Pushing stuck cars on after 10 seconds stops jams from
   building up, and that matters more than any of the rules above.
-  ShardSim's trips are 3–7% shorter, probably mostly because its arriving
+  DSim's trips are 3–7% shorter, probably mostly because its arriving
   cars do not wait for the last road's capacity (its rules' effects have not
   been measured one by one). In lighter traffic its trips are a few percent *longer*
   instead (3% at 20% capacity, 5% in free flow), from the extra second
   per road.
 * **With the stuck time switched off, the rules decide everything.** Jams
   only clear as fast as the merging rules allow, and no two rule sets
-  agree: ParallelSim's "longest wait first" breaks up streams of cars and
+  agree: PSim's "longest wait first" breaks up streams of cars and
   is much slower, AgentSim's "first to check again" a little slower, and
-  ShardSim much faster. The holding area accounts for only about 2 points
-  of ShardSim's difference.
+  DSim much faster. The holding area accounts for only about 2 points
+  of DSim's difference.
 
 MATSim's own results in such jammed regimes also depend on its random seed.
 
@@ -274,17 +274,17 @@ compares each mobsim with them (`tests/test_matsim_reference.py`).
 |---|---|---|
 | **equil, 100 people** | | |
 | QSim | 0.48 s | 0.01% |
-| HermesSim, ParallelSim | 0.47 s | 0.03% |
-| ShardSim (either holding-area rule) | 0.21 s | 0.05% |
+| HermesSim, PSim | 0.47 s | 0.03% |
+| DSim (either holding-area rule) | 0.21 s | 0.05% |
 | **equil, 2000 people, half capacity** | | |
 | QSim | 1.25 s | 0.00% |
 | HermesSim | 1.18 s | 0.01% |
-| ParallelSim | 1.36 s | 0.01% |
-| ShardSim | 1.03 s | 0.02% |
-| ShardSim, matsim-rust's holding area | 0.48 s | 0.02% |
+| PSim | 1.36 s | 0.01% |
+| DSim | 1.03 s | 0.02% |
+| DSim, matsim-rust's holding area | 0.48 s | 0.02% |
 
 All of them match MATSim's trip times to within a twentieth of a percent.
-ShardSim is closest road by road, because it copies MATSim's extra second at
+DSim is closest road by road, because it copies MATSim's extra second at
 each junction; with matsim-rust's holding area it is closer still on the
 busier run.
 
@@ -324,9 +324,9 @@ rules where Hermes simplifies them:
 The result is that, with whole-second road times, HermesSim gives exactly
 the same trips as QSim.
 
-### ShardSim and matsim-rust
+### DSim and matsim-rust
 
-ShardSim copies matsim-rust's design: the network is split into regions
+DSim copies matsim-rust's design: the network is split into regions
 with one worker each, and its traffic rules (the junction lottery, the
 extra second per junction, rounding road times down, arriving cars leaving
 freely, activities starting one second after arrival). The extra seconds
@@ -348,16 +348,16 @@ clock"); the rest is fixed. Its code is MobSlim's own. The differences:
   average they behave the same.
 * **Results never depend on the number of workers.** In matsim-rust the
   order of events within a second can change with how the network is split.
-  ShardSim always gives the same trips and events.
+  DSim always gives the same trips and events.
 * Teleported trips (walks, bikes) take at least one second.
 * No "kinematic waves" option, and no rerouting during the day.
 
-### AgentSim and ParallelSim
+### AgentSim and PSim
 
 These have no MATSim equivalent. **AgentSim** is QSim written from each
 traveller's point of view (each person decides their next move), with
 blocked cars checking again about once a second. Without congestion that
-spills backwards it gives exactly QSim's trips. **ParallelSim** is HermesSim
+spills backwards it gives exactly QSim's trips. **PSim** is HermesSim
 rebuilt to run on many cores, with rules chosen so that its results never
 depend on how many cores it uses. Without congestion it gives HermesSim's
 trips (except on roads that take less than a second, which take a full

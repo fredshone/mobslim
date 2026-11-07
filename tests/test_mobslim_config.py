@@ -27,7 +27,7 @@ from mobslim.config.mobslim import (
     MobslimConfig,
 )
 from mobslim.events import EventsManager
-from mobslim.mobsim import shard
+from mobslim.mobsim import dsim
 from mobslim.replanning import PersonStrategyManager, route_scenario
 from mobslim.replanning.context import ReplanningContext
 from mobslim.replanning.modules import routing_groups
@@ -194,7 +194,7 @@ def test_load_collects_every_problem(tmp_path):
                      "scoring.modes.car.constant: expected a number, got 'high'",
                      "scoring.activities.x.typical_duration: required",
                      "scoring.activities.x.priority: expected a value > 0",
-                     "mobsim.type: expected one of qsim, hermes, agentsim, parallel, shard",
+                     "mobsim.type: expected one of qsim, hermes, agentsim, psim, dsim",
                      "mobsim.flow_capacity_factor: expected a value > 0",
                      "mobsim.stuck_time: cannot vary by person",
                      "did you mean 'change_exp_beta'?",
@@ -482,10 +482,10 @@ def test_mobsim_timing_options(tmp_path):
             """)).mobsim()
 
 
-@pytest.mark.parametrize("mobsim", ["qsim", "hermes", "agentsim", "parallel", "shard"])
+@pytest.mark.parametrize("mobsim", ["qsim", "hermes", "agentsim", "psim", "dsim"])
 def test_per_person_teleport_speed(tmp_path, mobsim):
-    if mobsim == "shard" and not shard.rust_available():
-        pytest.skip("mobslim_shard extension not built")
+    if mobsim == "dsim" and not dsim.rust_available():
+        pytest.skip("mobslim_dsim extension not built")
     cfg = MobslimConfig.load(_config(tmp_path, f"""
         mobsim: {{type: {mobsim}}}
         modes:
@@ -502,7 +502,7 @@ def test_per_person_teleport_speed(tmp_path, mobsim):
     old = scenario.population.attributes["age"][person] > 50
     travel = (tr.leg_arrival - tr.leg_departure)[walk]
     expected = tr.leg_distance[walk] / np.where(old, 0.5, 1.0)
-    tol = 1.0 if mobsim in ("hermes", "parallel", "shard") else 1e-6  # whole-second clocks
+    tol = 1.0 if mobsim in ("hermes", "psim", "dsim") else 1e-6  # whole-second clocks
     np.testing.assert_allclose(travel, expected, atol=tol)
     assert old.any() and (~old).any()
 

@@ -52,11 +52,11 @@ Mobsims
 
 .. automodule:: mobslim.mobsim.hermes
 
-.. automodule:: mobslim.mobsim.parallel
+.. automodule:: mobslim.mobsim.psim
 
 .. automodule:: mobslim.mobsim.partition
 
-.. automodule:: mobslim.mobsim.shard
+.. automodule:: mobslim.mobsim.dsim
 
 Routing
 -------

@@ -10,7 +10,7 @@ Two methods, both deterministic:
   of equal node counts, contiguous partitions, and few neighbours per
   partition. Needs ``pymetis`` (``pip install mobslim[metis]``).
 
-ParallelSim's results do not depend on the partition, nor do ShardSim's
+PSim's results do not depend on the partition, nor do DSim's
 trajectories; only the speed does.
 """
 

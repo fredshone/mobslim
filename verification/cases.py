@@ -10,17 +10,17 @@ from typing import Optional
 from mobslim.mobsim import (
     AgentSim,
     AgentSimParams,
+    DSim,
+    DSimParams,
     HermesSim,
     HermesSimParams,
-    ParallelSim,
-    ParallelSimParams,
+    PSim,
+    PSimParams,
     QSim,
     QSimParams,
-    ShardSim,
-    ShardSimParams,
 )
+from mobslim.mobsim.dsim import rust_available as dsim_available
 from mobslim.mobsim.hermes import rust_available
-from mobslim.mobsim.shard import rust_available as shard_available
 
 MATSIM_LIBS = Path(os.environ.get("MATSIM_LIBS", Path.home() / "projects" / "matsim-libs"))
 SCENARIOS = MATSIM_LIBS / "examples" / "scenarios"
@@ -56,10 +56,10 @@ MOBSIMS = {
     "agentsim_chain": lambda **kw: AgentSim(AgentSimParams(blocked="chain", **kw)),
     "hermes": lambda **kw: HermesSim(HermesSimParams(
         backend="rust" if rust_available() else "python", **kw)),
-    "parallel": lambda **kw: ParallelSim(ParallelSimParams(**kw)),
+    "psim": lambda **kw: PSim(PSimParams(**kw)),
 }
-if shard_available():  # no Python kernel
-    MOBSIMS["shard"] = lambda **kw: ShardSim(ShardSimParams(**kw))
+if dsim_available():  # no Python kernel
+    MOBSIMS["dsim"] = lambda **kw: DSim(DSimParams(**kw))
 
 _L2 = {("controller", "lastIteration"): 0}  # one iteration: the input plans, no replanning
 

@@ -18,9 +18,9 @@ from tests.conftest import chain_network, commuters, routed, simulate
 
 # Documented deviations from this spec, per mobsim: test -> reason. They are
 # strict xfails, so a deviation that goes away is noticed.
-_SHARD = "ShardSim follows matsim-rust's queue dynamics: "
+_SHARD = "DSim follows matsim-rust's queue dynamics: "
 DEVIATIONS = {
-    "shard": {
+    "dsim": {
         "test_free_flow_travel_time": _SHARD + "a vehicle reaches the buffer in one second "
                                       "and crosses the node in the next (+1 s per link)",
         "test_flow_capacity_headway": _SHARD + "vehicles ending their leg leave without flow capacity",

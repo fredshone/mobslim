@@ -609,14 +609,14 @@ class MobslimConfig:
         from mobslim.mobsim import (
             AgentSim,
             AgentSimParams,
+            DSim,
+            DSimParams,
             HermesSim,
             HermesSimParams,
-            ParallelSim,
-            ParallelSimParams,
+            PSim,
+            PSimParams,
             QSim,
             QSimParams,
-            ShardSim,
-            ShardSimParams,
         )
 
         m = self.values["mobsim"]
@@ -630,15 +630,15 @@ class MobslimConfig:
             return HermesSim(HermesSimParams(**common, backend=m["hermes_backend"]))
         if m["type"] == "agentsim":
             return AgentSim(AgentSimParams(**common, blocked=m["agentsim_blocked"]))
-        if m["type"] == "parallel":
-            return ParallelSim(ParallelSimParams(**common, backend=m["parallel_backend"],
-                                                 threads=m["parallel_threads"],
-                                                 partitioner=m["parallel_partitioner"]))
-        if m["type"] == "shard":
-            return ShardSim(ShardSimParams(**common, threads=m["shard_threads"],
-                                           partitioner=m["shard_partitioner"],
-                                           seed=self.values["run"]["seed"] % 2**64,
-                                           buffer_in_storage=m["shard_buffer_in_storage"]))
+        if m["type"] == "psim":
+            return PSim(PSimParams(**common, backend=m["psim_backend"],
+                                   threads=m["psim_threads"],
+                                   partitioner=m["psim_partitioner"]))
+        if m["type"] == "dsim":
+            return DSim(DSimParams(**common, threads=m["dsim_threads"],
+                                   partitioner=m["dsim_partitioner"],
+                                   seed=self.values["run"]["seed"] % 2**64,
+                                   buffer_in_storage=m["dsim_buffer_in_storage"]))
         return QSim(QSimParams(**common))
 
     def strategies(self, attributes=None):
@@ -676,7 +676,11 @@ class MobslimConfig:
 
     def activity_link_params(self):
         """The ``activity_links`` section as :class:`~mobslim.activity_links.ActivityLinkParams`."""
-        from mobslim.activity_links import ActivityLinkParams, LinkFilter, SnapTier
+        from mobslim.activity_links import (
+            ActivityLinkParams,
+            LinkFilter,
+            SnapTier,
+        )
 
         a = self.values["activity_links"]
         av = a["avoid"]

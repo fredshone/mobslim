@@ -43,7 +43,7 @@ GUARDED = {
     "trip_tt_mean_rel_diff_pt": (0.005, False),
 }
 
-GUARDED_MOBSIMS = ("qsim", "hermes", "parallel", "shard")
+GUARDED_MOBSIMS = ("qsim", "hermes", "psim", "dsim")
 
 _INPUTS = [("network", "inputNetworkFile", "network.xml"),
            ("transit", "transitScheduleFile", "transitSchedule.xml"),

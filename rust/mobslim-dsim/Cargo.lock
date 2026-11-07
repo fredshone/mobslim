@@ -55,7 +55,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mobslim-shard"
+name = "mobslim-dsim"
 version = "0.1.0"
 dependencies = [
  "numpy",

@@ -26,3 +26,8 @@ output/
 
 # Built API docs
 docs/_build/
+
+# Showcase: raw MATSim/MobSlim outputs (showcase/output/ is covered by output/ above) and the compiled timing runner
+showcase/java/classes/
+showcase/java/classes-dsim/
+showcase/java/dsim/classpath.txt

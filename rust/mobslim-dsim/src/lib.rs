@@ -1,4 +1,4 @@
-//! Compiled kernel for mobslim's `ShardSim`: the parallel design of
+//! Compiled kernel for mobslim's `DSim`: the parallel design of
 //! matsim-rust (<https://github.com/matsim-vsp/matsim-rust>), reimplemented
 //! from its documentation and design (no code taken; that project is
 //! GPL-3.0), on mobslim's plans and outputs.
@@ -1948,7 +1948,7 @@ fn csr(n: usize, key: &[u32]) -> (Vec<usize>, Vec<u32>) {
     (off, items)
 }
 
-/// Run the ShardSim kernel on `n_parts` worker threads, one per partition
+/// Run the DSim kernel on `n_parts` worker threads, one per partition
 /// of the nodes (`node_part`). Returns `(act_start, act_end, leg_departure,
 /// leg_arrival, link_enter, stuck, ev_time, ev_code, stuck_leg, stuck_link,
 /// last_time, ride_wait_start, ride_board, ride_alight, ride_trip,

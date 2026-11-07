@@ -3,15 +3,15 @@ requires = ["maturin>=1.7,<2"]
 build-backend = "maturin"
 
 [project]
-name = "mobslim-shard"
+name = "mobslim-dsim"
 version = "0.1.0"
-description = "Compiled kernel for mobslim's ShardSim (partitioned workers exchanging messages with neighbours, as matsim-rust)"
+description = "Compiled kernel for mobslim's DSim (partitioned workers exchanging messages with neighbours, as matsim-rust)"
 requires-python = ">=3.12"
 dependencies = ["numpy>=2.0"]
 
 [tool.maturin]
 python-source = "python"
-module-name = "mobslim_shard._kernel"
+module-name = "mobslim_dsim._kernel"
 
 [tool.uv]
 # rebuild when the Rust sources change

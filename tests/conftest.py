@@ -16,16 +16,16 @@ from mobslim.events import EventLog, EventsManager
 from mobslim.mobsim import (
     AgentSim,
     AgentSimParams,
+    DSim,
+    DSimParams,
     HermesSim,
     HermesSimParams,
-    ParallelSim,
-    ParallelSimParams,
+    PSim,
+    PSimParams,
     QSim,
     QSimParams,
-    ShardSim,
-    ShardSimParams,
-    parallel,
-    shard,
+    dsim,
+    psim,
 )
 from mobslim.mobsim.hermes import rust_available
 
@@ -64,17 +64,17 @@ MOBSIMS = {
     "agentsim": (AgentSim, AgentSimParams),
     "agentsim_chain": (AgentSim, partial(AgentSimParams, blocked="chain")),
     "hermes_py": (HermesSim, partial(HermesSimParams, backend="python")),
-    "parallel_py": (ParallelSim, partial(ParallelSimParams, backend="python")),
+    "psim_py": (PSim, partial(PSimParams, backend="python")),
 }
 if rust_available():  # the compiled kernel (rust/mobslim-hermes) is optional
     MOBSIMS["hermes"] = (HermesSim, partial(HermesSimParams, backend="rust"))
-if parallel.rust_available():  # rust/mobslim-parallel, on 3 threads
-    MOBSIMS["parallel"] = (ParallelSim, partial(ParallelSimParams, backend="rust", threads=3))
-if shard.rust_available():  # rust/mobslim-shard (no Python kernel), on 3 workers
-    MOBSIMS["shard"] = (ShardSim, partial(ShardSimParams, threads=3))
+if psim.rust_available():  # rust/mobslim-psim, on 3 threads
+    MOBSIMS["psim"] = (PSim, partial(PSimParams, backend="rust", threads=3))
+if dsim.rust_available():  # rust/mobslim-dsim (no Python kernel), on 3 workers
+    MOBSIMS["dsim"] = (DSim, partial(DSimParams, threads=3))
 DEFAULT_MOBSIM = "qsim"  # tests/test_qsim.py runs its spec against every entry of MOBSIMS
 # clock resolution [s] of mobsims that run in whole time steps (others: continuous)
-TIME_STEP = {"hermes_py": 1.0, "hermes": 1.0, "parallel_py": 1.0, "parallel": 1.0, "shard": 1.0}
+TIME_STEP = {"hermes_py": 1.0, "hermes": 1.0, "psim_py": 1.0, "psim": 1.0, "dsim": 1.0}
 
 
 def time_step(kind=None) -> float:
@@ -127,7 +127,7 @@ def transit_grid(seed=1, vehicles="network", blocking=False, size=6, persons=400
     rng = Random(seed)
     b = TransitBuilder(net)
     b.vehicle_type("bus", seats=2, standing=1, access_time=1.3, egress_time=0.8,
-                   doors=rng.choice(["serial", "parallel"]), pce=2.0)
+                   doors=rng.choice(["serial", "psim"]), pce=2.0)
     stops = {}
 
     def stop_on(link):

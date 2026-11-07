@@ -3,7 +3,7 @@
 Every mobsim runs the same transit semantics (pinned by
 ``tests/test_transit.py``) with its own control flow (``mobsim._transit`` for
 the QSim, ``mobsim._agentsim_transit`` for AgentSim, the kernels of
-HermesSim, ParallelSim and ShardSim). What they share is here:
+HermesSim, PSim and DSim). What they share is here:
 
 * :func:`transit_times`: every time the transit model needs, on the run's
   clock. That is where the timing parameters apply, so all mobsims agree on

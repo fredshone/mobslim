@@ -1,4 +1,4 @@
-"""ShardSim (matsim-rust's parallel design): trajectories and events do not
+"""DSim (matsim-rust's parallel design): trajectories and events do not
 depend on the number of workers or the partition, and its link model
 behaves as matsim-rust's.
 
@@ -19,23 +19,23 @@ from mobslim import (
 )
 from mobslim.events import EventLog, EventsManager, LinkEnter, PersonArrival
 from mobslim.mobsim import (
+    DSim,
+    DSimParams,
     HermesSim,
     HermesSimParams,
-    ParallelSim,
-    ParallelSimParams,
-    ShardSim,
-    ShardSimParams,
+    PSim,
+    PSimParams,
     SimulationError,
-    parallel,
-    shard,
+    dsim,
+    psim,
 )
 from mobslim.mobsim.partition import metis_partition, partition
 from mobslim.population import Plan, Population
 from mobslim.scenario import Scenario
 from tests.conftest import FIXTURES, chain_network, commuters
 
-pytestmark = pytest.mark.skipif(not shard.rust_available(),
-                                reason="mobslim_shard extension not built")
+pytestmark = pytest.mark.skipif(not dsim.rust_available(),
+                                reason="mobslim_dsim extension not built")
 
 FIELDS = ("act_start", "act_end", "leg_departure", "leg_arrival", "link_enter", "stuck")
 
@@ -73,7 +73,7 @@ def grid():
 def run(scenario, node_part=None, **params):
     params.setdefault("partitioner", "morton")
     log = EventLog()
-    tr = ShardSim(ShardSimParams(**params)).run_batch(
+    tr = DSim(DSimParams(**params)).run_batch(
         scenario, scenario.population.selected_batch(), EventsManager([log]), node_part=node_part)
     return tr, [repr(e) for e in log.events]
 
@@ -136,7 +136,7 @@ def test_link_model_as_matsim_rust():
     node one second later; it arrives when it leaves its last link."""
     net = chain_network([100, 100, 100], freespeed=10)
     log = EventLog()
-    ShardSim(ShardSimParams(threads=2, partitioner="morton")).run(
+    DSim(DSimParams(threads=2, partitioner="morton")).run(
         route_scenario(Scenario(net, commuters(1, 0, 3, dep=100))), EventsManager([log]))
     assert [e.time for e in log.events if isinstance(e, LinkEnter)] == [100, 111, 122]
     assert [e.time for e in log.events if isinstance(e, PersonArrival)] == [132]
@@ -152,7 +152,7 @@ def _two_link_loop():
 def test_buffered_vehicles_keep_their_storage():
     """By default a vehicle waiting to cross a node still fills its link,
     so the loop locks (and stays locked without a stuck time)."""
-    tr = ShardSim(ShardSimParams(threads=2, partitioner="morton", stuck_time=math.inf)).run(
+    tr = DSim(DSimParams(threads=2, partitioner="morton", stuck_time=math.inf)).run(
         _two_link_loop(), EventsManager([]))
     assert tr.stuck.all()
 
@@ -160,7 +160,7 @@ def test_buffered_vehicles_keep_their_storage():
 def test_matsim_rust_frees_storage_on_entering_the_buffer():
     """buffer_in_storage=False: the buffered vehicles free their links, and
     each one crosses into the other's."""
-    tr = ShardSim(ShardSimParams(threads=2, partitioner="morton", stuck_time=math.inf,
+    tr = DSim(DSimParams(threads=2, partitioner="morton", stuck_time=math.inf,
                                  buffer_in_storage=False)).run(_two_link_loop(), EventsManager([]))
     assert not tr.stuck.any()
 
@@ -169,7 +169,7 @@ def test_flow_capacity_limits_crossing_a_node():
     """Through traffic uses flow capacity (1 veh / 10 s on the first link);
     arrivals at the end of a route do not."""
     net = chain_network([100, 100], freespeed=10, capacity=360)
-    tr = ShardSim(ShardSimParams(partitioner="morton")).run(
+    tr = DSim(DSimParams(partitioner="morton")).run(
         route_scenario(Scenario(net, commuters(4, 0, 2))), EventsManager([]))
     second_link = tr.link_enter.reshape(4, 2)[:, 1]
     assert np.diff(second_link).tolist() == [10.0, 10.0, 10.0]
@@ -201,12 +201,12 @@ def test_metis_partition_is_balanced_and_contiguous(grid):
 
 
 @metis
-def test_parallelsim_results_do_not_depend_on_the_partitioner(grid):
-    if not parallel.rust_available():
-        pytest.skip("mobslim_parallel extension not built")
+def test_psim_results_do_not_depend_on_the_partitioner(grid):
+    if not psim.rust_available():
+        pytest.skip("mobslim_psim extension not built")
     params = dict(backend="rust", threads=3, flow_capacity_factor=0.05, storage_capacity_factor=0.05)
-    a = ParallelSim(ParallelSimParams(**params, partitioner="morton")).run(grid, EventsManager([]))
-    b = ParallelSim(ParallelSimParams(**params, partitioner="metis")).run(grid, EventsManager([]))
+    a = PSim(PSimParams(**params, partitioner="morton")).run(grid, EventsManager([]))
+    b = PSim(PSimParams(**params, partitioner="metis")).run(grid, EventsManager([]))
     np.testing.assert_array_equal(a.leg_arrival, b.leg_arrival)
 
 
@@ -214,9 +214,9 @@ def test_unknown_partitioner_rejected(grid):
     with pytest.raises(ValueError):
         partition(grid.network, None, 2, "random")
     with pytest.raises(ValueError):
-        ShardSimParams(partitioner="random")
+        DSimParams(partitioner="random")
     with pytest.raises(ValueError):
-        ParallelSimParams(partitioner="random")
+        PSimParams(partitioner="random")
 
 
 TRANSIT_FIELDS = ("ride_wait_start", "ride_board", "ride_alight", "ride_trip")
@@ -282,14 +282,14 @@ def test_transit_close_to_hermes(transit_grid):
 
 def test_rejects_bad_params():
     with pytest.raises(ValueError):
-        ShardSimParams(threads=0)
+        DSimParams(threads=0)
     with pytest.raises(ValueError):
-        ShardSimParams(stuck_time=0)
+        DSimParams(stuck_time=0)
     with pytest.raises(ValueError):
-        ShardSimParams(seed=-1)
+        DSimParams(seed=-1)
 
 
 def test_unrouted_leg_raises(grid):
     plan = Plan.builder().act("h", 0, end_time=0).leg("car").act("w", 5).build()
     with pytest.raises(SimulationError):
-        ShardSim().run(Scenario(grid.network, Population.from_plans({"x": plan})), EventsManager([]))
+        DSim().run(Scenario(grid.network, Population.from_plans({"x": plan})), EventsManager([]))

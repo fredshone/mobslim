@@ -1,12 +1,12 @@
 [package]
-name = "mobslim-parallel"
+name = "mobslim-dsim"
 version = "0.1.0"
 edition = "2021"
-description = "Compiled kernel for mobslim's ParallelSim (whole-second queue mobsim on several threads)"
+description = "Compiled kernel for mobslim's DSim (partitioned workers exchanging messages with neighbours, as matsim-rust)"
 publish = false
 
 [lib]
-name = "mobslim_parallel"
+name = "mobslim_dsim"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
