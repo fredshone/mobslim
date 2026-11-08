@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE network SYSTEM "http://www.matsim.org/files/dtd/network_v1.dtd">
+<network>
+  <nodes>
+    <node id="H" x="-100" y="0"/>
+    <node id="A" x="0" y="0"/>
+    <node id="B" x="500" y="0"/>
+    <node id="C" x="1000" y="0"/>
+    <node id="D" x="1200" y="0"/>
+    <node id="E" x="1700" y="0"/>
+    <node id="F" x="2100" y="0"/>
+    <node id="W" x="2200" y="0"/>
+    <node id="S0" x="560" y="190"/>
+    <node id="S" x="650" y="150"/>
+    <node id="R" x="1100" y="-300"/>
+  </nodes>
+  <links capperiod="01:00:00">
+    <link id="a" from="H" to="A" length="100.0" freespeed="13.89" capacity="3600" permlanes="1" modes="car,pt"/>
+    <link id="ab" from="A" to="B" length="500.0" freespeed="13.89" capacity="1800" permlanes="1" modes="car,pt"/>
+    <link id="bc" from="B" to="C" length="500.0" freespeed="13.89" capacity="1800" permlanes="1" modes="car,pt"/>
+    <link id="s0" from="S0" to="S" length="98.5" freespeed="13.89" capacity="3600" permlanes="1" modes="car,pt"/>
+    <link id="s" from="S" to="C" length="380.8" freespeed="11.11" capacity="1200" permlanes="1" modes="car,pt"/>
+    <link id="cd" from="C" to="D" length="200.0" freespeed="8.33" capacity="720" permlanes="1" modes="car,pt"/>
+    <link id="de" from="D" to="E" length="500.0" freespeed="13.89" capacity="1800" permlanes="1" modes="car,pt"/>
+    <link id="ef" from="E" to="F" length="400.0" freespeed="13.89" capacity="1800" permlanes="1" modes="car,pt"/>
+    <link id="fw" from="F" to="W" length="100.0" freespeed="13.89" capacity="3600" permlanes="1" modes="car,pt"/>
+    <link id="r1" from="W" to="R" length="1140.2" freespeed="13.89" capacity="3600" permlanes="1" modes="car"/>
+    <link id="r2" from="R" to="H" length="1236.9" freespeed="13.89" capacity="3600" permlanes="1" modes="car"/>
+    <link id="r3" from="R" to="S0" length="729.2" freespeed="13.89" capacity="3600" permlanes="1" modes="car"/>
+  </links>
+</network>

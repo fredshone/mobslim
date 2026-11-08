@@ -1,0 +1,65 @@
+/* Showcase pages: corridor animation and benchmark figures. Colours follow furo's light/dark theme. */
+.mobsim-anim {
+  --ma-road: #c9ccd1; --ma-text: #222; --ma-muted: #6b7078;
+  --ma-main: #2a6fdb; --ma-side: #e07a1f; --ma-busc: #1b9e5a; --ma-paxc: #8e44ad;
+  --ma-hlc: #d81b60; --ma-bg: #ffffff; --ma-band: #f3f5f8;
+  margin: 1.2rem 0 1.6rem;
+  font-size: 0.85rem;
+}
+body[data-theme="dark"] .mobsim-anim {
+  --ma-road: #4a4f57; --ma-text: #e6e6e6; --ma-muted: #9aa0a8;
+  --ma-main: #6ea2ff; --ma-side: #ffa45c; --ma-busc: #3ccf86; --ma-paxc: #c58af0;
+  --ma-hlc: #ff5c9a; --ma-bg: #131416; --ma-band: #1c1e22;
+}
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme="light"]) .mobsim-anim {
+    --ma-road: #4a4f57; --ma-text: #e6e6e6; --ma-muted: #9aa0a8;
+    --ma-main: #6ea2ff; --ma-side: #ffa45c; --ma-busc: #3ccf86; --ma-paxc: #c58af0;
+    --ma-hlc: #ff5c9a; --ma-bg: #131416; --ma-band: #1c1e22;
+  }
+}
+.mobsim-anim .ma-controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; margin-bottom: 0.5rem;
+}
+.mobsim-anim .ma-play {
+  width: 2.4rem; height: 2rem; border-radius: 6px; border: 1px solid var(--color-background-border, #ccc);
+  background: var(--color-background-secondary, #f6f6f6); color: inherit; cursor: pointer; font-size: 0.9rem;
+}
+.mobsim-anim .ma-time { flex: 1 1 12rem; min-width: 8rem; }
+.mobsim-anim .ma-clock { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 4.8rem; }
+.mobsim-anim select { font: inherit; color: inherit; background: var(--color-background-secondary, #f6f6f6);
+  border: 1px solid var(--color-background-border, #ccc); border-radius: 4px; padding: 0.1rem 0.2rem; }
+.mobsim-anim .ma-canvas { display: block; width: 100%; cursor: pointer; border-radius: 6px; }
+.mobsim-anim .ma-legend { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; margin-top: 0.5rem; color: var(--ma-muted); }
+.mobsim-anim .ma-legend .ma-note { flex-basis: 100%; }
+.mobsim-anim .ma-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.3rem; vertical-align: 0; }
+.mobsim-anim .ma-main { background: var(--ma-main); }
+.mobsim-anim .ma-side { background: var(--ma-side); }
+.mobsim-anim .ma-pax { background: var(--ma-paxc); }
+.mobsim-anim .ma-hl { background: var(--ma-hlc); }
+.mobsim-anim .ma-bus { display: inline-block; width: 18px; height: 7px; border-radius: 2px; background: var(--ma-busc); margin-right: 0.3rem; }
+.mobsim-anim .ma-info { min-height: 2.6em; margin-top: 0.4rem; font-variant-numeric: tabular-nums; }
+.mobsim-anim .ma-info span { white-space: nowrap; }
+
+/* overview diagram */
+.ov-diagram { margin: 1.2rem 0; }
+.ov-diagram svg { width: 100%; height: auto; max-width: 760px; display: block; }
+.ov-diagram figcaption { font-size: 0.85rem; color: var(--color-foreground-secondary, #666); margin-top: 0.3rem; }
+.ov-diagram { --ov-ink: #3b3b3b; --ov-sub: #5d5d5d; --ov-box: #f4f5f7; --ov-stroke: #b9bec6;
+  --ov-py: #e9eaed; --ov-rs: #dbe8fb; --ov-rs-stroke: #2a78d6; --ov-group: transparent; }
+body[data-theme="dark"] .ov-diagram { --ov-ink: #e8e8e8; --ov-sub: #b9b9b9; --ov-box: #1f2125; --ov-stroke: #4b5058;
+  --ov-py: #2a2c31; --ov-rs: #1b2b44; --ov-rs-stroke: #3987e5; }
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme="light"]) .ov-diagram { --ov-ink: #e8e8e8; --ov-sub: #b9b9b9; --ov-box: #1f2125; --ov-stroke: #4b5058;
+    --ov-py: #2a2c31; --ov-rs: #1b2b44; --ov-rs-stroke: #3987e5; }
+}
+.ov-box { fill: var(--ov-box); stroke: var(--ov-stroke); }
+.ov-group { fill: none; stroke: var(--ov-stroke); stroke-dasharray: 4 4; }
+.ov-py { fill: var(--ov-py); stroke: var(--ov-stroke); }
+.ov-rs { fill: var(--ov-rs); stroke: var(--ov-rs-stroke); }
+.ov-title { fill: var(--ov-ink); font: 600 13px system-ui, sans-serif; text-anchor: middle; }
+.ov-sub { fill: var(--ov-sub); font: 11px system-ui, sans-serif; text-anchor: middle; }
+.ov-line { stroke: var(--ov-ink); stroke-width: 1.5; fill: none; }
+.ov-dash { stroke-dasharray: 4 3; }
+.ov-ink-fill { fill: var(--ov-ink); }
+.mobsim-anim .ma-stop { display: inline-block; width: 10px; height: 7px; border: 1.5px solid var(--ma-busc); margin-right: 0.3rem; box-sizing: border-box; }

@@ -236,7 +236,7 @@ listed in a comment at the top of the file.
   benchmarks and verification against MATSim.
 * [Design](docs/design.md): the reasoning behind the design, and how
   MobSlim differs from MATSim.
-* [The mobsims compared](docs/mobsims.md): how the five mobsims differ from
+* [Design detail](docs/simulation/design-detail.md): how the five mobsims differ from
   each other and from their MATSim equivalents, in plain terms.
 * API reference: build it with
   `uv run --group docs sphinx-build docs docs/_build`, then open
@@ -261,4 +261,4 @@ MobSlim keeps MATSim's names so MATSim users feel at home:
 | `seed=4711` | MATSim's default random seed |
 
 How the five mobsims differ from each other and from MATSim, in plain
-terms, is in [`docs/mobsims.md`](docs/mobsims.md).
+terms, is in [`docs/simulation/design-detail.md`](docs/simulation/design-detail.md).

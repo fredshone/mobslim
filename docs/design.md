@@ -197,7 +197,7 @@ class Mobsim(Protocol):
 ```
 
 How the mobsims differ from each other and from their MATSim equivalents,
-in plain terms and with measured effects, is in [The mobsims compared](mobsims.md).
+in plain terms and with measured effects, is in [Design detail](simulation/design-detail.md).
 
 **Timing parameters, shared by every mobsim** (`mobsim._common.check_timing`):
 `continuous_time` (exact times or whole seconds), `junction_delays` (a
@@ -480,7 +480,7 @@ best of 2–3):
   the closest to MATSim's link times (mean absolute error 0.21 s against
   HermesSim's 0.47 s on equil-100; 1.03 s, or 0.48 s with matsim-rust's
   buffer storage, against 1.18 s on equil-2000-cap0.5); leg times are within
-  0.05% for all. See [The mobsims compared](mobsims.md).
+  0.05% for all. See [Design detail](simulation/design-detail.md).
 
 **Transit**, as MATSim does it: a transit vehicle serves a stop when it
 reaches the front of its link's queue, before it moves to the buffer (at a
@@ -494,7 +494,7 @@ Passengers can walk to any stop, so with transit workers that are not
 neighbours stay within one tick of each other (`gate` = 1). Results do not
 depend on the worker count or partition (`test_dsim.py`). On MATSim's
 pt-tutorial, with its default timing, it is the closest to MATSim of all
-the mobsims (see [The mobsims compared](mobsims.md)).
+the mobsims (see [Design detail](simulation/design-detail.md)).
 
 ### 3.4 Routing (`routing`)
 

@@ -1,0 +1,1 @@
+*Measured 2026-11-07 on Intel(R) Core(TM) i5-8350U CPU @ 1.70GHz (8 logical CPUs, 15 GB), Linux-7.0.0-42-generic-x86_64; Python 3.12.8; java version "25.0.2" 2026-01-20 LTS, MATSim 2025.0 (DSim: weekly build 2027.0-2026w45) with `-Xmx10g`; MobSlim commit `d9df115`. Best of 3 iterations or runs.*

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE transitSchedule SYSTEM "http://www.matsim.org/files/dtd/transitSchedule_v1.dtd">
+<transitSchedule>
+  <transitStops>
+    <stopFacility id="stop1" x="500" y="0" linkRefId="ab" name="Mill Lane"/>
+    <stopFacility id="stop2" x="1700" y="0" linkRefId="de" name="Market"/>
+    <stopFacility id="stop3" x="2100" y="0" linkRefId="ef" name="Station"/>
+  </transitStops>
+  <transitLine id="line7">
+    <transitRoute id="line7_east">
+      <transportMode>pt</transportMode>
+      <routeProfile>
+        <stop refId="stop1" arrivalOffset="00:00:40" departureOffset="00:00:50" awaitDeparture="true"/>
+        <stop refId="stop2" arrivalOffset="00:03:00" departureOffset="00:03:10" awaitDeparture="true"/>
+        <stop refId="stop3" arrivalOffset="00:03:40" departureOffset="00:03:40" awaitDeparture="true"/>
+      </routeProfile>
+      <route>
+        <link refId="a"/>
+        <link refId="ab"/>
+        <link refId="bc"/>
+        <link refId="cd"/>
+        <link refId="de"/>
+        <link refId="ef"/>
+        <link refId="fw"/>
+      </route>
+      <departures>
+        <departure id="dep1" departureTime="07:01:00" vehicleRefId="bus1"/>
+        <departure id="dep2" departureTime="07:06:00" vehicleRefId="bus2"/>
+      </departures>
+    </transitRoute>
+  </transitLine>
+</transitSchedule>

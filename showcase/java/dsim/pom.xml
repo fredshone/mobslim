@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Classpath for MATSim's DSim, which is only in weekly builds (not in 2025.0).
+     Only the classpath is used: showcase/dsim.py compiles RunCase.java and
+     PerfRun.java against it with javac. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>mobslim</groupId>
+  <artifactId>mobslim-showcase-dsim</artifactId>
+  <version>0.1</version>
+  <packaging>pom</packaging>
+
+  <properties>
+    <matsim.version>2027.0-2026w45</matsim.version>
+  </properties>
+
+  <repositories>
+    <repository>
+      <id>matsim</id>
+      <url>https://repo.matsim.org/repository/matsim</url>
+    </repository>
+  </repositories>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.matsim</groupId>
+      <artifactId>matsim</artifactId>
+      <version>${matsim.version}</version>
+    </dependency>
+  </dependencies>
+</project>
