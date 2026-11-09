@@ -21,7 +21,7 @@ autodoc_typehints = "description"
 # optional extras: document the API even when they are not installed
 autodoc_mock_imports = ["pyarrow", "mobslim_router", "mobslim_hermes", "mobslim_psim", "mobslim_dsim", "pymetis"]
 default_role = "code"
-suppress_warnings = ["myst.xref_missing"]
+suppress_warnings = ["myst.xref_missing", "ref.python"]  # ref.python: ambiguous `type`/re-exported names
 
 html_theme = "furo"
 html_title = "MobSlim"

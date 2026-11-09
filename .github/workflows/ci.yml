@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.kernels }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # python: pure-Python mobsims only (Rust-dependent tests skip)
+        # rust: also builds the compiled kernels, routers and readers
+        kernels: [python, rust]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Rust
+        if: matrix.kernels == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust builds
+        if: matrix.kernels == 'rust'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust/mobslim-dsim
+            rust/mobslim-hermes
+            rust/mobslim-io
+            rust/mobslim-psim
+            rust/mobslim-router
+
+      - name: Install
+        run: uv sync --locked ${{ matrix.kernels == 'rust' && '--group rust' || '' }}
+
+      - name: Test
+        run: uv run --no-sync pytest

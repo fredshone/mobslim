@@ -575,6 +575,17 @@ The API reference (`docs/api.rst`) is generated from the docstrings, which
 use reStructuredText roles (``:class:`Population` ``) and may use Google-style
 `Args:` sections. A new public module needs a line in `docs/api.rst`.
 
+## Continuous integration
+
+GitHub Actions runs on pushes to `main` and on pull requests:
+
+- `.github/workflows/ci.yml` runs `pytest` twice: once Python-only, where the
+  tests that need the compiled kernels skip, and once with `--group rust`, which
+  builds the kernels with cargo.
+- `.github/workflows/docs.yml` builds the docs with `-W`, so a Sphinx warning
+  fails the build. On `main` it publishes them to GitHub Pages. For that, set
+  the repository's Pages source to "GitHub Actions".
+
 ## Benchmarks
 
 `benchmarks/` times each stage (loading, initialisation, mobsim, event
