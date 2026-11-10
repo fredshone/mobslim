@@ -15,10 +15,18 @@ files are described in the
   * [Performance](simulation/performance.md): speed and memory against
     MATSim Hermes, QSim and DSim, from 26,000 to 84,000 agents.
 
+* **[Optimisation](optimisation/index.md)**: the co-evolutionary loop, and
+  weaving: several simulations per iteration, so more people innovate.
+  * [Overview](optimisation/overview.md): the `Controller` and `Weave` loops.
+  * [Examples](optimisation/examples.md): both, from Python and from a config.
+  * [Performance](optimisation/performance.md): weaving on Sioux Falls.
+  * [Details](optimisation/details.md): what to know when using weaving.
+
 ```{toctree}
 :maxdepth: 2
 
 simulation/index
+optimisation/index
 developer
 design
 api

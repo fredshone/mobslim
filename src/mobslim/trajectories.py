@@ -71,7 +71,7 @@ from mobslim.routing.traveltime import (
     DEFAULT_BIN_SIZE,
     DEFAULT_HORIZON,
     TravelTimeTable,
-    travel_time_table,
+    TraversalAggregate,
 )
 
 
@@ -311,6 +311,13 @@ class Trajectories:
         self, network: Network, bin_size: float = DEFAULT_BIN_SIZE, horizon: float = DEFAULT_HORIZON
     ) -> TravelTimeTable:
         """Mean link travel times per entry-time bin (see :func:`travel_time_table`)."""
+        return self.traversal_aggregate(network, bin_size, horizon).table(network)
+
+    def traversal_aggregate(
+        self, network: Network, bin_size: float = DEFAULT_BIN_SIZE, horizon: float = DEFAULT_HORIZON
+    ) -> "TraversalAggregate":
+        """Link traversal sums per entry-time bin (see
+        :class:`~mobslim.routing.traveltime.TraversalAggregate`)."""
         entered = ~np.isnan(self.link_enter)
         links = self.plans.route_links[entered]
         enter = self.link_enter[entered]
@@ -321,7 +328,8 @@ class Trajectories:
             links = np.concatenate([links, v_links])
             enter = np.concatenate([enter, v_enter])
             leave = np.concatenate([leave, v_leave])
-        return travel_time_table(network, links, enter, leave, bin_size, horizon)
+        return TraversalAggregate.from_traversals(network.n_links, links, enter, leave,
+                                                  bin_size, horizon)
 
     def experienced_plans(self) -> list[ExperiencedPlan]:
         """One :class:`ExperiencedPlan` per person (built once, then cached)."""

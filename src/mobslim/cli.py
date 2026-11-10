@@ -3,6 +3,7 @@
     mobslim run config.yaml                  # run a mobslim YAML config
     mobslim run config.xml                   # run a MATSim config.xml
     mobslim run config.yaml -n 5 -o out/     # override iterations / output directory
+    mobslim run config.yaml --strands 8      # weave: 8 simulations per iteration
     mobslim check config.yaml                # load and precheck against the inputs
     mobslim resolved config.yaml             # the complete config, with defaults
     mobslim reference                        # every config parameter
@@ -27,6 +28,10 @@ def _add_run(sub) -> None:
     run.add_argument("config", help="*.yaml/*.yml (mobslim) or *.xml (MATSim)")
     run.add_argument("-n", "--iterations", type=int, help="number of iterations (overrides the config)")
     run.add_argument("-o", "--output-dir", help="output directory (overrides the config)")
+    run.add_argument("--strands", type=int,
+                     help="weave: simulations per iteration (overrides the config's weave.strands)")
+    run.add_argument("--innovation-rate", type=float,
+                     help="weave: share of persons innovating in each strand")
     run.add_argument("--strict", action="store_true",
                      help="MATSim config: fail on params mobslim cannot honour")
     run.add_argument("-q", "--quiet", action="store_true", help="log warnings only")
@@ -47,7 +52,14 @@ def _run(args) -> int:
                 cfg.set("controller", "lastIteration", first + args.iterations - 1)
             if args.output_dir is not None:
                 cfg.set("controller", "outputDirectory", args.output_dir)
-            controller = Controller.from_matsim_config(cfg, strict=args.strict)
+            if args.strands is not None or args.innovation_rate is not None:
+                from mobslim.weave import Weave
+
+                controller = Weave.from_matsim_config(
+                    cfg, strict=args.strict, strands=args.strands or 1,
+                    innovation_rate=args.innovation_rate)
+            else:
+                controller = Controller.from_matsim_config(cfg, strict=args.strict)
         else:
             from mobslim.config.mobslim import MobslimConfig
 
@@ -56,7 +68,17 @@ def _run(args) -> int:
                 cfg.values["run"]["iterations"] = args.iterations
             if args.output_dir is not None:
                 cfg.values["run"]["output_dir"] = str(Path(args.output_dir).resolve())
-            controller = Controller.from_mobslim_config(cfg)
+            if args.strands is not None:
+                cfg.values["weave"]["strands"] = args.strands
+            if args.innovation_rate is not None:
+                cfg.values["weave"]["innovation_rate"] = args.innovation_rate
+                cfg.values["weave"]["strands"] = cfg.values["weave"]["strands"] or 1
+            if cfg.weaves:
+                from mobslim.weave import Weave
+
+                controller = Weave.from_mobslim_config(cfg)
+            else:
+                controller = Controller.from_mobslim_config(cfg)
     except ConfigError as e:
         print(e, file=sys.stderr)
         return 1

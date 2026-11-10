@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from mobslim.planbatch import PlanBatch
 from mobslim.planstore import PlanStore
 from mobslim.population import Population
 from mobslim.replanning.context import ReplanningContext
@@ -112,38 +113,21 @@ class VectorRunner:
         n = len(population)
         if n == 0:
             return population
-        if isinstance(manager, PersonStrategyManager):
-            managers, codes = manager.managers, np.asarray(manager.codes, dtype=np.int64)
-        elif isinstance(manager, StrategyManager):
-            managers, codes = (manager,), np.zeros(n, dtype=np.int64)
-        else:  # some other manager: the per-person path
+        split = manager_split(manager, n)
+        if split is None:  # some other manager: the per-person path
             from mobslim.replanning.runners import SerialRunner
 
             return SerialRunner(self.batch_routing).run(population, manager, ctx, seed)
+        managers, codes = split
         it = ctx.iteration
         rng = replanning_rng(seed, it)
         u = rng.random(n)  # strategy choice
-
-        # (manager code, strategy index) -> persons
-        groups: list[tuple[StrategyManager, object, np.ndarray]] = []
-        for c, m in enumerate(managers):
-            persons = np.flatnonzero(codes == c)
-            if not len(persons):
-                continue
-            _, strategies, cum = m._table(it)
-            cum = np.asarray(cum, dtype=float)
-            pick = np.searchsorted(cum, u[persons] * cum[-1], side="right")
-            pick = np.minimum(pick, len(strategies) - 1)
-            for k, strategy in enumerate(strategies):
-                rows = persons[pick == k]
-                if len(rows):
-                    groups.append((m, strategy, rows))
+        groups = _choose(managers, codes, np.arange(n), u, lambda m: m._table(it)[0])
 
         vector = [g for g in groups if _vectorisable(g[0], g[1])]
         fallback = [g for g in groups if not _vectorisable(g[0], g[1])]
         tables = _Tables(population, spare=1 if any(g[1].is_innovative for g in vector) else 0)
         store = population.plans
-        rctx = ctx.batched()
 
         # selection, plan memory, and the new plans' sources
         innovations: list[tuple[PlanStrategy, np.ndarray, np.ndarray]] = []
@@ -168,22 +152,110 @@ class VectorRunner:
 
         # innovation: modules per strategy, then all new plans routed at once
         if innovations:
-            chunk = PlanStore.empty()
-            persons_of_new = []
-            for strategy, rows, sources in innovations:
-                batch = store.take(sources)
-                for module in strategy.modules:
-                    batch = module.mutate_batch(batch, rows, rctx, rng)
-                chunk = chunk.append(batch)
-                persons_of_new.append(rows)
-            persons_of_new = np.concatenate(persons_of_new)
-            new = route_batch(chunk.take(np.arange(len(chunk))), ctx, persons_of_new)
-            store = store.append(new)
+            store = store.append(innovate_batch(store, innovations, ctx, rng))
         result = population.with_tables(store, tables.plan_ids, tables.scores, tables.selected,
                                         tables.n_plans)
         if fallback:
             result = self._per_person(result, fallback, ctx, seed)
         return result
+
+    # -- the two halves of replanning, for callers that schedule them (Weave) --
+    def select(self, population: Population, manager, ctx: ReplanningContext,
+               rng: np.random.Generator, seed: int = 0) -> np.ndarray:
+        """The slot each person would execute under the *selection-only*
+        strategies (chosen by their relative weights), without changing the
+        population. One uniform draw per person picks the strategy, then each
+        strategy's selector draws. ``seed`` keys the per-person fallback for
+        selectors without ``select_many``."""
+        n = len(population)
+        split = manager_split(manager, n)
+        if split is None:
+            raise TypeError("select needs a StrategyManager or PersonStrategyManager.")
+        managers, codes = split
+        u = rng.random(n)
+        groups = _choose(managers, codes, np.arange(n), u, _selection_options)
+        slots = population.selected.astype(np.int64).copy()
+        for m, strategy, rows in groups:
+            if isinstance(strategy, PlanStrategy) and hasattr(strategy.selector, "select_many"):
+                slots[rows] = strategy.selector.select_many(
+                    population.scores[rows], population.n_plans[rows],
+                    population.selected[rows], rng)
+            else:
+                for i in rows.tolist():
+                    person = strategy.apply(population[i], ctx.for_person(i),
+                                            person_rng(seed, ctx.iteration, i))
+                    slots[i] = person.selected
+        return slots
+
+    def innovate(self, population: Population, manager, ctx: ReplanningContext, persons,
+                 rng: np.random.Generator):
+        """New plans for ``persons`` (person indices; a person may repeat, and
+        gets one independent new plan per copy), without attaching them to
+        anyone. Each copy draws an innovative strategy by the relative
+        weights of its manager's innovative strategies; the strategy's
+        selector picks the source plan and its modules mutate a copy. All new
+        plans are routed together and appended to the population's store.
+
+        Returns ``(store, rows)``: the extended store and each copy's new row.
+        """
+        persons = np.asarray(persons, dtype=np.int64)
+        store = population.plans
+        if not len(persons):
+            return store, np.zeros(0, dtype=np.int64)
+        innovations, order = self.plan_innovations(population, manager, ctx, persons, rng)
+        new = innovate_batch(store, innovations, ctx, rng)
+        first = len(store)
+        store = store.append(new)
+        rows = np.empty(len(persons), dtype=np.int64)
+        rows[order] = np.arange(first, first + len(persons))
+        return store, rows
+
+    def plan_innovations(self, population: Population, manager, ctx: ReplanningContext,
+                         persons, rng: np.random.Generator):
+        """The cheap half of :meth:`innovate`: each copy's innovative
+        strategy and source plan. Non-vectorisable strategies are applied
+        here, person by person.
+
+        Returns ``(innovations, order)``. ``innovations`` goes to
+        :func:`innovate_batch` (with the population's store), whose new plan
+        ``i`` belongs to copy ``order[i]`` of ``persons``.
+        """
+        persons = np.asarray(persons, dtype=np.int64)
+        if not len(persons):
+            return [], np.zeros(0, dtype=np.int64)
+        split = manager_split(manager, len(population))
+        if split is None:
+            raise TypeError("innovate needs a StrategyManager or PersonStrategyManager.")
+        managers, codes = split
+        u = rng.random(len(persons))
+        picks = _choose(managers, codes[persons], np.arange(len(persons)), u,
+                        _innovation_options, missing="innovative")
+        innovations, order, fallback = [], [], []
+        for m, strategy, copies in picks:
+            rows = persons[copies]
+            if _vectorisable(m, strategy):
+                slots = strategy.selector.select_many(
+                    population.scores[rows], population.n_plans[rows],
+                    population.selected[rows], rng)
+                sources = population.plan_ids[rows, slots].astype(np.int64)
+                innovations.append((strategy, rows, sources))
+                order.append(copies)
+            else:
+                fallback.append((strategy, copies))
+        if fallback:  # per copy: the strategy on the person, keep its new plan
+            rctx = ctx.batched()
+            plans, copies_fb = [], []
+            for strategy, copies in fallback:
+                for k in copies.tolist():
+                    i = int(persons[k])
+                    person = strategy.apply(population[i], rctx.for_person(i),
+                                            person_rng(int(rng.integers(2**63)), ctx.iteration, i))
+                    plans.append(person.selected_plan)
+                    copies_fb.append(k)
+            batch = PlanBatch.from_plans(plans)
+            innovations.append((None, persons[copies_fb], batch))
+            order.append(np.asarray(copies_fb, dtype=np.int64))
+        return innovations, np.concatenate(order)
 
     def _per_person(self, population: Population, groups, ctx: ReplanningContext,
                     seed: int) -> Population:
@@ -215,6 +287,67 @@ class VectorRunner:
 
     def __exit__(self, *exc):
         self.close()
+
+
+def manager_split(manager, n: int):
+    """``(managers, codes)``: the strategy managers and each person's code,
+    or ``None`` for a manager the vectorised path does not know."""
+    if isinstance(manager, PersonStrategyManager):
+        return manager.managers, np.asarray(manager.codes, dtype=np.int64)
+    if isinstance(manager, StrategyManager):
+        return (manager,), np.zeros(n, dtype=np.int64)
+    return None
+
+
+def _selection_options(m: StrategyManager):
+    return [(w, s) for w, s in m.strategies if not s.is_innovative]
+
+
+def _innovation_options(m: StrategyManager):
+    return [(w, s) for w, s in m.strategies if s.is_innovative]
+
+
+def _choose(managers, codes, items, u, options, missing: str = "selection-only"):
+    """``[(manager, strategy, items)]``: item ``k`` (manager ``codes[k]``)
+    takes the strategy its draw ``u[k]`` falls on, by ``options(manager)``'s
+    cumulative weights. Groups come in manager, then strategy order."""
+    groups = []
+    for c, m in enumerate(managers):
+        mine = items[codes == c]
+        if not len(mine):
+            continue
+        opts = options(m)
+        strategies = [s for _, s in opts]
+        cum = np.cumsum([w for w, _ in opts], dtype=float)
+        if not len(cum) or cum[-1] <= 0:
+            raise ValueError(f"No {missing} strategy with positive weight.")
+        pick = np.searchsorted(cum, u[mine] * cum[-1], side="right")
+        pick = np.minimum(pick, len(strategies) - 1)
+        for k, strategy in enumerate(strategies):
+            rows = mine[pick == k]
+            if len(rows):
+                groups.append((m, strategy, rows))
+    return groups
+
+
+def innovate_batch(store: PlanStore, innovations, ctx: ReplanningContext, rng) -> PlanBatch:
+    """The new plans of ``innovations`` (``(strategy, persons, sources)``,
+    with ``sources`` store rows to send through the strategy's modules, or
+    ``(None, persons, batch)`` for plans already made), routed in one batch."""
+    rctx = ctx.batched()
+    chunk = PlanStore.empty()
+    persons_of_new = []
+    for strategy, rows, sources in innovations:
+        if strategy is None:
+            batch = sources
+        else:
+            batch = store.take(sources)
+            for module in strategy.modules:
+                batch = module.mutate_batch(batch, rows, rctx, rng)
+        chunk = chunk.append(batch)
+        persons_of_new.append(rows)
+    persons_of_new = np.concatenate(persons_of_new)
+    return route_batch(chunk.take(np.arange(len(chunk))), ctx, persons_of_new)
 
 
 def _apply(manager: StrategyManager, strategy, person, ctx, rng):

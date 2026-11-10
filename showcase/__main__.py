@@ -1,13 +1,14 @@
-"""``python -m showcase {scenario,correctness,perf,report,networks,all} [--force-matsim]``."""
+"""``python -m showcase {scenario,correctness,perf,report,networks,weaving,weaving-report,all} [--force-matsim]``."""
 
 import argparse
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(prog="python -m showcase", description=__doc__)
-    ap.add_argument("what", choices=["scenario", "correctness", "perf", "report", "networks", "all"])
+    ap.add_argument("what", choices=["scenario", "correctness", "perf", "report", "networks", "weaving",
+                                     "weaving-report", "all"])
     ap.add_argument("--force-matsim", action="store_true", help="rerun MATSim even if cached")
-    ap.add_argument("-k", action="append", default=[], help="perf, networks: only cases matching")
+    ap.add_argument("-k", action="append", default=[], help="perf, networks, weaving: only cases/runs matching")
     args = ap.parse_args()
     if args.what == "scenario":
         from showcase import corridor
@@ -25,6 +26,12 @@ def main() -> None:
     if args.what in ("networks", "all"):
         from showcase import networks
         networks.main(args.k)
+    if args.what in ("weaving", "all"):
+        from showcase.weaving import experiment
+        experiment.main(args.k)
+    if args.what in ("weaving", "weaving-report", "all"):
+        from showcase.weaving import report
+        report.main()
 
 
 if __name__ == "__main__":

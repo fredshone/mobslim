@@ -35,6 +35,11 @@ class IterationState:
     trajectories: Optional[Trajectories] = None  # set after the mobsim
     travel_time: Optional[TravelTimeTable] = None  # set at iteration end
     metrics: dict = field(default_factory=dict)  # set at iteration end
+    # Weave: the strand whose mobsim the events and trajectories come from
+    # (None: the plain Controller, which runs one simulation per iteration)
+    strand: Optional[int] = None
+    # Weave: every strand's results this iteration (set after the mobsims)
+    strands: Optional[list] = None
 
     @property
     def experienced(self) -> Optional[list[ExperiencedPlan]]:

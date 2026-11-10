@@ -313,6 +313,23 @@ SCHEMA = Section({
     }, "Routing."),
     "scoring": SCORING,
     "replanning": REPLANNING,
+    "weave": Section({
+        "strands": Param("int", None, "simulations per iteration, each with a different cohort "
+                         "innovating (null: no weaving, the plain controller)", nullable=True, min=1),
+        "innovation_rate": Param("float", None, "share of persons innovating in each strand",
+                                 nullable=True, min=0,
+                                 null_means="the innovative strategies' share of the weights"),
+        "alpha": Param("float", 1.0, "who innovates: weight (1 + iterations since the last "
+                       "innovation) ** alpha (0: uniform random)", min=0),
+        "reducer": Param("str", "mean", "how a plan's scores from several strands combine",
+                         choices=("mean", "precision")),
+        "workers": Param("int", None, "worker processes; strand 0 runs in the main process "
+                         "(0: every strand in the main process)", nullable=True, min=0,
+                         null_means="strands - 1, at most the physical cores - 1"),
+        "travel_time_smoothing": Param("float", 1.0, "weight of each iteration's travel times "
+                                       "in the learned estimate (1: the latest only)", min=0,
+                                       min_exclusive=True),
+    }, "Weaving: parallel strands of innovation per iteration (mobslim.weave)."),
     "persons": Section({
         "car_availability": Param("bool", True, "whether the person has a car (read by "
                                   "change_trip_mode with ignore_car_availability: false)",
