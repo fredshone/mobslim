@@ -1,9 +1,13 @@
 """Compiled routers (the optional ``mobslim_router`` Rust extension).
 
 :class:`RustRouter` has the :class:`~mobslim.routing.base.Router` interface
-plus a parallel :meth:`~RustRouter.route_many`. Two algorithms:
+plus a parallel :meth:`~RustRouter.route_many`. Algorithms:
 
-* ``"dijkstra"`` (default): time-dependent Dijkstra, *identical* routes to
+* ``"auto"`` (default): ``"alt"`` with :data:`AUTO_LANDMARKS` landmarks
+  when no link time is below free speed (always so for learned travel
+  times), else ``"dijkstra"``. ALT with 4 landmarks routes 2-5x faster than
+  Dijkstra on the showcase networks.
+* ``"dijkstra"``: time-dependent Dijkstra, *identical* routes to
   :class:`~mobslim.routing.dijkstra.DijkstraRouter`.
 * ``"alt"``: A* with landmarks. Landmark lower bounds are computed once per
   network and mode on free-speed times and reused for every later table,
@@ -16,7 +20,7 @@ plus a parallel :meth:`~RustRouter.route_many`. Two algorithms:
 router when it is installed and the travel times are a
 :class:`TravelTimeTable` or :class:`FreeSpeedTravelTime`, else the Python one.
 
-Use ``functools.partial(RustRouter, algorithm="alt", threads=4)`` as a
+Use ``functools.partial(RustRouter, algorithm="dijkstra", threads=4)`` as a
 factory to change the options (a ``partial`` pickles, so it works with
 :class:`~mobslim.replanning.runners.ProcessPoolRunner`).
 """
@@ -37,8 +41,9 @@ try:  # rust/mobslim-router; optional
 except ImportError:  # pragma: no cover - depends on the build
     _rust = None
 
-ALGORITHMS = ("dijkstra", "alt")
+ALGORITHMS = ("dijkstra", "alt", "auto")
 DEFAULT_LANDMARKS = 16
+AUTO_LANDMARKS = 4  # "auto": fastest of 4, 8, 16 on the 40 and 80 grids and Sioux Falls
 THREADS_ENV = "MOBSLIM_ROUTER_THREADS"
 
 
@@ -106,7 +111,7 @@ class RustRouter:
         network: Network,
         mode: str,
         travel_time: TravelTime,
-        algorithm: str = "dijkstra",
+        algorithm: str = "auto",
         landmarks: int = DEFAULT_LANDMARKS,
         threads: Optional[int] = None,
     ):
@@ -118,9 +123,13 @@ class RustRouter:
         if algorithm not in ALGORITHMS:
             raise ValueError(f"algorithm must be one of {ALGORITHMS}, not {algorithm!r}.")
         self.mode = mode
-        self.algorithm = algorithm
         self.threads = threads or default_threads()
         columns, bin_col, bin_size = travel_time_columns(network, travel_time)
+        if algorithm == "auto":  # ALT when its lower bound holds, else Dijkstra
+            valid = (columns >= network.free_speed_travel_times()[None, :]).all()
+            algorithm = "alt" if valid else "dijkstra"
+            landmarks = AUTO_LANDMARKS if landmarks == DEFAULT_LANDMARKS else landmarks
+        self.algorithm = algorithm
         if algorithm == "alt":
             if not (columns >= network.free_speed_travel_times()[None, :]).all():
                 raise ValueError(
@@ -175,7 +184,10 @@ class RustRouter:
 
 def default_router(network: Network, mode: str, travel_time: TravelTime) -> Router:
     """Router factory: :class:`RustRouter` when installed and the travel
-    times are a table, else :class:`DijkstraRouter`. Both give the same routes."""
+    times are a table, else :class:`DijkstraRouter`. Both give shortest
+    routes; the compiled one uses ALT (A* with landmarks, about twice as fast)
+    whenever no link is faster than free speed, which holds for learned
+    travel times."""
     if _rust is not None and isinstance(travel_time, (TravelTimeTable, FreeSpeedTravelTime)):
         return RustRouter(network, mode, travel_time)
     return DijkstraRouter(network, mode, travel_time)

@@ -52,6 +52,7 @@ from mobslim.scoring import (
     apply_scores,
 )
 from mobslim.trajectories import Trajectories, TrajectoryCollector
+from mobslim.weave import Weave, WeaveResult
 
 __all__ = [
     "Activity",
@@ -96,6 +97,8 @@ __all__ = [
     "Trajectories",
     "TrajectoryCollector",
     "TravelTimeTable",
+    "Weave",
+    "WeaveResult",
     "apply_scores",
     "grid_network",
     "linear_network",

@@ -650,6 +650,14 @@ class Population:
         return self._derive(plans=plans, plan_ids=plan_ids, scores=scores,
                             selected=np.asarray(selected, dtype=np.int32).copy(), n_plans=n_plans.copy())
 
+    def with_plan_store(self, plans: PlanStore) -> "Population":
+        """The same tables over ``plans``, a store that extends this one
+        (``self.plans.append(...)``: the same rows, then new ones). Never
+        compacts, so rows appended but not yet held by anyone stay valid."""
+        if len(plans) < len(self.plans):
+            raise ValueError("with_plan_store: the store must extend this population's store.")
+        return self._derive(plans=plans)
+
     def replace(self, persons: Iterable[Person]) -> "Population":
         """Rebuild from updated persons (same persons, same order).
 
@@ -674,6 +682,59 @@ class Population:
         table = self.scores.copy()
         table[np.arange(len(self)), self.selected] = scores
         return self._derive(scores=table)
+
+    def with_scores(self, persons, slots, values) -> "Population":
+        """Set the score of slot ``slots[i]`` of person ``persons[i]`` to
+        ``values[i]`` (a slot must hold a plan)."""
+        persons = np.asarray(persons, dtype=np.int64)
+        slots = np.asarray(slots, dtype=np.int64)
+        values = np.asarray(values, dtype=float)
+        if not persons.shape == slots.shape == values.shape:
+            raise ValueError("with_scores: persons, slots and values must have the same length.")
+        if len(slots) and ((slots < 0).any() or (slots >= self.n_plans[persons]).any()):
+            raise ValueError("with_scores: slot out of range.")
+        table = self.scores.copy()
+        table[persons, slots] = values
+        return self._derive(scores=table)
+
+    def add_plans(self, persons, plan_rows, scores=None, select: bool = False) -> "Population":
+        """Give person ``persons[i]`` the stored plan ``plan_rows[i]`` (a row
+        of this population's store) as a new last slot, with score
+        ``scores[i]`` (``NaN``/omitted: unscored). A person may appear more
+        than once. With ``select``, each person's last added plan becomes
+        selected. ``max_plans`` is not enforced here."""
+        persons = np.asarray(persons, dtype=np.int64)
+        plan_rows = np.asarray(plan_rows, dtype=np.int64)
+        scores = (np.full(len(persons), np.nan) if scores is None
+                  else np.asarray(scores, dtype=float))
+        if not persons.shape == plan_rows.shape == scores.shape:
+            raise ValueError("add_plans: persons, plan_rows and scores must have the same length.")
+        if len(plan_rows) and (plan_rows.min() < 0 or plan_rows.max() >= len(self.plans)):
+            raise ValueError("add_plans: row out of range of the plan store.")
+        n = self.n_plans.astype(np.int64)
+        # each added plan's slot: after the person's plans and earlier additions
+        order = np.argsort(persons, kind="stable")
+        sp = persons[order]
+        first = np.r_[True, sp[1:] != sp[:-1]] if len(sp) else np.zeros(0, bool)
+        start = np.flatnonzero(first)
+        rank = np.arange(len(sp)) - np.repeat(start, np.diff(np.r_[start, len(sp)]))
+        slot = np.empty(len(persons), dtype=np.int64)
+        slot[order] = n[sp] + rank
+        new_n = n + np.bincount(persons, minlength=len(self))
+        width = max(int(new_n.max(initial=1)), self.plan_ids.shape[1])
+        plan_ids = np.full((len(self), width), -1, dtype=np.int32)
+        plan_ids[:, :self.plan_ids.shape[1]] = self.plan_ids
+        table = np.full((len(self), width), np.nan)
+        table[:, :self.scores.shape[1]] = self.scores
+        plan_ids[persons, slot] = plan_rows
+        table[persons, slot] = scores
+        selected = self.selected.copy()
+        if select and len(persons):
+            last = np.full(len(self), -1, dtype=np.int64)
+            np.maximum.at(last, persons, slot)
+            selected = np.where(last >= 0, last, selected).astype(np.int32)
+        return self._derive(plan_ids=plan_ids, scores=table, selected=selected,
+                            n_plans=new_n.astype(np.int32))
 
     def map_plans(self, fn: Callable[[Plan], Plan]) -> "Population":
         """Apply ``fn`` to every stored plan once. Scores and selection are kept."""

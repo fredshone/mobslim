@@ -179,6 +179,102 @@ class TravelTimeCollector(EventHandler):
         )
 
 
+@dataclass(frozen=True, eq=False)
+class TraversalAggregate:
+    """Sums of link traversal times per (link, entry-time bin).
+
+    ``total`` (seconds), ``sum_sq`` (seconds squared) and ``count`` are
+    ``(n_links, n_bins)`` arrays. Aggregates of the same shape add
+    (``a + b``), so traversals measured in separate simulations (the strands
+    of a :class:`~mobslim.weave.Weave`) or arriving at different times pool
+    into one estimate; :meth:`table` finalises them into a
+    :class:`TravelTimeTable`.
+    """
+
+    total: np.ndarray
+    count: np.ndarray
+    sum_sq: np.ndarray
+    bin_size: float = DEFAULT_BIN_SIZE
+
+    @classmethod
+    def empty(cls, n_links: int, n_bins: int, bin_size: float = DEFAULT_BIN_SIZE) -> "TraversalAggregate":
+        z = np.zeros((n_links, n_bins))
+        return cls(z, np.zeros((n_links, n_bins), dtype=np.int64), z.copy(), bin_size)
+
+    @classmethod
+    def from_traversals(cls, n_links: int, links: np.ndarray, enter: np.ndarray,
+                        leave: np.ndarray, bin_size: float = DEFAULT_BIN_SIZE,
+                        horizon: float = DEFAULT_HORIZON) -> "TraversalAggregate":
+        """``links[k]`` was entered at ``enter[k]`` and left at ``leave[k]``.
+        Traversals that were never completed (``leave`` is NaN) are ignored."""
+        n_bins = int(np.ceil(horizon / bin_size))
+        done = ~np.isnan(leave)
+        links, enter, leave = links[done], enter[done], leave[done]
+        b = np.clip((enter // bin_size).astype(np.int64), 0, n_bins - 1)
+        k = links.astype(np.int64) * n_bins + b
+        size = n_links * n_bins
+        dt = leave - enter
+        total = np.bincount(k, weights=dt, minlength=size).reshape(-1, n_bins)
+        sum_sq = np.bincount(k, weights=dt * dt, minlength=size).reshape(-1, n_bins)
+        count = np.bincount(k, minlength=size).reshape(-1, n_bins)
+        return cls(total, count, sum_sq, bin_size)
+
+    @property
+    def n_bins(self) -> int:
+        return self.total.shape[1]
+
+    def __add__(self, other: "TraversalAggregate") -> "TraversalAggregate":
+        if other.total.shape != self.total.shape or other.bin_size != self.bin_size:
+            raise ValueError("Can only add aggregates with the same shape and bin size.")
+        return TraversalAggregate(self.total + other.total, self.count + other.count,
+                                  self.sum_sq + other.sum_sq, self.bin_size)
+
+    def mean(self) -> np.ndarray:
+        """Mean travel time per bin (NaN where nothing was observed)."""
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return self.total / self.count
+
+    def variance(self) -> np.ndarray:
+        """Sample variance per bin (NaN with fewer than two observations)."""
+        with np.errstate(invalid="ignore", divide="ignore"):
+            n = self.count
+            return np.where(n > 1, (self.sum_sq - self.total ** 2 / n) / (n - 1), np.nan)
+
+    def table(self, network: Network) -> "TravelTimeTable":
+        """Mean observed times; free speed where nothing was observed or the
+        mean is below free speed."""
+        fs = network.free_speed_travel_times()[:, None]
+        times = np.where(self.count > 0, np.maximum(self.mean(), fs), fs)
+        return TravelTimeTable(times, self.bin_size)
+
+
+class TravelTimeEstimator:
+    """Travel times learned across iterations from traversal aggregates.
+
+    Each :meth:`observe` finalises the aggregate into a table and smooths it
+    into the estimate: ``tt <- (1 - smoothing) * tt + smoothing * observed``.
+    ``smoothing = 1`` (the default) keeps only the latest observation, which
+    is :class:`~mobslim.controller.Controller`'s behaviour. The estimate
+    starts at free speed.
+    """
+
+    def __init__(self, network: Network, bin_size: float = DEFAULT_BIN_SIZE,
+                 horizon: float = DEFAULT_HORIZON, smoothing: float = 1.0):
+        if not 0 < smoothing <= 1:
+            raise ValueError("smoothing must be in (0, 1].")
+        self.network = network
+        self.smoothing = smoothing
+        self._table = TravelTimeTable.free_speed(network, bin_size, horizon)
+
+    def observe(self, aggregate: TraversalAggregate) -> TravelTimeTable:
+        observed = aggregate.table(self.network)
+        self._table = observed if self.smoothing == 1 else self._table.blend(observed, self.smoothing)
+        return self._table
+
+    def table(self) -> TravelTimeTable:
+        return self._table
+
+
 def travel_time_table(
     network: Network,
     links: np.ndarray,
@@ -192,17 +288,8 @@ def travel_time_table(
     ``links[k]`` was entered at ``enter[k]`` and left at ``leave[k]``.
     Traversals that were never completed (``leave`` is NaN) are ignored.
     Bins without observations, and means below free speed, use free speed.
+    (:meth:`TraversalAggregate.from_traversals`, then
+    :meth:`TraversalAggregate.table`.)
     """
-    n_bins = int(np.ceil(horizon / bin_size))
-    done = ~np.isnan(leave)
-    links, enter, leave = links[done], enter[done], leave[done]
-    b = np.clip((enter // bin_size).astype(np.int64), 0, n_bins - 1)
-    k = links.astype(np.int64) * n_bins + b
-    size = network.n_links * n_bins
-    total = np.bincount(k, weights=leave - enter, minlength=size).reshape(-1, n_bins)
-    count = np.bincount(k, minlength=size).reshape(-1, n_bins)
-    fs = network.free_speed_travel_times()[:, None]
-    with np.errstate(invalid="ignore", divide="ignore"):
-        mean = total / count
-    times = np.where(count > 0, np.maximum(mean, fs), fs)
-    return TravelTimeTable(times, bin_size)
+    return TraversalAggregate.from_traversals(network.n_links, links, enter, leave,
+                                              bin_size, horizon).table(network)

@@ -379,6 +379,9 @@ class MobslimConfig:
         for key in ("schedule", "vehicles"):
             if t[key] is not None and not Path(t[key]).exists():
                 problems.append(f"transit.{key}: file not found: {t[key]}")
+        rate = v["weave"]["innovation_rate"]
+        if rate is not None and rate > 1:
+            problems.append(f"weave.innovation_rate: a share in [0, 1], got {rate}")
         frac = v["replanning"]["disable_innovation_after"]
         if frac is not None and frac > 1:
             problems.append(f"replanning.disable_innovation_after: a fraction in [0, 1], got {frac}")
@@ -715,6 +718,34 @@ class MobslimConfig:
                     strategies=self.strategies(scenario.population.attributes),
                     transit_router_factory=self.transit_router_factory(scenario, scorer.params),
                     params=self.controller_params(), listeners=[OutputConfigWriter(self)])
+
+    @property
+    def weaves(self) -> bool:
+        """Whether the config asks for weaving (``weave.strands`` is set)."""
+        return self.values["weave"]["strands"] is not None
+
+    def weave_kwargs(self) -> dict:
+        """Keyword arguments for :class:`~mobslim.weave.Weave` on top of
+        :meth:`controller_kwargs`."""
+        from mobslim.weave import (
+            MeanReducer,
+            PrecisionReducer,
+            ProcessLoom,
+            SerialLoom,
+            WeightedStalenessScheduler,
+            default_workers,
+        )
+
+        w = self.values["weave"]
+        strands = w["strands"] or 1
+        workers = ((default_workers(strands) if strands > 1 else 0) if w["workers"] is None
+                   else w["workers"])
+        reducer = (MeanReducer(self.values["scoring"]["learning_rate"]) if w["reducer"] == "mean"
+                   else PrecisionReducer())
+        return dict(strands=strands, innovation_rate=w["innovation_rate"],
+                    scheduler=WeightedStalenessScheduler(w["alpha"]), reducer=reducer,
+                    loom=ProcessLoom(workers) if workers > 0 else SerialLoom(),
+                    travel_time_smoothing=w["travel_time_smoothing"])
 
 
 _SELECTORS = {"change_exp_beta", "select_exp_beta", "best_score", "keep_selected", "select_random"}

@@ -10,6 +10,21 @@ Running
 
 .. automodule:: mobslim.listeners
 
+Weaving
+-------
+
+.. automodule:: mobslim.weave.controller
+
+.. automodule:: mobslim.weave.ledger
+
+.. automodule:: mobslim.weave.scheduler
+
+.. automodule:: mobslim.weave.strand
+
+.. automodule:: mobslim.weave.merge
+
+.. automodule:: mobslim.weave.loom
+
 .. automodule:: mobslim.metrics
 
 .. automodule:: mobslim.cli
