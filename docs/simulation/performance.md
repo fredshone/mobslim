@@ -1,6 +1,6 @@
 # Performance
 
-Simulations are fast and memory light. The folowing experiments compare MobSlim and MATSim at the *grid-40*, *grid-40-congested* and *sioux-falls scenarios*, on the same plans and routes, on the following machine:
+Simulations are fast and memory light. The following experiments compare MobSlim and MATSim at the *grid-40*, *grid-40-congested*, *grid-80*, *grid-80-congested* and *sioux-falls scenarios*, on the same plans and routes, on the following machine:
 
 ```{include} ../_generated/perf_machine.md
 ```
@@ -12,20 +12,22 @@ Simulations are fast and memory light. The folowing experiments compare MobSlim 
 
 ## Speed
 
-* **MobSlim simulations are around 10x faster than MATSim Hermes**.
+* **MobSlim's HermesSim is 7–11x faster than MATSim Hermes**; PSim and DSim are 1–14x faster.
+* **On the largest scenarios, grid-80 and grid-80-congested, PSim on 16 threads is the fastest**:
+  10–14x faster than MATSim Hermes.
 
 ```{image} ../_static/showcase/perf_time_light.svg
 :class: only-light
-:alt: Mobsim time per scenario and simulation, log scale
+:alt: Mobsim time per scenario and simulation
 ```
 ```{image} ../_static/showcase/perf_time_dark.svg
 :class: only-dark
-:alt: Mobsim time per scenario and simulation, log scale
+:alt: Mobsim time per scenario and simulation
 ```
 
 ## Max memory
 
-* **Every MobSlim mobsim needs 75–85% less memory than MATSim Hermes**.
+* **Every MobSlim mobsim needs 70–85% less memory than MATSim Hermes**.
 
 ```{image} ../_static/showcase/perf_memory_light.svg
 :class: only-light
@@ -82,6 +84,51 @@ full demand: queues and spillback across the network. At the busiest minute,
 ```{include} ../_generated/perf_grid-40-congested.md
 ```
 
+### grid-80
+
+The grid-40 scenario at four times the size: an 80×80 grid (25,920 links)
+with 104,960 car commuters, the same number per link. Trips are twice as
+long, so there is about 8 times the work. At the busiest minute, 15:50,
+16,441 cars are on the road and only 32 are queued.
+
+```{image} ../_static/showcase/net_grid-80_light.png
+:class: only-light
+:width: 75%
+:align: center
+:alt: The 80×80 grid at its busiest minute, with almost every car moving
+```
+```{image} ../_static/showcase/net_grid-80_dark.png
+:class: only-dark
+:width: 75%
+:align: center
+:alt: The 80×80 grid at its busiest minute, with almost every car moving
+```
+
+```{include} ../_generated/perf_grid-80.md
+```
+
+### grid-80-congested
+
+grid-80 at flow and storage capacity ×0.1, as grid-40-congested is to
+grid-40. At the busiest minute, 08:00, 75,431 cars are on the road and
+68,507 of them are queued.
+
+```{image} ../_static/showcase/net_grid-80-congested_light.png
+:class: only-light
+:width: 75%
+:align: center
+:alt: The congested 80×80 grid at its busiest minute, with queues on most links
+```
+```{image} ../_static/showcase/net_grid-80-congested_dark.png
+:class: only-dark
+:width: 75%
+:align: center
+:alt: The congested 80×80 grid at its busiest minute, with queues on most links
+```
+
+```{include} ../_generated/perf_grid-80-congested.md
+```
+
 ### siouxfalls
 
 MATSim's Sioux Falls 2014: 84,110 agents travelling by car and by bus, with
@@ -127,6 +174,9 @@ snapshot shows cars only.
   [design detail](design-detail.md)).
 * **MATSim's DSim comes from a weekly build** (`2027.0-2026w45`), run with the
   QSim's traffic model.
+* **The multi-threaded runs use all 16 logical CPUs,** on 8 physical cores.
+  On the smaller scenarios they gain little over one thread, and sometimes lose;
+  on the grid-80 scenarios they are 2.2–4.6x faster than one thread.
 * **Timings depend on the machine.** Run on mains power, with nothing else
   heavy running.
 

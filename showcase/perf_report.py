@@ -97,13 +97,14 @@ def headline(results: dict) -> str:
 
 
 def chart(results: dict, metric: str, mode: str, path: Path) -> None:
-    """One full-width column chart per scenario, stacked, on one shared y range."""
+    """One full-width column chart per scenario, stacked; memory on one shared y range,
+    time on each scenario's own (its values span 0.1 s to 45 s)."""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.patches import Patch
-    from matplotlib.ticker import FixedLocator, FuncFormatter, MaxNLocator, NullLocator
+    from matplotlib.ticker import FixedLocator, FuncFormatter, MaxNLocator
 
     th = THEMES[mode]
     cases = [c for c in CASES if c.name in results["cases"]]
@@ -118,7 +119,7 @@ def chart(results: dict, metric: str, mode: str, path: Path) -> None:
         return r["time_s"] + (r.get("post_s") or 0) if metric == "time" else r["peak_rss_mb"]
 
     every = [value(r) for c in cases for r in results["cases"][c.name]["runs"].values()]
-    lo, hi = min(v for v in every if v == v), max(v for v in every if v == v)
+    hi = max(v for v in every if v == v)
     for ax, c in zip(axes.flat, cases):
         runs = results["cases"][c.name]["runs"]
         vals = [value(runs.get(lab, {})) for lab in labels]
@@ -128,22 +129,16 @@ def chart(results: dict, metric: str, mode: str, path: Path) -> None:
                  for lab in labels]
         x = list(range(len(vals)))
         ax.bar(x, vals, color=colors, width=0.7, edgecolor="none")
+        top = (max(v for v in vals if v == v) if metric == "time" else hi) * 1.15
         for xi, v in zip(x, vals):
             if v == v:
-                ax.text(xi, v * 1.12 if metric == "time" else v + hi * 0.02,
-                        _t(v) if metric == "time" else _mb(v),
+                ax.text(xi, v + top * 0.02, _t(v) if metric == "time" else _mb(v),
                         ha="center", va="bottom", color=th["muted"], fontsize=8)
+        ax.set_ylim(0, top)
         if metric == "time":
-            ax.set_yscale("log")
-            ax.set_ylim(lo / 1.6, hi * 4)
-            ax.yaxis.set_major_locator(FixedLocator(
-                [10.0 ** k for k in range(-4, 4) if lo / 1.6 <= 10.0 ** k <= hi * 4]))
-            ax.yaxis.set_minor_locator(NullLocator())
-            ax.yaxis.set_major_formatter(FuncFormatter(
-                lambda v, _: f"{v * 1000:g} ms" if v < 1 else f"{v:g} s"))
+            ax.yaxis.set_major_locator(MaxNLocator(4, steps=[1, 2, 2.5, 5, 10]))
+            ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "0" if v == 0 else f"{v:g} s"))
         else:
-            top = hi * 1.15
-            ax.set_ylim(0, top)
             if top > 1500:  # round GB ticks (1 GB = 1024 MB, as in the labels)
                 step = next(g for g in (0.5, 1, 2, 4) if top / 1024 / g <= 5)
                 ax.yaxis.set_major_locator(FixedLocator(
@@ -167,7 +162,7 @@ def chart(results: dict, metric: str, mode: str, path: Path) -> None:
     fig.legend(handles=[Patch(color=th["matsim"], label="Java MATSim"),
                         Patch(color=th["mobslim"], label="MobSlim")],
                loc="upper right", ncol=2, frameon=False, labelcolor=th["text"], fontsize=10)
-    fig.text(0.01, 0.995, ("Mobsim time per iteration (log scale, lower is faster)" if metric == "time"
+    fig.text(0.01, 0.995, ("Mobsim time per iteration (each scenario on its own scale, lower is faster)" if metric == "time"
                            else "Peak memory of the whole process (lower is smaller)"),
              color=th["text"], fontsize=10, va="top")
     fig.patch.set_alpha(0)

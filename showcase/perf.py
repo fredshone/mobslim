@@ -70,6 +70,9 @@ CASES = [
     PerfCase("grid-40", "40x40 grid: 6,560 links, 26,240 car commuters", grid=40, persons=26_240),
     PerfCase("grid-40-congested", "the same at capacity x0.1: queues and spillback everywhere",
              grid=40, persons=26_240, capacity=0.1),
+    PerfCase("grid-80", "80x80 grid: 25,920 links, 104,960 car commuters", grid=80, persons=104_960),
+    PerfCase("grid-80-congested", "the same at capacity x0.1: queues and spillback everywhere",
+             grid=80, persons=104_960, capacity=0.1),
     # learned plans: the shipped iteration-0 plans gridlock the network on every mobsim
     PerfCase("siouxfalls", "MATSim Sioux Falls 2014: 84,110 agents, car and bus (2,040 departures)",
              "siouxfalls-2014", "config_default.xml", transit=True, learn_iterations=10,

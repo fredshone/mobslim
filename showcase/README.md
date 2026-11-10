@@ -13,10 +13,12 @@ Generates the evidence behind three documentation pages:
 results without rerunning anything. `python -m showcase networks` redraws the network snapshots
 (a few minutes; it simulates each case once). `python -m showcase all` does everything.
 
-**Requirements.** Java 21+, Maven and a `matsim-libs` checkout, as for
+**Requirements.** Java 25+ (a JDK, not just a JRE: MATSim's DSim weekly
+build needs 25, the rest 21), Maven and a `matsim-libs` checkout, as for
 `verification/` (see its README): the MATSim side reuses its runner and
 cache. Sioux Falls comes from `matsim-libs/examples/scenarios/siouxfalls-2014`.
-The full `perf` run takes about an hour on a laptop. Do not run anything
+The full `perf` run takes about 40 minutes on an 8-core desktop, most of it
+the grid-80 cases, plus a few minutes the first time to prepare the inputs. Do not run anything
 else heavy at the same time.
 
 ## Layout
