@@ -41,6 +41,10 @@ use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
+#[path = "../../shared/traversal_sums.rs"]
+mod traversal_sums;
+use traversal_sums::{SparseSums, TraversalSums};
+
 use numpy::{IntoPyArray, PyReadonlyArray1};
 use pyo3::prelude::*;
 use pyo3::types::{PyFloat, PyTuple};
@@ -133,6 +137,12 @@ struct Inputs {
     // 1: a vehicle leaves a link one second later if it crosses a junction
     // after it, and an activity starts one second after the arrival
     junction_delay: i64,
+    // traversal sums: slots of `traversal_slot` s, each slot's bin (empty:
+    // no sums; see traversal_sums.rs)
+    traversal_slot_bin: Vec<u32>,
+    traversal_slot: f64,
+    // record the persons' link entry times (else only the trips')
+    link_times: bool,
     node_part: Vec<u32>,
     n_parts: usize,
     // transit (as HermesSim's kernel takes it, in whole seconds)
@@ -174,6 +184,12 @@ struct Inputs {
 }
 
 impl Inputs {
+    /// The first route position whose entry time is recorded (`enter`
+    /// holds the positions from here on): 0, or the trips' only.
+    fn enter_base(&self) -> usize {
+        if self.link_times { 0 } else { self.n_plan_links }
+    }
+
     fn n_plans(&self) -> usize {
         self.act_offsets.len() - 1
     }
@@ -270,7 +286,7 @@ struct Shared {
     act_end: Col<f64>,
     dep: Col<f64>,
     arr: Col<f64>,
-    enter: Col<f64>,
+    enter: Col<f32>, // from route position `enter_base()`; whole seconds: exact to 194 days
     // persons
     a_act: Col<usize>,
     a_leg: Col<i64>,
@@ -338,7 +354,7 @@ impl Shared {
             act_end: Col::new(vec![nan; n_acts]),
             dep: Col::new(vec![nan; n_legs]),
             arr: Col::new(vec![nan; n_legs]),
-            enter: Col::new(vec![nan; inp.route_links.len()]),
+            enter: Col::new(vec![f32::NAN; inp.route_links.len() - inp.enter_base()]),
             a_act: Col::new(inp.act_offsets[..n_plans].iter().map(|&o| o as usize).collect()),
             a_leg: Col::new(vec![-1; n_plans]),
             a_done: Col::new(vec![false; n_plans]),
@@ -514,6 +530,10 @@ struct Part<'a> {
     wake_now: Vec<u32>, // nodes woken by the person phase of this step
     key: u64,           // event order key of the running person or node step
     events: Vec<Event>, // (second, order key, code)
+    // the persons' traversals of the links into this partition's nodes
+    // (whose exits it owns), by row `sums_row[link]`
+    sums: TraversalSums,
+    sums_row: Vec<u32>,
 }
 
 impl<'a> Part<'a> {
@@ -522,6 +542,18 @@ impl<'a> Part<'a> {
         for (k, r) in rec.iter_mut().enumerate() {
             *r = inp.event_mask & (1 << k) != 0;
         }
+        let (mut sums_row, mut owned) = (Vec::new(), Vec::new());
+        if !inp.traversal_slot_bin.is_empty() {
+            sums_row = vec![u32::MAX; inp.n_links()];
+            for l in 0..inp.n_links() {
+                if inp.part_of(inp.link_to[l]) == me {
+                    sums_row[l] = owned.len() as u32;
+                    owned.push(l as u32);
+                }
+            }
+        }
+        let sums = TraversalSums::new(owned.len(), inp.traversal_slot_bin.clone(), inp.traversal_slot,
+                                      Some(owned));
         Part {
             me,
             inp,
@@ -537,6 +569,8 @@ impl<'a> Part<'a> {
             wake_now: Vec::new(),
             key: 0,
             events: Vec::new(),
+            sums,
+            sums_row,
         }
     }
 
@@ -894,7 +928,7 @@ impl<'a> Part<'a> {
         sh.a_rend.set(v, rpos + inp.trip_link_offsets[d + 1] - inp.trip_link_offsets[d]);
         let link = inp.route_links[rpos] as usize;
         sh.a_link.set(v, link as i64);
-        sh.enter.set(rpos, now as f64);
+        sh.enter.set(rpos - inp.enter_base(), now as f32); // a trip: always recorded
         if self.rec[EV_VEH_LINK_ENTER as usize] {
             self.record(EV_VEH_LINK_ENTER, d, link);
         }
@@ -1327,6 +1361,14 @@ impl<'a> Part<'a> {
                 } else if self.rec[EV_VEH_LINK_LEAVE as usize] {
                     self.record(EV_VEH_LINK_LEAVE, vi - n_plans, s);
                 }
+                if vi < n_plans && self.sums.is_on() {
+                    // entered at its earliest exit less the link's steps and
+                    // junction delay, as set on entry (no memory read)
+                    let enter = earliest - inp.free_steps[s].max(1) - inp.jd(nxt);
+                    debug_assert!(!inp.link_times
+                        || enter as f32 == sh.enter.get(sh.a_rpos.get(vi)));
+                    self.sums.add(self.sums_row[s] as usize, enter as f64, now as f64);
+                }
                 let dst = inp.part_of(inp.link_from[s]);
                 self.out[dst].exit.push((s as u32, pce));
                 if nxt < 0 {
@@ -1346,7 +1388,9 @@ impl<'a> Part<'a> {
                 let nx = nxt as usize;
                 sh.l_occ.set(nx, sh.l_occ.get(nx) + pce);
                 let rpos = sh.a_rpos.get(vi);
-                sh.enter.set(rpos, now as f64);
+                if rpos >= inp.enter_base() {
+                    sh.enter.set(rpos - inp.enter_base(), now as f32);
+                }
                 sh.a_link.set(vi, nxt);
                 let after = self.after_of(vi);
                 let steps = if vi < n_plans {
@@ -1480,7 +1524,7 @@ impl<'a> Part<'a> {
 
     /// The partition's thread: steps in lockstep with the others. Returns
     /// its events and the last second in which it had something to do.
-    unsafe fn run(mut self, ctx: &Ctx) -> (Vec<Event>, i64) {
+    unsafe fn run(mut self, ctx: &Ctx) -> (Vec<Event>, i64, SparseSums) {
         let k = self.inp.n_parts;
         let me = self.me;
         self.init();
@@ -1518,7 +1562,7 @@ impl<'a> Part<'a> {
             t = ctx.next[parity].iter().map(|x| x.load(Ordering::Acquire)).min().unwrap_or(IDLE);
             parity ^= 1;
         }
-        (self.events, last)
+        (self.events, last, self.sums.into_sparse())
     }
 }
 
@@ -1530,7 +1574,7 @@ struct Outputs {
     act_end: Vec<f64>,
     dep: Vec<f64>,
     arr: Vec<f64>,
-    enter: Vec<f64>,
+    enter: Vec<f32>,
     stuck: Vec<bool>,
     ev_time: Vec<f64>,
     ev_code: Vec<i64>,
@@ -1543,6 +1587,8 @@ struct Outputs {
     ride_trip: Vec<i64>,
     stop_arr: Vec<f64>,
     stop_dep: Vec<f64>,
+    sums: Option<SparseSums>, // the persons' link traversals, if asked for
+    leg_entered: Vec<i32>,    // links entered per leg
 }
 
 fn simulate(inp: &Inputs) -> Outputs {
@@ -1553,7 +1599,7 @@ fn simulate(inp: &Inputs) -> Outputs {
         mail: [0, 1].map(|_| (0..k * k).map(|_| Mutex::new(Mail::default())).collect()),
         next: [0, 1].map(|_| (0..k).map(|_| AtomicI64::new(IDLE)).collect()),
     };
-    let results: Vec<(Vec<Event>, i64)> = std::thread::scope(|scope| {
+    let results: Vec<(Vec<Event>, i64, SparseSums)> = std::thread::scope(|scope| {
         let handles: Vec<_> = (1..k)
             .map(|me| {
                 let (sh, ctx) = (&sh, &ctx);
@@ -1566,8 +1612,10 @@ fn simulate(inp: &Inputs) -> Outputs {
     });
     let last = results.iter().map(|r| r.1).max().unwrap_or(0);
     let mut events: Vec<Event> = Vec::with_capacity(results.iter().map(|r| r.0.len()).sum());
-    for (ev, _) in results {
+    let mut sums = SparseSums::default();
+    for (ev, _, part_sums) in results {
         events.extend(ev);
+        sums.extend(part_sums); // each link's exit is owned by one partition
     }
     // canonical order: by second, then persons by index, then nodes by index;
     // one owner's events are all on one partition, in order (stable sort)
@@ -1581,6 +1629,23 @@ fn simulate(inp: &Inputs) -> Outputs {
     let a_done = sh.a_done.into_inner();
     let a_leg = sh.a_leg.into_inner();
     let a_link = sh.a_link.into_inner();
+    let arr = sh.arr.into_inner();
+    // links entered per leg: all of a network leg's route once it arrived,
+    // for a leg under way its links up to the current one, else none
+    let off = &inp.route_offsets;
+    let mut leg_entered: Vec<i32> = (0..inp.leg_network.len())
+        .map(|l| {
+            let arrived = inp.leg_network[l] != 0 && !arr[l].is_nan();
+            if arrived { (off[l + 1] - off[l]) as i32 } else { 0 }
+        })
+        .collect();
+    let a_rpos = sh.a_rpos.into_inner();
+    for p in 0..n_plans {
+        if a_leg[p] >= 0 && a_link[p] >= 0 {
+            let leg = a_leg[p] as usize;
+            leg_entered[leg] = (a_rpos[p] as i64 - off[leg] + 1) as i32;
+        }
+    }
     let stuck: Vec<bool> = a_done.iter().map(|&d| !d).collect();
     let stuck_leg = (0..n_plans).filter(|&p| stuck[p]).map(|p| a_leg[p]).collect();
     let stuck_link = (0..n_plans).filter(|&p| stuck[p]).map(|p| a_link[p]).collect();
@@ -1588,7 +1653,8 @@ fn simulate(inp: &Inputs) -> Outputs {
         act_start: sh.act_start.into_inner(),
         act_end: sh.act_end.into_inner(),
         dep: sh.dep.into_inner(),
-        arr: sh.arr.into_inner(),
+        arr,
+        leg_entered,
         enter: sh.enter.into_inner(),
         stuck,
         ev_time: events.iter().map(|e| e.0 as f64).collect(),
@@ -1602,6 +1668,7 @@ fn simulate(inp: &Inputs) -> Outputs {
         ride_trip: sh.r_trip.into_inner(),
         stop_arr: sh.stop_arr.into_inner(),
         stop_dep: sh.stop_dep.into_inner(),
+        sums: (!inp.traversal_slot_bin.is_empty()).then_some(sums),
     }
 }
 
@@ -1622,7 +1689,8 @@ fn err(msg: &str) -> PyErr {
                     trip_stop_offsets, trip_stop_arr_step, trip_stop_dep_step,
                     trip_link_offsets, trip_links, trip_link_steps, trip_capacity, trip_pce,
                     trip_access_steps, trip_egress_steps, trip_parallel, door_open_steps,
-                    door_close_steps, trip_network, rs_network, rs_node, junction_delay=0))]
+                    door_close_steps, trip_network, rs_network, rs_node, junction_delay=0,
+                    traversal_slot=0.0, traversal_slot_bin=None, link_times=true))]
 #[allow(clippy::too_many_arguments)]
 fn run<'py>(
     py: Python<'py>,
@@ -1635,7 +1703,7 @@ fn run<'py>(
     leg_network: PyReadonlyArray1<'py, u8>,
     leg_teleport_steps: PyReadonlyArray1<'py, i64>,
     route_offsets: PyReadonlyArray1<'py, i64>,
-    route_links: PyReadonlyArray1<'py, i64>,
+    route_links: PyReadonlyArray1<'py, i32>,
     stuck_time: f64,
     end_time: f64,
     event_mask: i64,
@@ -1676,6 +1744,9 @@ fn run<'py>(
     rs_network: PyReadonlyArray1<'py, u8>,
     rs_node: PyReadonlyArray1<'py, i64>,
     junction_delay: i64,
+    traversal_slot: f64,
+    traversal_slot_bin: Option<PyReadonlyArray1<'py, i64>>,
+    link_times: bool,
 ) -> PyResult<Bound<'py, PyTuple>> {
     let n_links = free_steps.as_array().len();
     let act_offsets = act_offsets.as_array().to_vec();
@@ -1700,7 +1771,17 @@ fn run<'py>(
     let usizes = |a: &PyReadonlyArray1<'py, i64>| -> Vec<usize> {
         a.as_array().iter().map(|&x| x.max(0) as usize).collect()
     };
-    let mut route_links = idx(&route_links, n_links, "route link")?;
+    let trip_links_len = trip_links.as_array().len();
+    // the plans' int32 links, straight to u32 (no int64 copy on either side)
+    let mut route_links = {
+        let v = route_links.as_array();
+        if v.iter().any(|&x| x < 0 || x as usize >= n_links) {
+            return Err(err("route link index out of range"));
+        }
+        let mut out = Vec::with_capacity(v.len() + trip_links_len);
+        out.extend(v.iter().map(|&x| x as u32));
+        out
+    };
     let link_from = idx(&link_from, n_nodes, "link from-node")?;
     let link_to = idx(&link_to, n_nodes, "link to-node")?;
     let act_owner = idx(&act_owner, n_nodes, "activity owner node")?;
@@ -1768,6 +1849,18 @@ fn run<'py>(
         link_to,
         act_owner,
         junction_delay,
+        traversal_slot_bin: match traversal_slot_bin {
+            Some(b) => {
+                let b = b.as_array();
+                if b.iter().any(|&x| x < 0 || x > u32::MAX as i64) {
+                    return Err(err("traversal_slot_bin out of range"));
+                }
+                b.iter().map(|&x| x as u32).collect()
+            }
+            None => Vec::new(),
+        },
+        traversal_slot,
+        link_times,
         node_part,
         n_parts,
         trip_network,
@@ -1805,7 +1898,11 @@ fn run<'py>(
         out_off,
         out_links,
     };
-    let o = py.allow_threads(|| simulate(&inp));
+    let mut o = py.allow_threads(|| simulate(&inp));
+    let sums = match o.sums.take() {
+        Some(s) => s.into_py(py)?,
+        None => py.None().into_bound(py),
+    };
     let items: Vec<Bound<'py, PyAny>> = vec![
         o.act_start.into_pyarray(py).into_any(),
         o.act_end.into_pyarray(py).into_any(),
@@ -1824,6 +1921,8 @@ fn run<'py>(
         o.ride_trip.into_pyarray(py).into_any(),
         o.stop_arr.into_pyarray(py).into_any(),
         o.stop_dep.into_pyarray(py).into_any(),
+        sums,
+        o.leg_entered.into_pyarray(py).into_any(),
     ];
     PyTuple::new(py, items)
 }

@@ -26,6 +26,7 @@ factory to change the options (a ``partial`` pickles, so it works with
 """
 
 import os
+from contextlib import contextmanager
 from typing import Optional, Sequence
 
 import numpy as np
@@ -34,7 +35,11 @@ from mobslim.network import Network
 from mobslim.population import Route
 from mobslim.routing.base import NoRouteError, Router, TravelTime
 from mobslim.routing.dijkstra import DijkstraRouter
-from mobslim.routing.traveltime import FreeSpeedTravelTime, TravelTimeTable
+from mobslim.routing.traveltime import (
+    FreeSpeedTravelTime,
+    TimeBins,
+    TravelTimeTable,
+)
 
 try:  # rust/mobslim-router; optional
     import mobslim_router as _rust
@@ -58,9 +63,25 @@ def default_threads() -> int:
     return max(1, int(env)) if env else (os.cpu_count() or 1)
 
 
+@contextmanager
+def router_threads(threads: Optional[int]):
+    """Routers made inside default to ``threads`` threads (``None``: no
+    change); ``$MOBSLIM_ROUTER_THREADS``, if set, still wins."""
+    if threads is None or THREADS_ENV in os.environ:
+        yield
+        return
+    os.environ[THREADS_ENV] = str(threads)
+    try:
+        yield
+    finally:
+        os.environ.pop(THREADS_ENV, None)
+
+
 def travel_time_columns(network: Network, travel_time: TravelTime):
     """``(columns, bin_col, bin_size)``: the distinct time-bin columns of the
-    travel times as an ``(n_columns, n_links)`` array, and each bin's column."""
+    travel times as an ``(n_columns, n_links)`` array, and the column of each
+    uniform bin of ``bin_size`` seconds (with uneven bins, a ``TimeBins``:
+    each slot's bin's column)."""
     if isinstance(travel_time, TravelTimeTable):
         t = travel_time.times
         index: dict[bytes, int] = {}
@@ -72,7 +93,10 @@ def travel_time_columns(network: Network, travel_time: TravelTime):
             if c == len(cols):
                 cols.append(col)
             bin_col[b] = c
-        return np.stack(cols), bin_col, float(travel_time.bin_size)
+        bins = travel_time.bin_size
+        if isinstance(bins, TimeBins):
+            return np.stack(cols), bin_col[bins.slot_bin], bins.slot
+        return np.stack(cols), bin_col, float(bins)
     if isinstance(travel_time, FreeSpeedTravelTime):
         fs = np.ascontiguousarray(network.free_speed_travel_times(), dtype=np.float64)
         return fs[None, :], np.zeros(1, dtype=np.int64), 1.0

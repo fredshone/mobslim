@@ -21,10 +21,12 @@
 //!
 //! `raptor` holds the least-cost transit router (a port of
 //! `mobslim.transit.raptor.RaptorRouter`); `points` the nearest-point index
-//! that snaps activities to links (`mobslim.activity_links`).
+//! that snaps activities to links (`mobslim.activity_links`); `traversals`
+//! the link traversal sums that travel-time tables are learned from.
 
 mod points;
 mod raptor;
+mod traversals;
 
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
@@ -714,5 +716,6 @@ fn _kernel(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Router>()?;
     m.add_class::<raptor::Raptor>()?;
     m.add_class::<points::PointIndex>()?;
+    m.add_function(wrap_pyfunction!(traversals::accumulate_traversals, m)?)?;
     Ok(())
 }

@@ -70,6 +70,9 @@ Per iteration (`Controller.run`):
 2. **Mobsim.** `Mobsim.run(scenario, events)` executes every person's
    *selected* plan (encoded as a `PlanBatch`) and returns `Trajectories`.
    It emits typed events only for handlers registered in `before_mobsim`.
+   The controller asks it (`run_mobsim`) for the link travel-time sums and,
+   outside output iterations, to leave out the per-link entry times (see
+   3.2, *What an iteration needs*).
 3. **Scoring.** `score_all` scores every person from the trajectories:
    vectorised when the scorer has `score_trajectories`, otherwise
    `Scorer.score` on each `ExperiencedPlan`. Scores are written into the
@@ -98,7 +101,7 @@ Per iteration (`Controller.run`):
 | `Scenario(network, population, teleported_modes)` | `scenario` | Everything a mobsim needs |
 | `Modes(network, teleported)` | `modes` | The one answer to "network or teleported, and how long?"; built once as `scenario.modes` and shared by the mobsim, preparation and `ReplanningContext.modes` |
 | `PlanBatch` | `planbatch` | Plans as flat arrays: activities, legs and route links in contiguous slices located by offsets (CSR); activity types and modes as codes; `NaN` for missing times. What a mobsim executes. Route validation is one vectorised pass (`invalid_legs`) |
-| `Trajectories` | `trajectories` | The mobsim's output, aligned with the `PlanBatch`: `act_start`/`act_end` per activity, `leg_departure`/`leg_arrival`/`leg_distance` per leg, `link_enter` per route link, `stuck` per person; `NaN` = did not happen |
+| `Trajectories` | `trajectories` | The mobsim's output, aligned with the `PlanBatch`: `act_start`/`act_end` per activity, `leg_departure`/`leg_arrival`/`leg_distance`/`leg_entered` (links entered) per leg, `link_enter` per route link (`None` when not recorded), `stuck` per person, and the link travel-time sums (`aggregate`) when the mobsim built them; `NaN` = did not happen |
 | `ExperiencedPlan` | `experience` | What actually happened, as objects: activity start/end, leg departure/arrival, distance, links, `stuck`. Built from `Trajectories` on request (and cached) |
 
 **Activity timing** follows MATSim's `tryEndTimeThenDuration`. An activity
@@ -173,6 +176,60 @@ Travel times, scores and metrics are numpy reductions over these arrays, and
 `ExperiencedPlan` objects are built only if something asks for them
 (`IterationState.experienced`, analysis, RL observations).
 
+Every mobsim fills the same tables, one value per activity, leg or route
+link of the executed `PlanBatch`:
+
+| table | per | |
+|---|---|---|
+| `act_start`, `act_end` | activity | simulated times |
+| `leg_departure`, `leg_arrival` | leg | simulated times |
+| `leg_entered` | leg | links of its route entered (a prefix of the route; all of it once it arrived) |
+| `leg_distance` | leg | lengths of the entered links, or the teleport distance |
+| `link_enter` | route link | entry time; optional (see below) |
+| `stuck` | plan | did not finish |
+| `ride_*`, `transit` | ride, trip stop and link | public transport |
+| `aggregate` | link × time bin used | link travel-time sums, if the mobsim built them |
+
+The compiled kernels write these arrays directly as they simulate (HermesSim
+and PSim index them by route position; DSim's workers log `(position,
+time)` pairs, placed after the run). QSim and AgentSim fill the same arrays
+in Python, and `TrajectoryCollector` rebuilds them from events for mobsims
+that only emit events.
+
+**What an iteration needs.** An iteration needs two things from its
+simulation: the link travel times per time bin, to route on in the next
+iteration, and the plans as simulated, to score. Neither needs the per-link
+entry times:
+
+* *Travel times* are sums over link traversals (link, entry-time bin,
+  leave − enter). The compiled mobsims add each traversal as its vehicle
+  leaves the link, when asked with `traversal_bins=(bin_size, horizon)`,
+  and hand over the cells used (`Trajectories.aggregate`, see 3.4). Others
+  leave it to `Trajectories.traversal_aggregate`, which sums them from
+  `link_enter`; both give the same sums.
+* *Scores* use activity and leg times and leg distances. A leg's distance,
+  and its route in `ExperiencedPlan`, need only how many of its links it
+  entered (`leg_entered`): every link once it arrived, none if it never
+  departed, and for a leg under way at the end, its links up to the current
+  one, which the kernels report.
+
+`link_enter` is the largest table by far (one value per route link: 11.5
+million a run on the 80×80 grid, against 210,000 legs) and the kernels' most
+frequent memory write. So it is optional: run with `link_times=False`, a
+compiled mobsim leaves it out (`Trajectories.link_enter` is `None`;
+`link_leave()` and summing travel times from it raise an error that says
+why) and everything else is unchanged; tests check every table and the
+experienced plans against a run with link times. The controllers record
+link times in their **output iterations** only: the last, and every
+`ControllerParams.link_times_interval` iterations (`run.link_times_interval`
+in a mobslim config); in a `Weave`, only in its own process (strand 0, the
+strand its listeners see). The Python mobsims always record them.
+
+Link-level results that scoring may need later (tolls per link, say) fit the
+same pattern as the travel-time sums: give the kernel a per-link cost table
+and have it return one value per leg, rather than recording every link
+entry.
+
 **Events are an optional view.** Typed events named after MATSim's:
 `ActivityStart`/`ActivityEnd`, `PersonDeparture`/`PersonArrival`,
 `LinkEnter`/`LinkLeave`, `Teleportation`, `PersonStuck`. The `EventsManager`
@@ -194,6 +251,9 @@ event-based collectors.
 ```python
 class Mobsim(Protocol):
     def run(self, scenario: Scenario, events: EventsManager) -> Trajectories: ...
+
+# the built-in mobsims also take (sums_traversals = True; see run_mobsim):
+mobsim.run(scenario, events, traversal_bins=(bin_size, horizon), link_times=False)
 ```
 
 How the mobsims differ from each other and from their MATSim equivalents,
@@ -510,14 +570,46 @@ class Router(Protocol):
 RouterFactory = Callable[[Network, str, TravelTime], Router]
 ```
 
-* `TravelTimeTable` is an immutable `(n_links, n_bins)` array (15-min bins by
-  default) with `free_speed(...)` and `blend(...)`. It is picklable and
-  array-shaped, so it can go straight to worker processes or a compiled router.
+* `TravelTimeTable` is an immutable `(n_links, n_bins)` array with
+  `free_speed(...)` and `blend(...)`. It is picklable and array-shaped, so
+  it can go straight to worker processes or a compiled router.
+* **Bins.** Wherever a `bin_size` is taken (tables, aggregates, mobsims,
+  the controllers), a number means uniform bins of that many seconds and a
+  `TimeBins` bins of any widths: the horizon cut into uniform *slots*, each
+  in one bin (`slot_bin`). A time's bin is its slot's, one division and a
+  lookup, so the compiled mobsims and router take the slots as they are (the
+  router maps each slot to its bin's column of times). The controllers'
+  default is `TimeBins.off_peak()`: 15-minute bins from 06:00 to 22:00 and
+  hourly bins before and after, 78 bins over 30 hours against 120 uniform
+  ones, as travel times change little outside the peaks
+  (`ControllerParams.travel_time_off_peak_bin_size` and `travel_time_peak`;
+  MATSim configs keep MATSim's uniform bins).
+* **Learned tables are compact.** `TraversalAggregate.table` (and so
+  `Trajectories.travel_time_table` and the controllers' estimates) stores
+  whole seconds, rounded up, as `uint16`: 2 bytes per cell, against 8, so a
+  table of the 80×80 grid is 4 MB against 25 MB with uniform `float64` bins.
+  Rounding up keeps every time at or above free speed, so the routers'
+  landmark (ALT) bounds stay valid. A table with a link time over 18.2 hours
+  falls back to `float32` whole seconds, with a warning. With
+  `travel_time_smoothing < 1` the estimator smooths the unrounded means and
+  rounds only the table it hands out, so rounding never accumulates.
+  `table(network, compact=False)` gives the unrounded means.
 * `travel_time_table(network, links, enter, leave)` learns a table from
   link traversals with `np.bincount`, binned by link **entry** time and never
   below free speed. `Trajectories.travel_time_table` feeds it the trajectory
   arrays; `TravelTimeCollector` feeds it from events, appending traversals to
   compact arrays rather than holding an `n_links × n_bins` table.
+* The compiled mobsims (`HermesSim`, `PSim`, `DSim`) can build the same
+  sums while simulating, when asked with `traversal_bins=(bin_size,
+  horizon)` (the controllers ask through `run_mobsim`): a traversal is
+  added as its vehicle leaves the link, into a table stored bin by bin, so
+  the cells being written (the current bin's) stay in cache. They return
+  the cells used (`Trajectories.aggregate`, a `SparseAggregate`), and
+  `Trajectories.traversal_aggregate` uses them when the bins match; the
+  sums are the same as from the trajectory arrays (times are whole seconds,
+  so the sums are exact in any order). The Python mobsims take the request
+  and leave the summing to the trajectories. The accumulator is one Rust
+  source shared by the three kernels (`rust/shared/traversal_sums.rs`).
 * Routers read the table one time bin at a time as a tuple of Python floats.
   These tuples are built lazily per bin, and identical bins (e.g. free-flow
   nights) share one tuple, so memory grows with the number of distinct bins
@@ -687,7 +779,10 @@ Controller(scenario, *, mobsim=QSim(), scorer=CharyparNagelScorer(),
 
 * `ControllerParams`: `iterations`, `seed`, `learning_rate`,
   `travel_time_bin_size`, `travel_time_horizon`, `output_dir`,
-  `write_events_interval`.
+  `write_events_interval`, `link_times_interval` (iterations that record
+  per-link entry times besides the last; see 3.2),
+  `travel_time_off_peak_bin_size` and `travel_time_peak` (uneven bins; see
+  3.4); `travel_time_bins()` gives the bins they make.
 * `Controller.from_matsim_config(path, strict=False, **overrides)`: a run from
   a MATSim `config.xml`. `mobslim.config.matsim` translates each module into
   the constructor arguments above (`controller_kwargs`) and lists every

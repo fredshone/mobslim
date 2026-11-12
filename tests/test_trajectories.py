@@ -147,6 +147,28 @@ def test_travel_time_table_matches_event_collector(scenarios):
         np.testing.assert_allclose(table.times, from_events.times, rtol=1e-12, err_msg=name)
 
 
+def test_chunked_aggregate_and_validation_match_one_chunk(scenarios, monkeypatch):
+    """Tiny chunks (traversals cut mid-leg, legs cut mid-route) change nothing."""
+    import mobslim.planbatch
+    import mobslim.routing.traveltime
+    import mobslim.trajectories
+
+    for name, scenario, config in scenarios:
+        direct = run_all_ways(scenario, **config)[0]
+        whole = direct.traversal_aggregate(scenario.network)
+        invalid = direct.plans.invalid_legs(scenario.network)
+        for chunk in (1, 2, 3, 7):
+            monkeypatch.setattr(mobslim.trajectories, "TRAVERSAL_CHUNK", chunk)
+            monkeypatch.setattr(mobslim.routing.traveltime, "TRAVERSAL_CHUNK", chunk)
+            monkeypatch.setattr(mobslim.planbatch, "_LINK_CHUNK", chunk)
+            agg = direct.traversal_aggregate(scenario.network)
+            np.testing.assert_array_equal(agg.count, whole.count, err_msg=name)
+            np.testing.assert_allclose(agg.total, whole.total, rtol=1e-12, err_msg=name)
+            np.testing.assert_allclose(agg.sum_sq, whole.sum_sq, rtol=1e-12, err_msg=name)
+            np.testing.assert_array_equal(direct.plans.invalid_legs(scenario.network), invalid,
+                                          err_msg=name)
+
+
 def test_events_are_optional(equil_scenario):
     scenario = routed(equil_scenario)
     quiet = make_mobsim().run(scenario, EventsManager())

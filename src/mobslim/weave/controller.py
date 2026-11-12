@@ -45,10 +45,12 @@ from mobslim.controller import Controller, RunResult
 from mobslim.events import EventsManager
 from mobslim.listeners import IterationState
 from mobslim.metrics import iteration_metrics
+from mobslim.mobsim._common import validate_population, without_validation
 from mobslim.replanning.context import ReplanningContext
 from mobslim.replanning.strategy import PersonStrategyManager, StrategyManager
 from mobslim.replanning.vectorised import VectorRunner, manager_split
-from mobslim.routing.traveltime import TravelTimeEstimator
+from mobslim.routing.compiled import router_threads
+from mobslim.routing.traveltime import TravelTimeEstimator, sum_aggregates
 from mobslim.weave.ledger import Ledger
 from mobslim.weave.loom import Loom, ProcessLoom, SerialLoom, default_workers
 from mobslim.weave.merge import MeanReducer, Observations, ScoreReducer, merge
@@ -64,6 +66,7 @@ from mobslim.weave.strand import (
     StrandJob,
     StrandResult,
     run_strand,
+    slim_jobs,
     strand_scenario,
 )
 
@@ -184,20 +187,32 @@ class Weave(Controller):
         groups = [(m.removal_selector, np.flatnonzero(codes == c)) for c, m in enumerate(managers)]
         return max_plans, [(s, rows) for s, rows in groups if len(rows)]
 
+    def _strand_context(self, scenario, transit_weights) -> StrandContext:
+        """What every strand shares. Routes are validated here, every plan
+        once, rather than by the mobsim in every strand and iteration (most
+        plans are simulated again unchanged): strands then validate only
+        their new plans."""
+        cfg = self.params
+        mobsim, validates = without_validation(self.mobsim)
+        if validates:
+            validate_population(scenario)
+        return StrandContext(scenario, mobsim, self.scorer, cfg.travel_time_bins(),
+                             cfg.travel_time_horizon, self.router_factory,
+                             self.transit_router_factory, transit_weights,
+                             validate_new=validates)
+
     def run(self) -> WeaveResult:
         cfg = self.params
         scenario = self.prepare(self.scenario)
         transit_weights = self.person_transit_weights(scenario)
-        estimator = TravelTimeEstimator(scenario.network, cfg.travel_time_bin_size,
+        estimator = TravelTimeEstimator(scenario.network, cfg.travel_time_bins(),
                                         cfg.travel_time_horizon, self.travel_time_smoothing)
         travel_time = estimator.table()
         ledger = self.ledger = Ledger.start(scenario.population)
         n = len(ledger)
         max_plans, removal = self._removal_groups(n)
         runner = self.runner if isinstance(self.runner, VectorRunner) else VectorRunner()
-        ctx = StrandContext(scenario, self.mobsim, self.scorer, cfg.travel_time_bin_size,
-                            cfg.travel_time_horizon, self.router_factory,
-                            self.transit_router_factory, transit_weights)
+        ctx = self._strand_context(scenario, transit_weights)
         self.metrics, self.strand_metrics = [], []
         stats: Optional[dict] = None
         self._notify("on_startup", self)
@@ -220,8 +235,15 @@ class Weave(Controller):
                 t_replanned = time.perf_counter()
 
                 # 4: strands 1.. to the loom, strand 0 here (with events and listeners)
+                snapshot_s = getattr(self.loom, "snapshot_s", 0.0)
                 futures = [self.loom.submit(job) for job in jobs[1:]]
-                results = [self._run_local(ctx, jobs[0], state)] + [f.result() for f in futures]
+                snapshot_s = getattr(self.loom, "snapshot_s", 0.0) - snapshot_s
+                t_submitted = time.perf_counter()
+                with router_threads(getattr(self.loom, "router_threads", None)):
+                    local = self._run_local(ctx, jobs[0], state)
+                t_local = time.perf_counter()
+                results = [local] + [f.result() for f in futures]
+                del jobs, futures, local
                 state.strands = results
                 t_simulated = time.perf_counter()
 
@@ -234,11 +256,12 @@ class Weave(Controller):
                 scenario = state.scenario = scenario.with_population(ledger.population)
                 self._notify("on_scoring", state)
 
-                # 6: travel times
-                aggregate = results[0].aggregate
-                for r in results[1:]:
-                    aggregate = aggregate + r.aggregate
+                # 6: travel times (summed into strand 0's aggregate)
+                t_scored = time.perf_counter()
+                aggregate = sum_aggregates(r.aggregate for r in results)
+                t_summed = time.perf_counter()
                 travel_time = state.travel_time = estimator.observe(aggregate)
+                t_observed = time.perf_counter()
 
                 m = iteration_metrics(it, ledger.population, results[0].trajectories)
                 m.update(
@@ -253,12 +276,20 @@ class Weave(Controller):
                                                   for r in results)),
                     merge_s=t_merged - t_simulated,
                     strand_s=float(max(r.seconds for r in results)),
-                    iteration_s=time.perf_counter() - t_start,
+                    # simulation_s = submit_s + local_strand_s + wait_s; submit_s
+                    # includes snapshot_s (and, on a SerialLoom, strands 1..)
+                    submit_s=t_submitted - t_replanned, snapshot_s=snapshot_s,
+                    local_strand_s=t_local - t_submitted, wait_s=t_simulated - t_local,
+                    on_scoring_s=t_scored - t_merged, aggregate_sum_s=t_summed - t_scored,
+                    travel_time_s=t_observed - t_summed,
+                    metrics_s=time.perf_counter() - t_observed,
                 )
+                m["iteration_s"] = time.perf_counter() - t_start
                 state.metrics = stats = m
                 self.metrics.append(m)
                 self.strand_metrics.append([r.metrics for r in results])
                 self._notify("on_iteration_end", state)
+                del results, aggregate, obs  # free before the next iteration's strands
         finally:
             self.loom.close()
             self.runner.close()
@@ -278,19 +309,30 @@ class Weave(Controller):
                                                self.transit_router_factory, transit_weights)
         cohorts = (self.scheduler.allocate(ledger, k, rate, it, weave_rng(seed, it, "allocate"))
                    if rate > 0 else [np.zeros(0, dtype=np.int64)] * k)
-        jobs = []
-        for j, cohort in enumerate(cohorts):
-            innovations, _ = runner.plan_innovations(pop, self.strategies, rctx, cohort,
-                                                     weave_rng(seed, it, "innovate", j))
-            slots = runner.select(pop, self.strategies, rctx, weave_rng(seed, it, "background", j), seed)
-            rows = pop.plan_ids[np.arange(n), slots].astype(np.int64)
-            jobs.append(StrandJob(it, j, seed, ledger.version, rows, np.zeros(n, dtype=bool),
-                                  store=pop.plans, innovations=innovations or None,
-                                  travel_time=travel_time))
+        jobs = [self._strand_job(ledger, rctx, runner, it, j, cohort)
+                for j, cohort in enumerate(cohorts)]
         everyone = np.concatenate(cohorts) if cohorts else np.zeros(0, dtype=np.int64)
         ledger.last_innovated[everyone] = it
         ledger.in_flight[everyone] = True
+        if len(jobs) > 1 and getattr(self.loom, "workers", 0):  # workers load only what they use
+            jobs = slim_jobs(jobs)
         return jobs, len(everyone)
+
+    def _strand_job(self, ledger: Ledger, rctx: ReplanningContext, runner: VectorRunner,
+                    it: int, j: int, cohort: np.ndarray) -> StrandJob:
+        """Strand ``j``'s job: ``cohort``'s planned innovations, everyone
+        else's plan drawn by the selection strategies (with strand ``j``'s
+        random streams)."""
+        seed = self.params.seed
+        pop = ledger.population
+        n = len(pop)
+        innovations, _ = runner.plan_innovations(pop, self.strategies, rctx, cohort,
+                                                 weave_rng(seed, it, "innovate", j))
+        slots = runner.select(pop, self.strategies, rctx, weave_rng(seed, it, "background", j), seed)
+        rows = pop.plan_ids[np.arange(n), slots].astype(np.int64)
+        return StrandJob(it, j, seed, ledger.version, rows, np.zeros(n, dtype=bool),
+                         store=pop.plans, innovations=innovations or None,
+                         travel_time=rctx.travel_time)
 
     @staticmethod
     def _add_new_plans(ledger: Ledger, results: list[StrandResult]) -> Observations:
@@ -312,7 +354,9 @@ class Weave(Controller):
         return Observations.concat(observations)
 
     def _run_local(self, ctx: StrandContext, job: StrandJob, state: IterationState) -> StrandResult:
-        """Strand ``job`` in this process, with the listeners' event handlers."""
+        """Strand ``job`` in this process, with the listeners' event handlers
+        (and link times in the output iterations; workers never record them)."""
+        job = replace(job, link_times=self.params.records_link_times(job.iteration))
         scenario = strand_scenario(ctx, job)
         state.scenario, state.strand = scenario, job.strand
         events = state.events = EventsManager()

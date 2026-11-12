@@ -674,7 +674,10 @@ class MobslimConfig:
             iterations=run["iterations"], seed=run["seed"],
             learning_rate=self.values["scoring"]["learning_rate"],
             travel_time_bin_size=tt["bin_size"], travel_time_horizon=tt["horizon"],
+            travel_time_off_peak_bin_size=tt["off_peak_bin_size"],
+            travel_time_peak=(tt["peak_start"], tt["peak_end"]),
             output_dir=run["output_dir"], write_events_interval=run["write_events_interval"],
+            link_times_interval=run["link_times_interval"],
             activity_links=self.activity_link_params())
 
     def activity_link_params(self):

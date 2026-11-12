@@ -710,9 +710,13 @@ def test_learn_from_transit_adds_vehicle_link_times_without_dwell():
     scenario = car_behind_bus(blocking=True)
     net = scenario.network
     link, t_bin = net.link_index("0-1"), int(T0 // 900)
-    off = run(scenario).travel_time_table(net).times[link, t_bin]
+    def mean(trajectories):  # the learned mean, before rounding to whole seconds
+        return trajectories.traversal_aggregate(net).table(net, compact=False).times[link, t_bin]
+
+    off = mean(run(scenario))
     assert off == pytest.approx(251.0, abs=tol())  # the car, held by the bus at S1
     learn = replace(scenario.transit.params, learn_from_transit=True)
     on = run(replace(scenario, transit=scenario.transit.with_params(learn)))
     # the bus: entered 0-1 at T0, left at T0 + 300, of which 200 s dwell
-    assert on.travel_time_table(net).times[link, t_bin] == pytest.approx((off + 100.0) / 2)
+    assert mean(on) == pytest.approx((off + 100.0) / 2)
+    assert on.travel_time_table(net).times[link, t_bin] == np.ceil(mean(on))

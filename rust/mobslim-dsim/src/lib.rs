@@ -69,6 +69,10 @@
 //! (`buffer_in_storage`); matsim-rust frees it when the vehicle enters the
 //! buffer (`buffer_in_storage=false`).
 
+#[path = "../../shared/traversal_sums.rs"]
+mod traversal_sums;
+use traversal_sums::{SparseSums, TraversalSums};
+
 use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
@@ -171,6 +175,12 @@ struct Inputs {
     // next tick, and an activity starts one tick after the arrival
     // (matsim-rust); false: both in the same tick
     junction_delay: bool,
+    // traversal sums: slots of `traversal_slot` s, each slot's bin (empty:
+    // no sums; see traversal_sums.rs)
+    traversal_slot_bin: Vec<u32>,
+    traversal_slot: f64,
+    // record the persons' link entry times (else only the trips')
+    link_times: bool,
     end_tick: i64,
     event_mask: i64,
     link_from: Vec<u32>,
@@ -280,6 +290,7 @@ struct Veh {
     leg: u32,  // the person's leg (trips: NIL)
     rpos: u32, // index into route_links of the current link
     rend: u32, // end of the route (exclusive)
+    entered: i64, // when it entered its current link's queue
 }
 
 struct QEntry {
@@ -344,7 +355,7 @@ impl Shared {
         let n_rides = inp.ride_board.len();
         let n_ts = *inp.trip_stop_offsets.last().unwrap_or(&0);
         let nan = f64::NAN;
-        let veh = Veh { p: NIL, leg: NIL, rpos: 0, rend: 0 };
+        let veh = Veh { p: NIL, leg: NIL, rpos: 0, rend: 0, entered: NONE };
         Shared {
             waiting: Col::new((0..n_rs).map(|_| VecDeque::new()).collect()),
             at_stop: Col::new((0..n_rs).map(|_| Vec::new()).collect()),
@@ -439,7 +450,9 @@ struct Report {
     enter: Vec<(u32, i64)>,
     done: Vec<u32>,
     held: Vec<(u32, i64, i64)>, // persons still out there: (person, leg, link)
+    on_link: Vec<(u32, u32)>,   // persons on a link at the end: (leg, route position)
     events: Vec<Event>,
+    sums: SparseSums, // the persons' traversals of this worker's links
 }
 
 struct Worker<'a> {
@@ -453,6 +466,7 @@ struct Worker<'a> {
     alive: Vec<bool>,
     lloc: Vec<u32>, // global link -> local exit side
     links: Vec<Link>,
+    sums: TraversalSums, // the persons' traversals, by local exit side
     eloc: Vec<u32>, // global link -> local entry side
     entries: Vec<Entry>,
     nodes: Vec<u32>,
@@ -545,6 +559,9 @@ impl<'a> Worker<'a> {
                 s
             })
             .collect();
+        let globals = links.iter().map(|l: &Link| l.global).collect();
+        let sums = TraversalSums::new(links.len(), inp.traversal_slot_bin.clone(), inp.traversal_slot,
+                                      Some(globals));
         let k = inp.n_parts;
         let mut rec = [false; N_EVENT_KINDS];
         for (kind, r) in rec.iter_mut().enumerate() {
@@ -561,6 +578,7 @@ impl<'a> Worker<'a> {
             neighbours,
             lloc,
             links,
+            sums,
             eloc,
             entries,
             node_active: vec![false; nodes.len()],
@@ -666,7 +684,7 @@ impl<'a> Worker<'a> {
             if entry.waiting.is_empty() {
                 entry.wait_since = now;
             }
-            entry.waiting.push_back(Veh { p, leg: leg as u32, rpos: r0 as u32, rend: r1 as u32 });
+            entry.waiting.push_back(Veh { p, leg: leg as u32, rpos: r0 as u32, rend: r1 as u32, entered: NONE });
             if !entry.departing {
                 entry.departing = true;
                 self.departing.push(e);
@@ -878,7 +896,7 @@ impl<'a> Worker<'a> {
         // next tick
         let rpos = inp.tr_rstart[d];
         let rend = rpos + inp.trip_link_offsets[d + 1] - inp.trip_link_offsets[d];
-        let v = Veh { p: (inp.n_plans() + d) as u32, leg: NIL, rpos: rpos as u32, rend: rend as u32 };
+        let v = Veh { p: (inp.n_plans() + d) as u32, leg: NIL, rpos: rpos as u32, rend: rend as u32, entered: NONE };
         let link = inp.route_links[rpos];
         let pce = inp.trip_pce[d];
         let ll = self.lloc[link as usize];
@@ -1182,6 +1200,7 @@ impl<'a> Worker<'a> {
 
     fn push_queue_at(&mut self, l: u32, v: Veh, earliest: i64) {
         let (inp, now) = (self.inp, self.now);
+        let v = Veh { entered: now, ..v };
         let lk = &mut self.links[l as usize];
         lk.q.push_back(QEntry { v, earliest });
         let global = lk.global as usize;
@@ -1190,7 +1209,9 @@ impl<'a> Worker<'a> {
             lk.active = true;
             self.active_links.push(l);
         }
-        self.out.enter.push((v.rpos, now));
+        if inp.link_times || inp.is_trip(v) {
+            self.out.enter.push((v.rpos, now));
+        }
         if inp.is_trip(v) {
             self.record_trip(EV_VEH_LINK_ENTER, v.p as usize - inp.n_plans(), global);
         } else {
@@ -1273,6 +1294,7 @@ impl<'a> Worker<'a> {
                 self.record_trip(EV_VEH_LINK_LEAVE, v.p as usize - inp.n_plans(), global);
             } else {
                 self.record(EV_LINK_LEAVE, v.p, global);
+                self.sums.add(ll as usize, v.entered as f64, now as f64);
             }
             self.enter(Veh { rpos: v.rpos + 1, ..v }, next);
         }
@@ -1460,6 +1482,7 @@ impl<'a> Worker<'a> {
                         self.progressed = true;
                     } else {
                         self.record(EV_LINK_LEAVE, v.p, global);
+                        self.sums.add(ll, v.entered as f64, self.now as f64);
                         self.arrive(v.p, v.leg as usize, Some(inp.link_to[global]));
                     }
                 }
@@ -1685,11 +1708,14 @@ impl<'a> Worker<'a> {
             let g = lk.global as i64;
             held.extend(lk.q.iter().filter(|e| e.v.p < n_plans).map(|e| (e.v.p, e.v.leg as i64, g)));
             held.extend(lk.buf.iter().filter(|v| v.p < n_plans).map(|v| (v.p, v.leg as i64, g)));
+            let on = lk.q.iter().map(|e| &e.v).chain(lk.buf.iter()).filter(|v| v.p < n_plans);
+            self.out.on_link.extend(on.map(|v| (v.leg, v.rpos)));
         }
         for items in self.agenda.values() {
             held.extend(items.iter().filter_map(|it| held_item(inp, it)));
         }
         self.out.held = held;
+        self.out.sums = std::mem::replace(&mut self.sums, TraversalSums::off()).into_sparse();
         let rx = self.rx;
         (self.out, rx)
     }
@@ -1720,7 +1746,7 @@ struct Outputs {
     act_end: Vec<f64>,
     dep: Vec<f64>,
     arr: Vec<f64>,
-    enter: Vec<f64>,
+    enter: Vec<f32>,
     stuck: Vec<bool>,
     ev_time: Vec<f64>,
     ev_code: Vec<i64>,
@@ -1733,6 +1759,8 @@ struct Outputs {
     ride_trip: Vec<i64>,
     stop_arr: Vec<f64>,
     stop_dep: Vec<f64>,
+    sums: Option<SparseSums>, // the persons' link traversals, if asked for
+    leg_entered: Vec<i32>,    // links entered per leg
 }
 
 /// Partitions sharing a link, per partition.
@@ -1845,18 +1873,26 @@ fn simulate(inp: &Inputs) -> Outputs {
     let mut act_end = vec![nan; inp.act_end_time.len()];
     let mut dep = vec![nan; inp.leg_network.len()];
     let mut arr = vec![nan; inp.leg_network.len()];
-    let mut enter = vec![nan; inp.route_links.len()];
+    // from route position `base` on; whole seconds: exact to 194 days
+    let base = if inp.link_times { 0 } else { inp.n_plan_links };
+    let mut enter = vec![f32::NAN; inp.route_links.len() - base];
+    let mut on_link = Vec::new();
     // a plan of one activity is done from the start
     let mut done: Vec<bool> =
         (0..n_plans).map(|p| inp.act_offsets[p] as usize == inp.last_act(p)).collect();
     let mut held = Vec::new();
     let mut events: Vec<Event> = Vec::new();
+    let mut sums = SparseSums::default();
     for (rep, rx) in results {
         for (col, log) in [(&mut act_start, &rep.act_start), (&mut act_end, &rep.act_end),
-                           (&mut dep, &rep.dep), (&mut arr, &rep.arr), (&mut enter, &rep.enter)] {
+                           (&mut dep, &rep.dep), (&mut arr, &rep.arr)] {
             for &(i, t) in log {
                 col[i as usize] = t as f64;
             }
+        }
+        on_link.extend(rep.on_link);
+        for &(i, t) in &rep.enter {
+            enter[i as usize - base] = t as f32;
         }
         for p in rep.done {
             done[p as usize] = true;
@@ -1868,6 +1904,7 @@ fn simulate(inp: &Inputs) -> Outputs {
             }
         }
         events.extend(rep.events);
+        sums.extend(rep.sums); // each link's exit side is on one worker
     }
     // passengers waiting at stops or riding when the run ended
     unsafe {
@@ -1898,6 +1935,18 @@ fn simulate(inp: &Inputs) -> Outputs {
         where_[p as usize] = (leg, link);
     }
     let stuck: Vec<bool> = done.iter().map(|&d| !d).collect();
+    // links entered per leg: all of a network leg's route once it arrived,
+    // for a leg under way its links up to the current one, else none
+    let off = &inp.route_offsets;
+    let mut leg_entered: Vec<i32> = (0..inp.leg_network.len())
+        .map(|l| {
+            let arrived = inp.leg_network[l] != 0 && !arr[l].is_nan();
+            if arrived { (off[l + 1] - off[l]) as i32 } else { 0 }
+        })
+        .collect();
+    for (leg, rpos) in on_link {
+        leg_entered[leg as usize] = (rpos as i64 - off[leg as usize] + 1) as i32;
+    }
     let stuck_leg = (0..n_plans).filter(|&p| stuck[p]).map(|p| where_[p].0).collect();
     let stuck_link = (0..n_plans).filter(|&p| stuck[p]).map(|p| where_[p].1).collect();
     let ran = start < NEVER && start <= inp.end_tick;
@@ -1924,6 +1973,8 @@ fn simulate(inp: &Inputs) -> Outputs {
         ride_trip: sh.ride_trip.into_inner(),
         stop_arr: sh.stop_arr.into_inner(),
         stop_dep: sh.stop_dep.into_inner(),
+        sums: (!inp.traversal_slot_bin.is_empty()).then_some(sums),
+        leg_entered,
     }
 }
 
@@ -1963,7 +2014,8 @@ fn csr(n: usize, key: &[u32]) -> (Vec<usize>, Vec<u32>) {
                     trip_stop_offsets, trip_stop_arr_step, trip_stop_dep_step,
                     trip_link_offsets, trip_links, trip_link_steps, trip_capacity, trip_pce,
                     trip_access_steps, trip_egress_steps, trip_parallel, door_open_steps,
-                    door_close_steps, trip_network, rs_network, rs_link, buffer_in_storage=true, junction_delay=1))]
+                    door_close_steps, trip_network, rs_network, rs_link, buffer_in_storage=true, junction_delay=1,
+                    traversal_slot=0.0, traversal_slot_bin=None, link_times=true))]
 #[allow(clippy::too_many_arguments)]
 fn run<'py>(
     py: Python<'py>,
@@ -1976,7 +2028,7 @@ fn run<'py>(
     leg_network: PyReadonlyArray1<'py, u8>,
     leg_teleport_steps: PyReadonlyArray1<'py, i64>,
     route_offsets: PyReadonlyArray1<'py, i64>,
-    route_links: PyReadonlyArray1<'py, i64>,
+    route_links: PyReadonlyArray1<'py, i32>,
     stuck_time: f64,
     end_time: f64,
     event_mask: i64,
@@ -2019,6 +2071,9 @@ fn run<'py>(
     rs_link: PyReadonlyArray1<'py, i64>,
     buffer_in_storage: bool,
     junction_delay: i64,
+    traversal_slot: f64,
+    traversal_slot_bin: Option<PyReadonlyArray1<'py, i64>>,
+    link_times: bool,
 ) -> PyResult<Bound<'py, PyTuple>> {
     let n_links = cap.as_array().len();
     let act_offsets = act_offsets.as_array().to_vec();
@@ -2043,7 +2098,17 @@ fn run<'py>(
     let usizes = |a: &PyReadonlyArray1<'py, i64>| -> Vec<usize> {
         a.as_array().iter().map(|&x| x.max(0) as usize).collect()
     };
-    let mut route_links = idx(&route_links, n_links, "route link")?;
+    let trip_links_len = trip_links.as_array().len();
+    // the plans' int32 links, straight to u32 (no int64 copy on either side)
+    let mut route_links = {
+        let v = route_links.as_array();
+        if v.iter().any(|&x| x < 0 || x as usize >= n_links) {
+            return Err(err("route link index out of range"));
+        }
+        let mut out = Vec::with_capacity(v.len() + trip_links_len);
+        out.extend(v.iter().map(|&x| x as u32));
+        out
+    };
     let link_from = idx(&link_from, n_nodes, "link from-node")?;
     let link_to = idx(&link_to, n_nodes, "link to-node")?;
     let act_owner = idx(&act_owner, n_nodes, "activity owner node")?;
@@ -2113,6 +2178,18 @@ fn run<'py>(
         route_links,
         buffer_in_storage,
         junction_delay: junction_delay != 0,
+        traversal_slot_bin: match traversal_slot_bin {
+            Some(b) => {
+                let b = b.as_array();
+                if b.iter().any(|&x| x < 0 || x > u32::MAX as i64) {
+                    return Err(err("traversal_slot_bin out of range"));
+                }
+                b.iter().map(|&x| x as u32).collect()
+            }
+            None => Vec::new(),
+        },
+        traversal_slot,
+        link_times,
         stuck_ticks: if stuck_time.is_finite() { stuck_time.floor() as i64 } else { -1 },
         end_tick: if end_time.is_finite() { end_time.floor() as i64 } else { NEVER },
         event_mask,
@@ -2156,7 +2233,11 @@ fn run<'py>(
         tr_rstart,
         ride_leg,
     };
-    let o = py.allow_threads(|| simulate(&inp));
+    let mut o = py.allow_threads(|| simulate(&inp));
+    let sums = match o.sums.take() {
+        Some(s) => s.into_py(py)?,
+        None => py.None().into_bound(py),
+    };
     let items: Vec<Bound<'py, PyAny>> = vec![
         o.act_start.into_pyarray(py).into_any(),
         o.act_end.into_pyarray(py).into_any(),
@@ -2175,6 +2256,8 @@ fn run<'py>(
         o.ride_trip.into_pyarray(py).into_any(),
         o.stop_arr.into_pyarray(py).into_any(),
         o.stop_dep.into_pyarray(py).into_any(),
+        sums,
+        o.leg_entered.into_pyarray(py).into_any(),
     ];
     PyTuple::new(py, items)
 }

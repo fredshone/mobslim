@@ -5,7 +5,10 @@ means the two simulations cannot drift apart on the queue model itself, only
 on how they schedule it.
 """
 
+import copy
+import dataclasses
 import math
+from typing import Optional
 
 import numpy as np
 
@@ -81,9 +84,12 @@ def link_parameters(
     return free_time.tolist(), (1.0 / cap_per_s).tolist(), storage.tolist()
 
 
-def validate(scenario: Scenario, plans: PlanBatch) -> None:
-    """Raise :class:`SimulationError` for unknown modes or unexecutable routes."""
+def validate(scenario: Scenario, plans: PlanBatch, persons: Optional[np.ndarray] = None) -> None:
+    """Raise :class:`SimulationError` for unknown modes or unexecutable routes.
+    ``persons[i]``: the person of plan ``i`` (default: person ``i``)."""
     ids = scenario.population.ids
+    if persons is not None:
+        ids = _PersonOfPlan(ids, persons)
     is_net = plans.network_legs(scenario.modes.network_modes)
     for code, mode in enumerate(plans.modes):
         if not scenario.modes.is_known(mode):
@@ -102,6 +108,35 @@ def validate(scenario: Scenario, plans: PlanBatch) -> None:
             )
         links = tuple(plans.route_links[plans.route_offsets[leg]:plans.route_offsets[leg + 1]].tolist())
         raise SimulationError(f"Person {person!r}: invalid '{mode}' route {links}.")
+
+
+class _PersonOfPlan:
+    """``ids`` looked up by plan: ``id(i)`` is the id of plan ``i``'s person."""
+
+    def __init__(self, ids, persons):
+        self.ids, self.persons = ids, persons
+
+    def id(self, plan: int):
+        return self.ids.id(int(self.persons[plan]))
+
+
+def validate_population(scenario: Scenario) -> None:
+    """:func:`validate` every plan of every person, selected or not."""
+    pop = scenario.population
+    persons, slots = np.nonzero(pop.plan_ids >= 0)
+    validate(scenario, pop.plans.take(pop.plan_ids[persons, slots]), persons)
+
+
+def without_validation(mobsim) -> tuple[object, bool]:
+    """``(copy of mobsim that skips route validation, whether it validated)``;
+    ``mobsim`` itself when it has no ``params.validate_routes`` or it is off.
+    For callers that validate plans themselves, each plan once."""
+    params = getattr(mobsim, "params", None)
+    if not getattr(params, "validate_routes", False) or not dataclasses.is_dataclass(params):
+        return mobsim, False
+    out = copy.copy(mobsim)
+    out.params = dataclasses.replace(params, validate_routes=False)
+    return out, True
 
 
 def none_if_nan(values: np.ndarray) -> list:

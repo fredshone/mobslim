@@ -11,7 +11,9 @@ act_end          per act   activity end (``NaN`` for the last, or if stuck)
 leg_departure    per leg   departure time
 leg_arrival      per leg   arrival time (``NaN`` if stuck on the way)
 leg_distance     per leg   entered link lengths, or the teleport distance
-link_enter       per link  time the route link was entered
+leg_entered      per leg   links of its route entered (a prefix of the route)
+link_enter       per link  time the route link was entered (optional: None
+                           when the mobsim ran with link_times=False)
 stuck            per plan  the person did not finish their plan
 ride_wait_start  per ride  pt: reached the board stop (``NaN`` = never)
 ride_board       per ride  pt: boarded
@@ -35,11 +37,18 @@ arrival for a leg's last link, so leave times are not stored.
 
 Mobsims that only produce events can build the same table with a
 :class:`TrajectoryCollector`.
+
+``link_enter`` is the largest table (one value per route link) and nothing
+an iteration needs reads it: leg distances and experienced routes need only
+``leg_entered``, and the compiled mobsims sum the link travel times while
+simulating (:attr:`Trajectories.aggregate`). So the controllers record it in
+their output iterations only (``ControllerParams.link_times_interval``); see
+:func:`mobslim.mobsim.base.run_mobsim`.
 """
 
 import math
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 
@@ -70,8 +79,12 @@ from mobslim.planbatch import PlanBatch
 from mobslim.routing.traveltime import (
     DEFAULT_BIN_SIZE,
     DEFAULT_HORIZON,
+    TRAVERSAL_CHUNK,
+    Bins,
+    SparseAggregate,
     TravelTimeTable,
     TraversalAggregate,
+    n_bins_of,
 )
 
 
@@ -154,7 +167,7 @@ class Trajectories:
     leg_departure: np.ndarray  # float64 (n_legs,)
     leg_arrival: np.ndarray  # float64 (n_legs,)
     leg_distance: np.ndarray  # float64 (n_legs,)
-    link_enter: np.ndarray  # float64 (n_route_links,)
+    link_enter: Optional[np.ndarray]  # float64 (n_route_links,), None: not recorded
     stuck: np.ndarray  # bool (n_plans,)
     ride_wait_start: Optional[np.ndarray] = None  # float64 (n_rides,)
     ride_board: Optional[np.ndarray] = None  # float64 (n_rides,)
@@ -162,6 +175,12 @@ class Trajectories:
     ride_trip: Optional[np.ndarray] = None  # int32 (n_rides,), -1 = none
     transit: Optional[TransitTrajectories] = None
     transit_modes: frozenset = frozenset()
+    # the persons' link traversal sums, if the mobsim built them while
+    # simulating (see traversal_aggregate)
+    aggregate: Optional[SparseAggregate] = field(default=None, repr=False)
+    # links entered per leg (a prefix of its route); derived from
+    # link_enter when not given
+    leg_entered: Optional[np.ndarray] = field(default=None, repr=False)
     _experienced: Optional[list] = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -172,13 +191,20 @@ class Trajectories:
                 object.__setattr__(self, name, np.full(n_rides, np.nan))
         if self.ride_trip is None:
             object.__setattr__(self, "ride_trip", np.full(n_rides, -1, dtype=np.int32))
+        if self.leg_entered is None:
+            if self.link_enter is None:
+                raise ValueError("Trajectories need link_enter or leg_entered.")
+            object.__setattr__(self, "leg_entered", entered_per_leg(p, self.link_enter))
+        object.__setattr__(self, "leg_entered", np.asarray(self.leg_entered, dtype=np.int32))
         sizes = {"act_start": p.n_acts, "act_end": p.n_acts, "leg_departure": p.n_legs,
                  "leg_arrival": p.n_legs, "leg_distance": p.n_legs,
                  "link_enter": len(p.route_links), "stuck": p.n_plans,
                  "ride_wait_start": n_rides, "ride_board": n_rides, "ride_alight": n_rides,
-                 "ride_trip": n_rides}
+                 "ride_trip": n_rides, "leg_entered": p.n_legs}
         for name, n in sizes.items():
             a = getattr(self, name)
+            if a is None:  # link_enter, when not recorded
+                continue
             if a.shape != (n,):
                 raise ValueError(f"Trajectories.{name} must have shape ({n},), got {a.shape}.")
             a.flags.writeable = False
@@ -188,21 +214,37 @@ class Trajectories:
               leg_arrival, link_enter, stuck, teleport_distance,
               network_modes=None, transit=None, ride_wait_start=None, ride_board=None,
               ride_alight=None, ride_trip=None, stop_arrival=None, stop_departure=None,
-              transit_link_enter=None, act_xy=None) -> "Trajectories":
+              transit_link_enter=None, act_xy=None, aggregate=None,
+              leg_entered=None) -> "Trajectories":
         """Assemble from recorded values (lists or arrays).
 
         ``teleport_distance`` is per leg; it is used for teleported legs, and
         network legs get the summed length of the links they entered. With
         ``transit``, pt legs get the distance of the walks they finished and
         the rides they completed (``rs_distance`` of alight minus board).
+        ``aggregate``: the persons' link traversal sums, built by the mobsim
+        (a :class:`~mobslim.routing.traveltime.SparseAggregate`).
+        ``link_enter`` may be ``None`` (link times not recorded) when
+        ``leg_entered``, the links entered per leg, is given.
         """
-        link_enter = np.asarray(link_enter, dtype=float)
+        if link_enter is not None:
+            link_enter = np.asarray(link_enter, dtype=float)
+            if leg_entered is None:
+                leg_entered = entered_per_leg(plans, link_enter)
+        elif leg_entered is None:
+            raise ValueError("Trajectories.build needs link_enter or leg_entered.")
+        leg_entered = np.asarray(leg_entered, dtype=np.int32)
         distance = np.asarray(teleport_distance, dtype=float).copy()
         is_net = plans.network_legs(network.modes if network_modes is None else network_modes)
-        if len(link_enter):
-            entered = ~np.isnan(link_enter)
-            lengths = np.where(entered, network.length[plans.route_links], 0.0)
-            by_leg = np.bincount(plans.leg_of_link(), weights=lengths, minlength=plans.n_legs)
+        if len(plans.route_links):
+            # lengths of the entered links, summed per leg (in link order)
+            lengths = network.length[plans.route_links]
+            lengths[~entered_links(plans, leg_entered)] = 0.0
+            starts = plans.route_offsets[:-1]
+            has = plans.route_offsets[1:] > starts
+            by_leg = np.zeros(plans.n_legs)
+            if has.any():
+                by_leg[has] = np.add.reduceat(lengths, starts[has])
             distance[is_net] = by_leg[is_net]
         else:
             distance[is_net] = 0.0
@@ -240,6 +282,8 @@ class Trajectories:
             np.asarray(stuck, dtype=bool),
             transit=transit_tr,
             transit_modes=transit_modes,
+            aggregate=aggregate,
+            leg_entered=leg_entered,
             **rides,
         )
 
@@ -294,10 +338,18 @@ class Trajectories:
         return out
 
     # -- derived views -----------------------------------------------------
+    def _link_times(self) -> np.ndarray:
+        if self.link_enter is None:
+            raise ValueError(
+                "Link times were not recorded in this run (the mobsim was run with "
+                "link_times=False; controllers record them in output iterations only, "
+                "see ControllerParams.link_times_interval).")
+        return self.link_enter
+
     def link_leave(self) -> np.ndarray:
         """Leave time per route link: the next link's entry, or the leg's
         arrival for its last link. ``NaN`` if the link was not left."""
-        enter = self.link_enter
+        enter = self._link_times()
         leave = np.full_like(enter, np.nan)
         if len(enter):
             leave[:-1] = enter[1:]
@@ -308,28 +360,56 @@ class Trajectories:
         return leave
 
     def travel_time_table(
-        self, network: Network, bin_size: float = DEFAULT_BIN_SIZE, horizon: float = DEFAULT_HORIZON
+        self, network: Network, bin_size: Bins = DEFAULT_BIN_SIZE, horizon: float = DEFAULT_HORIZON
     ) -> TravelTimeTable:
         """Mean link travel times per entry-time bin (see :func:`travel_time_table`)."""
         return self.traversal_aggregate(network, bin_size, horizon).table(network)
 
     def traversal_aggregate(
-        self, network: Network, bin_size: float = DEFAULT_BIN_SIZE, horizon: float = DEFAULT_HORIZON
-    ) -> "TraversalAggregate":
+        self, network: Network, bin_size: Bins = DEFAULT_BIN_SIZE, horizon: float = DEFAULT_HORIZON,
+        sparse: bool = False,
+    ) -> Union["TraversalAggregate", SparseAggregate]:
         """Link traversal sums per entry-time bin (see
-        :class:`~mobslim.routing.traveltime.TraversalAggregate`)."""
-        entered = ~np.isnan(self.link_enter)
-        links = self.plans.route_links[entered]
-        enter = self.link_enter[entered]
-        leave = self.link_leave()[entered]
+        :class:`~mobslim.routing.traveltime.TraversalAggregate`; ``sparse``:
+        as a :class:`~mobslim.routing.traveltime.SparseAggregate`).
+
+        A link is left when the next one on the route is entered, or at
+        arrival for a leg's last link. The mobsims that can sum traversals
+        while simulating (asked with ``traversal_bins``) hand them over in
+        :attr:`aggregate`, used when its bins are these; otherwise they are
+        summed here from :attr:`link_enter`. Both give the same sums.
+        """
+        n_bins = n_bins_of(bin_size, horizon)
         tt = self.transit
-        if tt is not None and tt.transit.params.learn_from_transit:
-            v_links, v_enter, v_leave = tt.link_traversals()
-            links = np.concatenate([links, v_links])
-            enter = np.concatenate([enter, v_enter])
-            leave = np.concatenate([leave, v_leave])
-        return TraversalAggregate.from_traversals(network.n_links, links, enter, leave,
-                                                  bin_size, horizon)
+        transit = tt is not None and tt.transit.params.learn_from_transit
+        pre = self.aggregate
+        if pre is not None and pre.bin_size == bin_size and pre.shape == (network.n_links, n_bins):
+            if sparse and not transit:
+                return pre
+            agg = pre.to_dense()
+        else:
+            agg = self._sum_traversals(network.n_links, n_bins, bin_size)
+        if transit:
+            agg.accumulate(*tt.link_traversals())
+        return agg.to_sparse() if sparse else agg
+
+    def _sum_traversals(self, n_links: int, n_bins: int, bin_size: Bins) -> "TraversalAggregate":
+        agg = TraversalAggregate.empty(n_links, n_bins, bin_size)
+        enter, links = self._link_times(), self.plans.route_links
+        n = len(enter)
+        # each leg's last link is left at the leg's arrival (as link_leave, chunk by chunk)
+        offsets = self.plans.route_offsets
+        has = offsets[1:] > offsets[:-1]
+        last, arrival = offsets[1:][has] - 1, self.leg_arrival[has]
+        for s in range(0, n, TRAVERSAL_CHUNK):
+            e = min(s + TRAVERSAL_CHUNK, n)
+            leave = np.empty(e - s)
+            leave[:-1] = enter[s + 1:e]
+            leave[-1] = enter[e] if e < n else np.nan
+            i, j = np.searchsorted(last, [s, e])
+            leave[last[i:j] - s] = arrival[i:j]
+            agg.accumulate(links[s:e], enter[s:e], leave)
+        return agg
 
     def experienced_plans(self) -> list[ExperiencedPlan]:
         """One :class:`ExperiencedPlan` per person (built once, then cached)."""
@@ -345,7 +425,8 @@ class Trajectories:
         start, end = self.act_start.tolist(), self.act_end.tolist()
         dep, arr, dist = (self.leg_departure.tolist(), self.leg_arrival.tolist(),
                           self.leg_distance.tolist())
-        enter, links, roff = self.link_enter.tolist(), b.route_links.tolist(), b.route_offsets.tolist()
+        links, roff = b.route_links.tolist(), b.route_offsets.tolist()
+        entered = self.leg_entered.tolist()
         act_off, stuck = b.act_offsets.tolist(), self.stuck.tolist()
         transit_legs = b.mode_legs(self.transit_modes).tolist()
         ro = b.ride_offsets.tolist()
@@ -370,10 +451,8 @@ class Trajectories:
                 d = dep[leg]
                 if d != d:
                     break  # never departed
-                r0, r1 = roff[leg], roff[leg + 1]
-                r = r0
-                while r < r1 and enter[r] == enter[r]:  # entered links are a prefix
-                    r += 1
+                r0 = roff[leg]
+                r = r0 + entered[leg]  # entered links are a prefix
                 t = arr[leg]
                 rides = None
                 if transit_legs[leg]:
@@ -519,6 +598,30 @@ def _ride_distance(transit, plans: PlanBatch, ride_alight: np.ndarray) -> np.nda
     d = transit.schedule.rs_distance
     full = d[plans.ride_alight_stop] - d[plans.ride_board_stop] if plans.n_rides else np.zeros(0)
     return np.where(np.isnan(ride_alight), 0.0, full)
+
+
+def entered_per_leg(plans: PlanBatch, link_enter: np.ndarray) -> np.ndarray:
+    """Links entered per leg (``link_enter`` not ``NaN``: a prefix of the
+    leg's route)."""
+    out = np.zeros(plans.n_legs, dtype=np.int32)
+    starts = plans.route_offsets[:-1]
+    has = plans.route_offsets[1:] > starts
+    if has.any():
+        entered = ~np.isnan(np.asarray(link_enter[:len(plans.route_links)], dtype=float))
+        out[has] = np.add.reduceat(entered, starts[has], dtype=np.int64)
+    return out
+
+
+def entered_links(plans: PlanBatch, leg_entered: np.ndarray) -> np.ndarray:
+    """Whether each route link was entered: the first ``leg_entered[leg]``
+    links of each leg (one byte per link, from per-leg marks)."""
+    n = len(plans.route_links)
+    starts = plans.route_offsets[:-1]
+    some = leg_entered > 0
+    marks = np.zeros(n + 1, dtype=np.int8)
+    marks[starts[some]] += 1
+    np.subtract.at(marks, starts[some] + leg_entered[some], 1)
+    return np.cumsum(marks[:n], dtype=np.int8) > 0
 
 
 def _none_list(a: np.ndarray) -> list:

@@ -15,6 +15,10 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
+#[path = "../../shared/traversal_sums.rs"]
+mod traversal_sums;
+use traversal_sums::{SparseSums, TraversalSums};
+
 use numpy::{IntoPyArray, PyReadonlyArray1};
 use pyo3::prelude::*;
 use pyo3::types::{PyFloat, PyTuple};
@@ -131,6 +135,12 @@ struct Inputs {
     // 1: a vehicle leaves a link one second later if it crosses a junction
     // after it, and an activity starts one second after the arrival
     junction_delay: i64,
+    // traversal sums: slots of `traversal_slot` s, each slot's bin (empty:
+    // no sums; see traversal_sums.rs)
+    traversal_slot_bin: Vec<u32>,
+    traversal_slot: f64,
+    // record the persons' link entry times (else only the trips')
+    link_times: bool,
 }
 
 #[derive(Default)]
@@ -139,7 +149,10 @@ struct Outputs {
     act_end: Vec<f64>,
     dep: Vec<f64>,
     arr: Vec<f64>,
-    enter: Vec<f64>,
+    // link entries from route position `enter_base` on (0, or with
+    // `link_times` off, the trips' only); whole seconds: exact to 194 days
+    enter: Vec<f32>,
+    leg_entered: Vec<i32>, // links entered per leg
     stuck: Vec<bool>,
     ev_time: Vec<f64>,
     ev_code: Vec<i64>,
@@ -152,6 +165,7 @@ struct Outputs {
     ride_trip: Vec<i64>,
     stop_arr: Vec<f64>,
     stop_dep: Vec<f64>,
+    sums: Option<SparseSums>, // the persons' link traversals, if asked for
 }
 
 /// A link's state and parameters that a vehicle move reads or writes, packed
@@ -187,6 +201,8 @@ struct VehHot {
 
 struct Sim<'a> {
     lk: Vec<LinkHot>,
+    sums: TraversalSums,
+    enter_base: usize,
     vh: Vec<VehHot>,
     inp: &'a Inputs,
     out: Outputs,
@@ -241,6 +257,7 @@ impl<'a> Sim<'a> {
         let n_links = inp.free_steps.len();
         let n_acts = inp.act_end_time.len();
         let n_legs = inp.leg_network.len();
+        let enter_base = if inp.link_times { 0 } else { inp.n_plan_links };
         let n_trips = inp.trip_k0.len();
         let n_veh = n_plans + n_trips;
         let n_rides = inp.ride_board.len();
@@ -275,6 +292,8 @@ impl<'a> Sim<'a> {
                     head: NIL,
                 })
                 .collect(),
+            sums: TraversalSums::new(n_links, inp.traversal_slot_bin.clone(), inp.traversal_slot, None),
+            enter_base,
             vh: (0..n_veh).map(|v| VehHot { rpos: 0, rend: 0, link: -1, pce: inp.v_pce[v], qnext: NIL, qnx: END, qearliest: 0 }).collect(),
             inp,
             out: Outputs {
@@ -282,7 +301,7 @@ impl<'a> Sim<'a> {
                 act_end: vec![nan; n_acts],
                 dep: vec![nan; n_legs],
                 arr: vec![nan; n_legs],
-                enter: vec![nan; inp.route_links.len()],
+                enter: vec![f32::NAN; inp.route_links.len() - enter_base],
                 stuck: vec![false; n_plans],
                 ev_time: Vec::with_capacity(n_events),
                 ev_code: Vec::with_capacity(n_events),
@@ -632,7 +651,9 @@ impl<'a> Sim<'a> {
 
     fn enter_link(&mut self, v: usize, link: usize) {
         let rpos = self.vh[v].rpos;
-        self.out.enter[rpos] = self.now as f64;
+        if rpos >= self.enter_base {
+            self.out.enter[rpos - self.enter_base] = self.now as f32;
+        }
         let nx = self.next_of(v);
         let earliest = if v < self.n_plans {
             if self.rec[EV_LINK_ENTER as usize] {
@@ -718,6 +739,7 @@ impl<'a> Sim<'a> {
             // leaving the last link: arrive
             self.pop_head(link, ready);
             if v < self.n_plans {
+                self.add_traversal(v, link, nx, earliest);
                 self.arrive(v);
             }
             return;
@@ -725,6 +747,9 @@ impl<'a> Sim<'a> {
         let nxt = nx as usize;
         if force || self.lk[nxt].occ < self.lk[nxt].storage {
             self.pop_head(link, ready);
+            if v < self.n_plans {
+                self.add_traversal(v, link, nx, earliest);
+            }
             self.vh[v].rpos += 1;
             self.enter_link(v, nxt);
             return;
@@ -748,6 +773,41 @@ impl<'a> Sim<'a> {
                 self.l_waiters[nxt].push_back(token);
                 self.lk[nxt].nwait += 1;
             }
+        }
+    }
+
+    /// Links entered per leg: all of a network leg's route once it arrived,
+    /// for a leg under way its links up to the current one, else none.
+    fn leg_entered(&self) -> Vec<i32> {
+        let inp = self.inp;
+        let off = &inp.route_offsets;
+        let mut out: Vec<i32> = (0..inp.leg_network.len())
+            .map(|l| {
+                let arrived = inp.leg_network[l] != 0 && !self.out.arr[l].is_nan();
+                if arrived { (off[l + 1] - off[l]) as i32 } else { 0 }
+            })
+            .collect();
+        for p in 0..self.n_plans {
+            let leg = self.a_leg[p];
+            if leg >= 0 && self.vh[p].link >= 0 {
+                out[leg as usize] = (self.vh[p].rpos as i64 - off[leg as usize] + 1) as i32;
+            }
+        }
+        out
+    }
+
+    /// Person `v` (next link `nx`, earliest exit `earliest`) leaves `link`
+    /// now: one traversal. Its entry is `earliest` less the link's free-speed
+    /// time and junction delay (as `enter_link` set it), which are in cache
+    /// here, where its recorded entry would be a memory read.
+    #[inline]
+    fn add_traversal(&mut self, v: usize, link: usize, nx: u32, earliest: i64) {
+        if self.sums.is_on() {
+            let delay = if nx != END { self.inp.junction_delay } else { 0 };
+            let enter = earliest - self.lk[link].free as i64 - delay;
+            debug_assert!(!self.inp.link_times
+                || enter as f32 == self.out.enter[self.vh[v].rpos]);
+            self.sums.add(link, enter as f64, self.now as f64);
         }
     }
 
@@ -1217,6 +1277,10 @@ impl<'a> Sim<'a> {
             }
         }
         self.out.last_time = now;
+        self.out.leg_entered = self.leg_entered();
+        if self.sums.is_on() {
+            self.out.sums = Some(std::mem::replace(&mut self.sums, TraversalSums::off()).into_sparse());
+        }
         self.out
     }
 }
@@ -1238,7 +1302,8 @@ fn err(msg: &str) -> PyErr {
                     trip_link_steps, trip_capacity, trip_pce, trip_access_steps,
                     trip_egress_steps, trip_parallel, door_open_steps, door_close_steps,
                     trip_network, rs_network,
-                    junction_delay=0))]
+                    junction_delay=0, traversal_slot=0.0, traversal_slot_bin=None,
+                    link_times=true))]
 #[allow(clippy::too_many_arguments)]
 fn run<'py>(
     py: Python<'py>,
@@ -1251,7 +1316,7 @@ fn run<'py>(
     leg_network: PyReadonlyArray1<'py, u8>,
     leg_teleport_steps: PyReadonlyArray1<'py, i64>,
     route_offsets: PyReadonlyArray1<'py, i64>,
-    route_links: PyReadonlyArray1<'py, i64>,
+    route_links: PyReadonlyArray1<'py, i32>,
     stuck_time: f64,
     end_time: f64,
     event_mask: i64,
@@ -1285,16 +1350,31 @@ fn run<'py>(
     trip_network: PyReadonlyArray1<'py, u8>,
     rs_network: PyReadonlyArray1<'py, u8>,
     junction_delay: i64,
+    traversal_slot: f64,
+    traversal_slot_bin: Option<PyReadonlyArray1<'py, i64>>,
+    link_times: bool,
 ) -> PyResult<Bound<'py, PyTuple>> {
     let n_links = free_steps.as_array().len();
     let net = network_vehicles != 0;
-    let mut links: Vec<i64> = route_links.as_array().to_vec();
-    let n_plan_links = links.len();
-    if net {
-        links.extend(trip_links.as_array().iter());
+    // one u32 copy of the plans' links (then the trips'), checked on the way
+    let plan_links = route_links.as_array();
+    let n_plan_links = plan_links.len();
+    let trip_links = trip_links.as_array();
+    let mut links: Vec<u32> = Vec::with_capacity(n_plan_links + if net { trip_links.len() } else { 0 });
+    let in_range = |l: i64| l >= 0 && (l as usize) < n_links;
+    for &l in plan_links.iter() {
+        if !in_range(l as i64) {
+            return Err(err("route link index out of range"));
+        }
+        links.push(l as u32);
     }
-    if links.iter().any(|&l| l < 0 || l as usize >= n_links) {
-        return Err(err("route link index out of range"));
+    if net {
+        for &l in trip_links.iter() {
+            if !in_range(l) {
+                return Err(err("route link index out of range"));
+            }
+            links.push(l as u32);
+        }
     }
     let act_offsets = act_offsets.as_array().to_vec();
     if act_offsets.is_empty() {
@@ -1330,7 +1410,7 @@ fn run<'py>(
         leg_network: leg_network.as_array().to_vec(),
         leg_teleport_steps: leg_teleport_steps.as_array().to_vec(),
         route_offsets: route_offsets.as_array().to_vec(),
-        route_links: links.iter().map(|&l| l as u32).collect(),
+        route_links: links,
         n_plan_links,
         stuck_time,
         end_time,
@@ -1364,8 +1444,24 @@ fn run<'py>(
         rs_network: rs_network.as_array().to_vec(),
         v_pce,
         junction_delay,
+        traversal_slot_bin: match traversal_slot_bin {
+            Some(b) => {
+                let b = b.as_array();
+                if b.iter().any(|&x| x < 0 || x > u32::MAX as i64) {
+                    return Err(err("traversal_slot_bin out of range"));
+                }
+                b.iter().map(|&x| x as u32).collect()
+            }
+            None => Vec::new(),
+        },
+        traversal_slot,
+        link_times,
     };
-    let o = py.allow_threads(|| Sim::new(&inp).run());
+    let mut o = py.allow_threads(|| Sim::new(&inp).run());
+    let sums = match o.sums.take() {
+        Some(s) => s.into_py(py)?,
+        None => py.None().into_bound(py),
+    };
     let items: Vec<Bound<'py, PyAny>> = vec![
         o.act_start.into_pyarray(py).into_any(),
         o.act_end.into_pyarray(py).into_any(),
@@ -1384,6 +1480,8 @@ fn run<'py>(
         o.ride_trip.into_pyarray(py).into_any(),
         o.stop_arr.into_pyarray(py).into_any(),
         o.stop_dep.into_pyarray(py).into_any(),
+        sums,
+        o.leg_entered.into_pyarray(py).into_any(),
     ];
     PyTuple::new(py, items)
 }

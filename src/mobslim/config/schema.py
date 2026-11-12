@@ -23,7 +23,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Union
 
-from mobslim.routing.traveltime import DEFAULT_HORIZON
+from mobslim.routing.traveltime import (
+    DEFAULT_HORIZON,
+    DEFAULT_OFF_PEAK_BIN_SIZE,
+    DEFAULT_PEAK,
+)
 
 
 class _Required:
@@ -212,6 +216,9 @@ SCHEMA = Section({
                             matsim="controller.outputDirectory"),
         "write_events_interval": Param("int", 10, "events every N iterations (0: last only)",
                                        min=0, matsim="controller.writeEventsInterval"),
+        "link_times_interval": Param("int", 0, "record the persons' link entry times every N "
+                                     "iterations (0: last only; others record how far each "
+                                     "leg got)", min=0),
     }, "The iteration loop (MATSim controller and global modules)."),
     "inputs": Section({
         "network": Param("path", REQUIRED, "MATSim network XML", matsim="network.inputNetworkFile"),
@@ -284,6 +291,12 @@ SCHEMA = Section({
                           matsim="travelTimeCalculator.traveltimeBinSize"),
         "horizon": Param("time", DEFAULT_HORIZON, "s covered by the travel-time table", min=0,
                          min_exclusive=True),
+        "off_peak_bin_size": Param("time", DEFAULT_OFF_PEAK_BIN_SIZE,
+                                   "s per bin before peak_start and after peak_end (a "
+                                   "multiple of bin_size; equal to it: uniform bins, as "
+                                   "MATSim)", min=0, min_exclusive=True),
+        "peak_start": Param("time", DEFAULT_PEAK[0], "start of the bins of bin_size", min=0),
+        "peak_end": Param("time", DEFAULT_PEAK[1], "end of the bins of bin_size", min=0),
     }, "Travel-time learning between iterations."),
     "activity_links": Section({
         "modes": Param("strlist", ["car"], "activities are assigned to links that allow one of "

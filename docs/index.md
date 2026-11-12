@@ -19,7 +19,7 @@ files are described in the
   weaving: several simulations per iteration, so more people innovate.
   * [Overview](optimisation/overview.md): the `Controller` and `Weave` loops.
   * [Examples](optimisation/examples.md): both, from Python and from a config.
-  * [Performance](optimisation/performance.md): weaving on Sioux Falls.
+  * [Performance](optimisation/performance.md): weaving on a congested grid, in wall-clock time.
   * [Details](optimisation/details.md): what to know when using weaving.
 
 ```{toctree}

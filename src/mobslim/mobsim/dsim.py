@@ -75,7 +75,7 @@ from mobslim.mobsim._common import (
     round_steps,
     validate,
 )
-from mobslim.mobsim.hermes import _event_mask, kernel_results
+from mobslim.mobsim.hermes import _event_mask, kernel_bins, kernel_results
 from mobslim.mobsim.partition import METHODS as PARTITIONERS
 from mobslim.mobsim.partition import partition
 from mobslim.mobsim.psim import psim_inputs
@@ -147,16 +147,25 @@ class DSim:
             return self.params.threads
         return os.cpu_count() or 1
 
-    def run(self, scenario: Scenario, events: EventsManager) -> Trajectories:
+    sums_traversals = True  # takes ``traversal_bins`` (see run_mobsim)
+
+    def run(self, scenario: Scenario, events: EventsManager,
+            traversal_bins: Optional[tuple[float, float]] = None,
+            link_times: bool = True) -> Trajectories:
         plans = scenario.population.selected_batch()
-        return self.run_batch(scenario, plans, events)
+        return self.run_batch(scenario, plans, events, traversal_bins=traversal_bins,
+                              link_times=link_times)
 
     def run_batch(self, scenario: Scenario, plans: PlanBatch, events: EventsManager,
-                  node_part: Optional[np.ndarray] = None) -> Trajectories:
+                  node_part: Optional[np.ndarray] = None, *,
+                  traversal_bins: Optional[tuple[float, float]] = None,
+                  link_times: bool = True) -> Trajectories:
         """Run already-encoded plans (``plans`` row ``i`` = person index ``i``).
 
         ``node_part`` assigns each node to a partition (default: by
         ``params.partitioner``); trajectories do not depend on it.
+        ``traversal_bins``, ``link_times``: see
+        :func:`~mobslim.mobsim.base.run_mobsim`.
         """
         if plans.n_plans != len(scenario.population):
             raise ValueError("PlanBatch must have one plan per person.")
@@ -168,10 +177,13 @@ class DSim:
         if node_part is None:
             node_part = partition(net, plans, self.threads, cfg.partitioner)
         node_part = np.asarray(node_part, dtype=np.int64)
+        bins = traversal_bins and kernel_bins(*traversal_bins)
         out = _rust.run(**inputs, node_part=node_part,
                         n_parts=int(np.max(node_part, initial=0)) + 1, seed=int(cfg.seed),
-                        buffer_in_storage=bool(cfg.buffer_in_storage))
-        return kernel_results(scenario, plans, events, inputs, tele_distance, out)
+                        buffer_in_storage=bool(cfg.buffer_in_storage), **(bins or {}),
+                        link_times=bool(link_times))
+        return kernel_results(scenario, plans, events, inputs, tele_distance, out,
+                              traversal_bins, link_times)
 
 
 def dsim_inputs(scenario: Scenario, plans: PlanBatch, cfg: DSimParams,

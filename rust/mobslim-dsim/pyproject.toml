@@ -15,4 +15,5 @@ module-name = "mobslim_dsim._kernel"
 
 [tool.uv]
 # rebuild when the Rust sources change
-cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "src/**/*.rs" }]
+cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "src/**/*.rs" },
+              { file = "../shared/*.rs" }]  # shared sources (`#[path]` modules)

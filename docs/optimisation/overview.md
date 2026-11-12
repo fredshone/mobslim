@@ -5,22 +5,19 @@
 `Controller` runs MATSim's co-evolutionary loop. Every person holds a few
 plans with scores. Each iteration:
 
-1. **Replan.** Each person draws a strategy by weight. Most *select* one of
-   their plans (ChangeExpBeta). A share *innovate*: they copy a plan,
+1. **(Re)plan.** Each person draws a strategy by weight. Most *select* one of
+   their existing good plans. A share *innovate*: they copy a plan,
    change it (reroute, shift activity times, change mode) and execute the
    new plan.
 2. **Simulate** everyone's selected plan once.
 3. **Score** what happened, and store each executed plan's score.
-4. **Learn travel times** from the simulation, for the next routing.
+4. **Extract travel times** from the simulation, for the next routing.
 
-The innovation share stays small (MATSim's default is 10-20%). If too many
-people change plan at once, the network they planned for no longer exists
-and the run oscillates. The cost is speed: with 10% innovating, each person
-gets a new plan about once every ten iterations.
+The innovation share, particularly for disruptive innovations such as changing modes, is generally expected to be low, so that the simulation remains somewhat realistic and the extracted scores and travel times provide a useful signal for learning. This limits the pace at which agents can explore their options and therefore requires us to run a lot of simulations before agents find their optima.
 
 ## Weaving
 
-`Weave` keeps each simulated world realistic but runs several of them per
+`Weave` keeps each simulation realistic but runs several of them per
 iteration. Each world, or *strand*, has a different cohort innovating:
 
 ```{raw} html

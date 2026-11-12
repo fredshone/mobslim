@@ -61,6 +61,28 @@ Weave(scenario, strands=4, loom=SerialLoom())                # all in this proce
 Weave(scenario, strands=8, loom=ProcessLoom(workers=3))      # 8 strands on 3 workers + main
 ```
 
+## Don't wait for the slowest strand
+
+`AsyncWeave` takes the same arguments as `Weave`, but never waits for all
+its strands at once. It merges them one at a time, in a fixed order, and
+gives each strand its next job as soon as its result is merged, so no core
+idles while the slowest strand finishes or while the main process merges:
+
+```python
+from mobslim import AsyncWeave
+
+AsyncWeave(scenario, strands=8, innovation_rate=0.1).run()
+```
+
+The order of merges is fixed, so the same seed gives the same result on any
+loom. Every strand after iteration 0 runs in a worker (by default one per
+strand, up to the physical cores), so listeners see events and trajectories
+in iteration 0 only. A strand's results are merged after the other strands'
+merges since its job was built: `dropped_observations` counts the scores of
+plans pruned meanwhile, which are dropped. Each merge pools the last
+`strands` strands' travel times, so `travel_time_smoothing` applies per
+merge rather than per iteration.
+
 ## Tune who innovates, and when
 
 ```python

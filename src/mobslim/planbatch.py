@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from mobslim.population import Plan
 
 _I32 = np.dtype("=i4")
+_LINK_CHUNK = 1 << 20  # route links checked at a time in invalid_legs
 
 
 @dataclass(frozen=True, eq=False)
@@ -125,8 +126,8 @@ class PlanBatch:
         return len(self.ride_board_stop)
 
     def leg_of_link(self) -> np.ndarray:
-        return self._cached("_leg_of_link", lambda: np.repeat(np.arange(self.n_legs),
-                                                              np.diff(self.route_offsets)))
+        """The leg of each route link (int32; not cached: it is as long as the routes)."""
+        return np.repeat(np.arange(self.n_legs, dtype=np.int32), np.diff(self.route_offsets))
 
     def leg_of_ride(self) -> np.ndarray:
         return self._cached("_leg_of_ride", lambda: np.repeat(np.arange(self.n_legs),
@@ -230,24 +231,36 @@ class PlanBatch:
         bad = is_net & (~self.leg_routed | self.leg_pt_route)
         bad |= bad_pt
 
-        links = self.route_links.astype(np.int64)
+        links = self.route_links
         if len(links):
-            leg = self.leg_of_link()
             starts = self.route_offsets[:-1]
             ends = self.route_offsets[1:]
             nonempty = ends > starts
-            # node each link must start from: the previous link's to-node, or
-            # the leg's origin for the first link of a leg
-            expected = np.empty_like(links)
-            expected[1:] = network.to_node[links[:-1]]
-            expected[starts[nonempty]] = origin[nonempty]
-            allowed = np.zeros(len(links), dtype=bool)
-            for code, mode in enumerate(self.modes):
-                if mode in network_modes:
-                    on = self.leg_mode[leg] == code
-                    allowed[on] = network.mode_mask(mode)[links[on]]
-            broken = (network.from_node[links] != expected) | ~allowed
-            bad |= is_net & (np.bincount(leg[broken], minlength=self.n_legs) > 0)
+            # link by link, in chunks (the temporaries are per route link):
+            # each must start from the previous link's to-node, or the leg's
+            # origin for the first link of a leg, and allow the leg's mode
+            masks = [network.mode_mask(m) if m in network_modes else None for m in self.modes]
+            broken_legs = np.zeros(self.n_legs, dtype=bool)
+            first = np.zeros(len(links) + 1, dtype=bool)
+            first[starts[nonempty]] = True
+            origin_of_first = origin[nonempty]
+            for s in range(0, len(links), _LINK_CHUNK):
+                e = min(s + _LINK_CHUNK, len(links))
+                lk = links[s:e]
+                leg = (np.searchsorted(self.route_offsets, np.arange(s, e, dtype=np.int64),
+                                       side="right") - 1).astype(np.int32)
+                expected = np.empty(e - s, dtype=network.to_node.dtype)
+                expected[1:] = network.to_node[lk[:-1]]
+                expected[0] = network.to_node[links[s - 1]] if s else -1
+                at_first = np.flatnonzero(first[s:e])
+                expected[at_first] = origin_of_first[np.searchsorted(starts[nonempty], at_first + s)]
+                broken = network.from_node[lk] != expected
+                mode = self.leg_mode[leg]
+                for code, mask in enumerate(masks):
+                    if mask is not None:  # other modes' legs are not network legs
+                        broken |= (mode == code) & ~mask[lk]
+                broken_legs[leg[broken]] = True
+            bad |= is_net & broken_legs
             last_to = np.full(self.n_legs, -1, dtype=np.int64)
             last_to[nonempty] = network.to_node[links[ends[nonempty] - 1]]
             bad |= is_net & nonempty & (last_to != dest)

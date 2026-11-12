@@ -12,8 +12,10 @@ resident memory (the whole process: interpreter or JVM, scenario, mobsim).
   with no replanning and no output files, and times each iteration's mobsim.
   The JVM gets ``-Xmx`` = :data:`JAVA_XMX`.
 * **MobSlim**: :func:`child` loads the same files, then runs the mobsim
-  ``REPEATS`` times with no event handlers (the controller's default: the
-  mobsim returns trajectory arrays).
+  ``REPEATS`` times with no event handlers, as the controller does in an
+  iteration that is not an output iteration (:func:`~mobslim.mobsim.run_mobsim`):
+  the mobsim returns trajectory arrays and, if it can, the link traversal
+  sums in MATSim's 15-minute bins, without each link's entry time.
 
 The reported time is the fastest repeat (the JVM's later iterations are
 warmed up; MobSlim's first run includes nothing extra). Results go to
@@ -350,6 +352,7 @@ def child(case_name: str, label: str, out: str) -> None:
         PSimParams,
         QSim,
         QSimParams,
+        run_mobsim,
     )
     from mobslim.routing.traveltime import DEFAULT_HORIZON
     from mobslim.scoring import CharyparNagelScorer
@@ -375,7 +378,8 @@ def child(case_name: str, label: str, out: str) -> None:
     runs = []
     for _ in range(REPEATS):
         t = time.perf_counter()
-        tr = sim.run(scenario, EventsManager([]))
+        tr = run_mobsim(sim, scenario, EventsManager([]), (900.0, DEFAULT_HORIZON),
+                        link_times=False)
         runs.append(time.perf_counter() - t)
         if len(runs) == 1:
             mobsim_peak = (_status_kb("VmHWM") - rss0) / 1024

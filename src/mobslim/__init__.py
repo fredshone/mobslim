@@ -52,13 +52,14 @@ from mobslim.scoring import (
     apply_scores,
 )
 from mobslim.trajectories import Trajectories, TrajectoryCollector
-from mobslim.weave import Weave, WeaveResult
+from mobslim.weave import AsyncWeave, Weave, WeaveResult
 
 __all__ = [
     "Activity",
     "ActivityParams",
     "AgentSim",
     "AgentSimParams",
+    "AsyncWeave",
     "CharyparNagelScorer",
     "Controller",
     "ControllerParams",

@@ -12,9 +12,9 @@ Simulations are fast and memory light. The following experiments compare MobSlim
 
 ## Speed
 
-* **MobSlim's HermesSim is 7–11x faster than MATSim Hermes**; PSim and DSim are 1–14x faster.
+* **MobSlim's HermesSim is 8.5–14x faster than MATSim Hermes**; PSim and DSim are 1.2–19x faster.
 * **On the largest scenarios, grid-80 and grid-80-congested, PSim on 16 threads is the fastest**:
-  10–14x faster than MATSim Hermes.
+  13–19x faster than MATSim Hermes.
 
 ```{image} ../_static/showcase/perf_time_light.svg
 :class: only-light
@@ -27,7 +27,7 @@ Simulations are fast and memory light. The following experiments compare MobSlim
 
 ## Max memory
 
-* **Every MobSlim mobsim needs 70–85% less memory than MATSim Hermes**.
+* **Every MobSlim mobsim needs 71–91% less memory than MATSim Hermes**.
 
 ```{image} ../_static/showcase/perf_memory_light.svg
 :class: only-light
@@ -157,9 +157,14 @@ snapshot shows cars only.
 * **The time is the mobsim alone,** not loading, routing or replanning. For
   each simulation it is the fastest of 3 runs, or of 3 iterations for MATSim,
   so the JVM is warmed up. MATSim feeds its events to its standard handlers
-  (travel times, scoring) while it runs. MobSlim builds the same travel-time
-  table and scores from its trajectories afterwards, and **that time is
-  included** in MobSlim's figures.
+  (travel times, scoring) while it runs. MobSlim runs as in an iteration
+  that is not an output iteration (see *What an iteration needs* in
+  [the design](../design.md#32-trajectories-and-events-trajectories-events)):
+  HermesSim, PSim and DSim sum the link travel times while they simulate,
+  and do not record when each link was entered. QSim and AgentSim record
+  every link, and the travel times are summed from their trajectories
+  afterwards. MobSlim then builds the same travel-time table and scores,
+  and **that time is included** in MobSlim's figures.
 * **Memory is the whole process's peak resident memory** (Python or the JVM,
   plus the loaded scenario, plus the mobsim). The JVM was allowed a 10 GB heap
   (`-Xmx10g`), and Java grows its heap lazily, so MATSim usually needs less
@@ -176,7 +181,7 @@ snapshot shows cars only.
   QSim's traffic model.
 * **The multi-threaded runs use all 16 logical CPUs,** on 8 physical cores.
   On the smaller scenarios they gain little over one thread, and sometimes lose;
-  on the grid-80 scenarios they are 2.2–4.6x faster than one thread.
+  on the grid-80 scenarios they are 2.4–4.3x faster than one thread.
 * **Timings depend on the machine.** Run on mains power, with nothing else
   heavy running.
 

@@ -116,16 +116,32 @@ log.to_dataframe()  # one row per event
 ## Trajectories
 
 ```python
+from mobslim.routing.traveltime import TimeBins
+
 traj = HermesSim().run(scenario, EventsManager())
 
 traj.link_enter                    # entry time per route link, in plan order
 traj.link_leave()                  # leave time per route link
+traj.leg_entered                   # links entered per leg
 traj.stuck                         # per person
-traj.travel_time_table(network, bin_size=900)  # mean link times per 15 min
+traj.travel_time_table(network, bin_size=900)  # mean link times per 15 min (uint16 s)
+traj.travel_time_table(network, TimeBins.off_peak())  # 15 min 06-22 h, hourly otherwise
 traj.experienced_plans()[0].legs[0]
 # ExperiencedLeg(mode='car', departure_time=21600.0, arrival_time=22500.0,
 #                distance=25000.0, links=(1, 10, 19), rides=None)
+
+# what the controllers ask for outside their output iterations: the link
+# travel-time sums built while simulating, and no per-link entry times
+lean = HermesSim().run(scenario, EventsManager(), traversal_bins=(900, 30 * 3600),
+                       link_times=False)
+lean.link_enter                    # None (leg_entered, leg_distance etc. as above)
+lean.traversal_aggregate(network)  # the sums the mobsim built
 ```
+
+Link entry times are the largest output (one value per route link), and
+nothing an iteration needs reads them, so the controllers record them in
+the last iteration only, unless `ControllerParams(link_times_interval=n)`
+asks for every `n`-th as well. See [Design: trajectories](../design.md).
 
 ## In the controller
 

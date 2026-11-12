@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Optional, Sequence, Union
 
+from mobslim.activity_links import ActivityLinkParams
 from mobslim.attributes import PersonAttributes
 from mobslim.events import EventsManager
 from mobslim.listeners import (
@@ -49,21 +50,27 @@ from mobslim.listeners import (
     ProgressLogger,
 )
 from mobslim.metrics import iteration_metrics
-from mobslim.mobsim.base import Mobsim
+from mobslim.mobsim.base import Mobsim, run_mobsim
 from mobslim.mobsim.qsim import QSim
 from mobslim.replanning.context import (
     ReplanningContext,
     TransitRouterFactory,
     default_transit_router,
 )
-from mobslim.activity_links import ActivityLinkParams
 from mobslim.replanning.prepare import route_scenario
 from mobslim.replanning.runners import ReplanningRunner
 from mobslim.replanning.strategy import StrategyManager
 from mobslim.replanning.vectorised import VectorRunner
 from mobslim.routing.base import RouterFactory
 from mobslim.routing.compiled import default_router
-from mobslim.routing.traveltime import DEFAULT_HORIZON, TravelTimeTable
+from mobslim.routing.traveltime import (
+    DEFAULT_HORIZON,
+    DEFAULT_OFF_PEAK_BIN_SIZE,
+    DEFAULT_PEAK,
+    Bins,
+    TimeBins,
+    TravelTimeTable,
+)
 from mobslim.scenario import Scenario
 from mobslim.scoring import CharyparNagelScorer, Scorer, apply_scores, score_all
 
@@ -77,17 +84,42 @@ class ControllerParams:
     iterations: int = 10  # number of mobsim runs
     seed: int = 4711  # MATSim's default random seed
     learning_rate: float = 1.0  # score averaging: new = (1-lr) * old + lr * observed
-    travel_time_bin_size: float = 900.0  # seconds per learned travel-time bin
+    travel_time_bin_size: float = 900.0  # seconds per learned travel-time bin (in the peak)
     travel_time_horizon: float = DEFAULT_HORIZON  # seconds covered by the travel-time table
+    # bins outside travel_time_peak (a multiple of travel_time_bin_size; equal
+    # to it: uniform bins, as MATSim); see travel_time_bins
+    travel_time_off_peak_bin_size: float = DEFAULT_OFF_PEAK_BIN_SIZE
+    travel_time_peak: tuple[float, float] = DEFAULT_PEAK
     output_dir: Optional[Union[str, Path]] = None  # None: write no files
     write_events_interval: int = 0  # with output_dir: every N iterations (0 = last only)
+    # record the persons' link entry times (Trajectories.link_enter) every N
+    # iterations (0 = the last only); other iterations record how far each
+    # leg got, which is all scoring and the travel times need
+    link_times_interval: int = 0
     # how activities without a link are assigned one before the first
     # iteration (None: they keep reaching their node by any link)
     activity_links: Optional[ActivityLinkParams] = ActivityLinkParams()
 
+    def travel_time_bins(self) -> Bins:
+        """The learned travel times' bins: ``travel_time_bin_size`` seconds in
+        ``travel_time_peak``, ``travel_time_off_peak_bin_size`` before and
+        after (a :class:`~mobslim.routing.traveltime.TimeBins`), or uniform
+        bins of ``travel_time_bin_size`` (a number) when the two are equal."""
+        if self.travel_time_off_peak_bin_size == self.travel_time_bin_size:
+            return self.travel_time_bin_size
+        return TimeBins.off_peak(self.travel_time_bin_size, self.travel_time_off_peak_bin_size,
+                                 tuple(self.travel_time_peak), self.travel_time_horizon)
+
+    def records_link_times(self, iteration: int) -> bool:
+        """Whether ``iteration`` records the persons' link entry times: the
+        last, and every ``link_times_interval`` (as events are written)."""
+        n = self.link_times_interval
+        return iteration == self.iterations - 1 or (n > 0 and iteration % n == 0)
+
     def __post_init__(self):
         if self.iterations < 1:
             raise ValueError("iterations must be >= 1.")
+        self.travel_time_bins()  # checks the bins
         if not 0 < self.learning_rate <= 1:
             raise ValueError("learning_rate must be in (0, 1].")
 
@@ -266,7 +298,8 @@ class Controller:
 
     def free_speed_travel_time(self) -> TravelTimeTable:
         c = self.params
-        return TravelTimeTable.free_speed(self.scenario.network, c.travel_time_bin_size, c.travel_time_horizon)
+        return TravelTimeTable.free_speed(self.scenario.network, c.travel_time_bins(),
+                                          c.travel_time_horizon)
 
     def prepare(self, scenario: Scenario) -> Scenario:
         """Validate modes, assign activities to links (``params.activity_links``)
@@ -300,7 +333,10 @@ class Controller:
                 events = state.events = EventsManager()
                 self._notify("on_before_mobsim", state)
                 events.reset(it)
-                trajectories = state.trajectories = self.mobsim.run(scenario, events)
+                trajectories = state.trajectories = run_mobsim(
+                    self.mobsim, scenario, events,
+                    (cfg.travel_time_bins(), cfg.travel_time_horizon),
+                    link_times=cfg.records_link_times(it))
                 events.finish()
                 self._notify("on_after_mobsim", state)
 
@@ -311,11 +347,12 @@ class Controller:
                 self._notify("on_scoring", state)
 
                 travel_time = state.travel_time = trajectories.travel_time_table(
-                    scenario.network, cfg.travel_time_bin_size, cfg.travel_time_horizon
+                    scenario.network, cfg.travel_time_bins(), cfg.travel_time_horizon
                 )
                 state.metrics = iteration_metrics(it, scenario.population, trajectories)
                 self.metrics.append(state.metrics)
                 self._notify("on_iteration_end", state)
+                del trajectories  # free before the next iteration (listeners keep ``state``)
         finally:
             self.runner.close()
             self._notify("on_shutdown", self)

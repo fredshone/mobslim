@@ -12,7 +12,7 @@ views of the first ``n`` rows of shared buffers. :meth:`append` returns a new
 snapshot. If the store is the newest snapshot of its *lineage* (the tip), the
 new rows are written into spare buffer capacity past its end, which older
 snapshots never read, so appending costs only the new rows (buffers grow by
-doubling). Appending to an older snapshot copies it into a new lineage first.
+half). Appending to an older snapshot copies it into a new lineage first.
 Rows never change once written, so any snapshot of a lineage sees a prefix of
 the same rows: ``(lineage token, row)`` identifies a plan across snapshots
 (and processes), which is how :class:`~mobslim.population.Population` knows
@@ -225,7 +225,7 @@ class PlanStore:
         return sum(self._view(name).nbytes for name in _ALL)
 
     # -- appending --------------------------------------------------------------
-    def append(self, batch: PlanBatch, headroom: float = 1.0) -> "PlanStore":
+    def append(self, batch: PlanBatch, headroom: float = 0.5) -> "PlanStore":
         """A snapshot with ``batch``'s plans appended as rows
         ``n_plans .. n_plans + batch.n_plans - 1``."""
         add = (batch.n_plans, batch.n_acts, batch.n_legs, len(batch.route_links), batch.n_rides)
@@ -410,7 +410,8 @@ class PlanStore:
 
     # -- pickling: the rows only, as a new lineage -------------------------------
     def __reduce__(self):
-        return (_unpickle, ({name: np.array(self._view(name)) for name in _ALL},
+        # numpy pickles a view's own elements, not its buffer: no copy needed
+        return (_unpickle, ({name: self._view(name) for name in _ALL},
                             self.act_types, self.modes, self._n))
 
     def __repr__(self) -> str:

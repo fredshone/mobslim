@@ -12,10 +12,11 @@ is dropped at once.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, Sequence, runtime_checkable
+from typing import Optional, Protocol, Sequence, runtime_checkable
 
 import numpy as np
 
+from mobslim.population import compact_plans
 from mobslim.weave.ledger import Ledger, best_plan_rows
 
 BACKGROUND = 0
@@ -138,6 +139,8 @@ class MergeStats:
     new_plans: int  # candidates added (before pruning)
     pruned: int  # plans removed to respect max_plans
     best_changed: float  # share of persons whose best-scored plan changed
+    # the store was compacted: the old rows kept (old row live[i] is now row i)
+    live: Optional[np.ndarray] = None
 
 
 def merge(ledger: Ledger, obs: Observations, reducer: ScoreReducer, max_plans: np.ndarray,
@@ -205,7 +208,8 @@ def merge(ledger: Ledger, obs: Observations, reducer: ScoreReducer, max_plans: n
             pruned += len(rows)
 
     best_before = ledger.best_rows
-    population = pop.with_tables(pop.plans, plan_ids, scores, selected, n_plans)
+    plans, compacted, live = compact_plans(pop.plans, plan_ids, n_plans)
+    population = pop.with_tables(plans, compacted, scores, selected, n_plans)
     # with_tables keeps the used width and may compact the store (renumbering rows)
     score_n = np.ascontiguousarray(score_n[:, :population.plan_ids.shape[1]])
     best_after_rows = plan_ids[np.arange(n), _best_slots(scores, n_plans, selected)]
@@ -214,7 +218,7 @@ def merge(ledger: Ledger, obs: Observations, reducer: ScoreReducer, max_plans: n
     ledger.score_n = score_n
     ledger.version += 1
     ledger.best_rows = best_plan_rows(population)
-    return MergeStats(int(new.sum()), pruned, changed)
+    return MergeStats(int(new.sum()), pruned, changed, live)
 
 
 def _best_slots(scores, n_plans, selected) -> np.ndarray:

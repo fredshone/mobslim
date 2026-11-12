@@ -242,6 +242,17 @@ listed in a comment at the top of the file.
   `uv run --group docs sphinx-build docs docs/_build`, then open
   `docs/_build/index.html`.
 
+To serve the docs locally, at http://localhost:8000:
+
+```bash
+python -m http.server 8000 -d docs/_build    # the last build
+uv run --group docs --with sphinx-autobuild sphinx-autobuild docs docs/_build --port 8000    # rebuilds and reloads on edits
+```
+
+Add `-W` to `sphinx-build` to fail on warnings, as CI does. Builds are
+incremental: pages that did not change keep their old sidebar, so after
+adding, removing or renaming pages, rebuild them all with `-E`.
+
 ### A note on names
 
 MobSlim keeps MATSim's names so MATSim users feel at home:

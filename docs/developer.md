@@ -131,7 +131,8 @@ the travel-time table feed into the next one.
   plans)      CSR offsets              PlanBatch:           (EventLog, XML, yours)
                                        act_start/end   per activity
                                        leg_departure/arrival/distance per leg
-                                       link_enter      per route link
+                                       leg_entered     per leg (links entered)
+                                       link_enter      per route link (optional)
                                        stuck           per person
                                               │
           ┌───────────────────────────────────┼──────────────────────┐

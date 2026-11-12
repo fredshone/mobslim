@@ -8,21 +8,8 @@ from mobslim.trajectories import Trajectories
 
 def iteration_metrics(iteration: int, population: Population, trajectories: Trajectories) -> dict:
     """Score statistics (MATSim's ``scorestats``) plus per-mode leg statistics."""
-    scores = population.scores  # (n_persons, n_slots), NaN = unscored / empty
-    scored = ~np.isnan(scores).all(axis=1)  # persons with at least one score
-    rows = scores[scored]
-    best, worst, average = (np.nanmax(rows, axis=1), np.nanmin(rows, axis=1),
-                            np.nanmean(rows, axis=1))
-
-    row = {
-        "iteration": iteration,
-        "score_executed": _mean(population.selected_scores()),
-        "score_best": _mean(best),
-        "score_worst": _mean(worst),
-        "score_average": _mean(average),
-        "plans_per_person": float(population.n_plans.mean()) if len(population) else 0.0,
-        "stuck": int(trajectories.stuck.sum()),
-    }
+    row = score_metrics(iteration, population)
+    row["stuck"] = int(trajectories.stuck.sum())
 
     # per mode, over completed legs
     b = trajectories.plans
@@ -41,6 +28,23 @@ def iteration_metrics(iteration: int, population: Population, trajectories: Traj
     if trajectories.transit is not None:
         row.update(pt_metrics(trajectories))
     return row
+
+
+def score_metrics(iteration: int, population: Population) -> dict:
+    """Score statistics (MATSim's ``scorestats``) alone."""
+    scores = population.scores  # (n_persons, n_slots), NaN = unscored / empty
+    scored = ~np.isnan(scores).all(axis=1)  # persons with at least one score
+    rows = scores[scored]
+    best, worst, average = (np.nanmax(rows, axis=1), np.nanmin(rows, axis=1),
+                            np.nanmean(rows, axis=1))
+    return {
+        "iteration": iteration,
+        "score_executed": _mean(population.selected_scores()),
+        "score_best": _mean(best),
+        "score_worst": _mean(worst),
+        "score_average": _mean(average),
+        "plans_per_person": float(population.n_plans.mean()) if len(population) else 0.0,
+    }
 
 
 def pt_metrics(tr: Trajectories) -> dict:

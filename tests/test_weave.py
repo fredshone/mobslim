@@ -17,14 +17,17 @@ from mobslim.mobsim import QSim
 from mobslim.replanning import VectorRunner
 from mobslim.replanning.context import ReplanningContext
 from mobslim.routing.traveltime import (
+    SparseAggregate,
     TravelTimeEstimator,
     TravelTimeTable,
     TraversalAggregate,
+    sum_aggregates,
     travel_time_table,
 )
 from mobslim.weave import (
     BACKGROUND,
     CANDIDATE,
+    AsyncWeave,
     ConstantRate,
     Ledger,
     LinearRate,
@@ -44,7 +47,8 @@ from tests.test_cli import SCENARIOS
 
 
 def _strip_timing(metrics):
-    return [{k: v for k, v in m.items() if not k.endswith("_s")} for m in metrics]
+    """Without timings and transfer sizes (which depend on the loom)."""
+    return [{k: v for k, v in m.items() if not k.endswith(("_s", "_mb"))} for m in metrics]
 
 
 @pytest.fixture
@@ -142,6 +146,32 @@ def test_traversal_aggregates_add(equil_scenario):
     assert (a + b).count.sum() == (~np.isnan(leave)).sum()
 
 
+def test_sparse_aggregates_add(equil_scenario):
+    net = equil_scenario.network
+    rng = np.random.default_rng(1)
+    links = rng.integers(0, net.n_links, 300).astype(np.int32)
+    enter = rng.uniform(0, 3600 * 10, 300)
+    leave = enter + rng.uniform(1, 600, 300)
+    parts = [TraversalAggregate.from_traversals(net.n_links, links[s:s + 100], enter[s:s + 100],
+                                                leave[s:s + 100]) for s in (0, 100, 200)]
+    dense = parts[0] + parts[1] + parts[2]
+    sparse = [p.to_sparse() for p in parts]
+    assert isinstance(sparse[0], SparseAggregate) and len(sparse[0].cells) <= 100
+
+    def same(got, want):
+        return (np.array_equal(got.total, want.total) and np.array_equal(got.count, want.count)
+                and np.array_equal(got.sum_sq, want.sum_sq))
+
+    one = TraversalAggregate.empty(net.n_links, parts[0].n_bins)
+    sparse[0].add_into(one)
+    assert same(one, parts[0]) and same(sparse[0].to_dense(), parts[0])
+    assert same(sum_aggregates(sparse), dense)
+    summed = sum_aggregates([parts[0], sparse[1], sparse[2]])
+    assert summed is parts[0] and same(summed, dense)  # in place, into the dense one
+    with pytest.raises(ValueError):
+        sparse[0].add_into(TraversalAggregate.empty(net.n_links, 3))
+
+
 def test_estimator_smoothing(equil_scenario):
     net = equil_scenario.network
     agg = TraversalAggregate.from_traversals(net.n_links, np.array([0, 0], np.int32),
@@ -149,8 +179,12 @@ def test_estimator_smoothing(equil_scenario):
     free = TravelTimeTable.free_speed(net)
     latest = TravelTimeEstimator(net).observe(agg)
     assert latest.times[0, 0] == 1000.0
-    smooth = TravelTimeEstimator(net, smoothing=0.5).observe(agg)
-    assert smooth.times[0, 0] == pytest.approx(0.5 * free.times[0, 0] + 500.0)
+    smooth = TravelTimeEstimator(net, smoothing=0.5)
+    # whole seconds, rounded up, from the unrounded smoothed estimate
+    expected = 0.5 * free.times[0, 0] + 500.0
+    assert smooth.observe(agg).times[0, 0] == np.ceil(expected)
+    assert smooth.observe(agg).times[0, 0] == np.ceil(0.5 * expected + 500.0)  # no drift
+    assert latest.times.dtype == np.uint16
 
 
 def test_population_add_plans_and_with_scores(scenario):
@@ -365,3 +399,145 @@ def test_weave_from_mobslim_config_kwargs():
     w = Weave.from_mobslim_config(cfg)
     assert w.strands == 4 and isinstance(w.loom, SerialLoom)
     assert w.schedule.rate(1) == 0.05 and isinstance(w.reducer, PrecisionReducer)
+
+
+# ------------------------------------------------------------------ async
+
+
+def test_async_weave_is_deterministic_and_covers(equil_scenario):
+    def run(seed, loom):
+        return AsyncWeave(equil_scenario, strands=3, innovation_rate=0.2, loom=loom,
+                          params=ControllerParams(iterations=5, seed=seed)).run()
+
+    a, b, c = run(7, SerialLoom()), run(7, SerialLoom()), run(8, SerialLoom())
+    assert _strip_timing(a.metrics) == _strip_timing(b.metrics)
+    assert _strip_timing(a.metrics) != _strip_timing(c.metrics)
+    assert [m["strands"] for m in a.metrics] == [1, 3, 3, 3, 3]
+    assert a.metrics[-1]["coverage"] == pytest.approx(0.6)
+    assert [len(s) for s in a.strand_metrics] == [1, 3, 3, 3, 3]
+    assert a.metrics[-1]["score_executed"] > a.metrics[0]["score_executed"]
+    assert all(len(p.plans) <= 5 for p in a.scenario.population)
+
+
+def test_async_process_loom_matches_serial(equil_scenario):
+    """Merges and builds happen in a fixed order: completion order (two
+    workers for three slots) changes nothing."""
+    params = ControllerParams(iterations=4, seed=5)
+    serial = AsyncWeave(equil_scenario, strands=3, innovation_rate=0.2, loom=SerialLoom(),
+                        params=params).run()
+    parallel = AsyncWeave(equil_scenario, strands=3, innovation_rate=0.2,
+                          loom=ProcessLoom(2, start_method="fork"), params=params).run()
+    assert _strip_timing(serial.metrics) == _strip_timing(parallel.metrics)
+
+
+def test_async_renumber():
+    from mobslim.weave.asynchronous import _renumber
+
+    live = np.array([2, 5, 9])
+    assert _renumber(np.array([2, 3, 5, 9, -1, 10]), live).tolist() == [0, -1, 1, 2, -1, -1]
+    assert _renumber(np.array([1, 2]), np.zeros(0, dtype=np.int64)).tolist() == [-1, -1]
+
+
+def test_async_merges_stale_strands_onto_the_right_plans(equil_scenario, monkeypatch):
+    """Strands in flight across other merges (which prune and compact the
+    store) still score the plans they executed, or drop them if pruned."""
+    import mobslim.weave.asynchronous as aw
+
+    compacted, checked = [], [0]
+    real_merge = aw.merge
+
+    def spy_merge(*args, **kwargs):
+        stats = real_merge(*args, **kwargs)
+        compacted.append(stats.live is not None)
+        return stats
+
+    class Checked(AsyncWeave):
+        def _submit(self, ledger, *args):
+            slot = super()._submit(ledger, *args)
+            slot.built = (ledger.population.plans, slot.rows.copy())  # what the strand runs
+            return slot
+
+        def _remapped(self, ledger, result, slot):
+            obs = super()._remapped(ledger, result, slot)
+            bg = obs.role == BACKGROUND
+            now = ledger.population.plans.take(obs.plan[bg])
+            store, rows = slot.built
+            then = store.take(rows[obs.person[bg]])
+            assert np.array_equal(now.route_links, then.route_links)
+            assert np.array_equal(now.act_end_time, then.act_end_time, equal_nan=True)
+            checked[0] += int(bg.sum())
+            return obs
+
+    monkeypatch.setattr(aw, "merge", spy_merge)
+    res = Checked(equil_scenario, strands=4, innovation_rate=0.3, loom=SerialLoom(),
+                  params=ControllerParams(iterations=12, seed=3)).run()
+    assert any(compacted) and checked[0] > 0
+    assert sum(m.get("dropped_observations", 0) for m in res.metrics) > 0
+
+
+def test_async_pool_is_the_sum_of_the_last_k(equil_scenario):
+    from mobslim.weave.asynchronous import _Pool
+
+    net = equil_scenario.network
+    rng = np.random.default_rng(4)
+    parts = []
+    for _ in range(7):
+        links = rng.integers(0, net.n_links, 50).astype(np.int32)
+        enter = np.floor(rng.uniform(0, 3600 * 10, 50))
+        parts.append(TraversalAggregate.from_traversals(net.n_links, links, enter,
+                                                        enter + np.floor(rng.uniform(1, 600, 50))))
+    pool = _Pool(3)
+    for i, part in enumerate(parts):
+        got = pool.add(part)
+        want = sum_aggregates([p.to_sparse() for p in parts[max(0, i - 2):i + 1]])
+        assert np.array_equal(got.count, want.count) and np.array_equal(got.total, want.total)
+        assert np.array_equal(got.sum_sq, want.sum_sq)
+
+
+# ------------------------------------------------------------------ validation
+
+
+def test_weave_validates_every_plan_up_front():
+    """An invalid route is found before the first iteration, even in a plan
+    that is not selected (strands may select it later)."""
+    from mobslim import Person, Plan, Route, Scenario
+    from mobslim.mobsim import SimulationError
+    from tests.conftest import chain_network
+
+    net = chain_network([100, 100])
+    good = Plan.builder().act("h", 0, end_time=0).leg("car", Route((0, 1), 20, 200)).act("w", 2).build()
+    bad = Plan.builder().act("h", 0, end_time=0).leg("car", Route((1,), 10, 100)).act("w", 2).build()
+    pop = Population([Person("a", (good,)), Person("b", (good, bad), selected=0)])
+    weave = Weave(Scenario(net, pop), strands=2, innovation_rate=0.5, loom=SerialLoom(),
+                  params=ControllerParams(iterations=2))
+    with pytest.raises(SimulationError, match="'b': invalid 'car' route"):
+        weave.run()
+
+
+def test_strands_validate_only_their_new_plans(scenario, monkeypatch):
+    from mobslim.weave import strand
+
+    seen, validate = [], strand.validate
+
+    def spy(sc, plans, persons=None):
+        seen.append((plans.n_plans, len(sc.population)))
+        validate(sc, plans, persons)
+
+    monkeypatch.setattr(strand, "validate", spy)
+    result = Weave(scenario, strands=3, innovation_rate=0.2, loom=SerialLoom(),
+                   params=ControllerParams(iterations=4, seed=1)).run()
+    innovators = [m["innovators"] for ms in result.strand_metrics[1:] for m in ms]
+    assert [n for n, _ in seen] == innovators
+    assert all(n < people for n, people in seen)
+
+
+def test_without_validation_copies_the_mobsim():
+    from mobslim.mobsim._common import without_validation
+
+    mobsim = QSim()
+    quiet, validated = without_validation(mobsim)
+    assert validated and quiet is not mobsim
+    assert mobsim.params.validate_routes and not quiet.params.validate_routes
+    again, validated = without_validation(quiet)
+    assert again is quiet and not validated
+

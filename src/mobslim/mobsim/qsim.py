@@ -108,7 +108,15 @@ class QSim:
     def __init__(self, params: QSimParams = QSimParams()):
         self.params = params
 
-    def run(self, scenario: Scenario, events: EventsManager) -> Trajectories:
+    sums_traversals = True  # takes ``traversal_bins`` (see run_mobsim)
+
+    def run(self, scenario: Scenario, events: EventsManager,
+            traversal_bins: Optional[tuple[float, float]] = None,
+            link_times: bool = True) -> Trajectories:
+        """``traversal_bins`` and ``link_times`` are accepted for the common
+        interface (see :func:`~mobslim.mobsim.base.run_mobsim`); this mobsim
+        always records link times and leaves the sums to
+        :meth:`Trajectories.traversal_aggregate`, with the same result."""
         plans = scenario.population.selected_batch()
         return self.run_batch(scenario, plans, events)
 

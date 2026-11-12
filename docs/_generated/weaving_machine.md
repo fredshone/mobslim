@@ -1,1 +1,1 @@
-Intel(R) Core(TM) i5-8350U CPU @ 1.70GHz: 4 physical cores (8 logical), 15.5 GB memory, Python 3.12.8.
+11th Gen Intel(R) Core(TM) i9-11900K @ 3.50GHz: 8 physical cores (16 logical), 125.7 GB memory, Python 3.12.6.

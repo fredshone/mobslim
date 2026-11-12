@@ -5,6 +5,7 @@ simulations per iteration, each with a different tenth of the population
 innovating, and merges them into one record of everyone's plans and scores.
 """
 
+from mobslim.weave.asynchronous import AsyncWeave
 from mobslim.weave.controller import (
     Weave,
     WeaveResult,
@@ -49,7 +50,7 @@ from mobslim.weave.strand import (
 )
 
 __all__ = [
-    "BACKGROUND", "CANDIDATE", "ConstantRate", "InnovationSchedule", "InnovationScheduler",
+    "AsyncWeave", "BACKGROUND", "CANDIDATE", "ConstantRate", "InnovationSchedule", "InnovationScheduler",
     "Ledger", "LinearRate", "Loom", "MeanReducer", "MergeStats", "Observations",
     "PrecisionReducer", "ProcessLoom", "default_workers", "physical_cores", "ScoreReducer", "ScoreUpdate", "SerialLoom", "StepRate",
     "StrandContext", "StrandJob", "StrandResult", "Weave", "WeaveResult",

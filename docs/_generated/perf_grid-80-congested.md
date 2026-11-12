@@ -1,13 +1,13 @@
 | Simulation | Mobsim time | vs MATSim Hermes | Peak memory (whole process) |
 |---|---|---|---|
-| MATSim QSim | 145 s | 11.0× slower | 2.68 GB |
-| MATSim Hermes | 13.2 s | reference | 6.24 GB |
-| MATSim DSim, 1 thread | 105 s | 8.0× slower | 2.70 GB |
-| MATSim DSim, 16 threads | 22.7 s | 1.7× slower | 4.43 GB |
-| MobSlim QSim | 40.3 s | 3.1× slower | 1.85 GB |
-| MobSlim AgentSim | 31.4 s | 2.4× slower | 1.49 GB |
-| MobSlim HermesSim | 1.40 s | 9.4× faster | 1.31 GB |
-| MobSlim PSim, 1 thread | 2.71 s | 4.9× faster | 1.31 GB |
-| MobSlim PSim, 16 threads | 1.26 s | **10×** faster | 1.39 GB |
-| MobSlim DSim, 1 thread | 11.5 s | 1.1× faster | 1.31 GB |
-| MobSlim DSim, 16 threads | 2.89 s | 4.6× faster | 1.50 GB |
+| MATSim QSim | 160 s | 11.3× slower | 2.61 GB |
+| MATSim Hermes | 14.1 s | reference | 5.87 GB |
+| MATSim DSim, 1 thread | 117 s | 8.3× slower | 2.75 GB |
+| MATSim DSim, 16 threads | 24.9 s | 1.8× slower | 4.54 GB |
+| MobSlim QSim | 42.8 s | 3.0× slower | 1.68 GB |
+| MobSlim AgentSim | 33.1 s | 2.3× slower | 1.31 GB |
+| MobSlim HermesSim | 1.19 s | **12×** faster | 674 MB |
+| MobSlim PSim, 1 thread | 2.61 s | 5.4× faster | 707 MB |
+| MobSlim PSim, 16 threads | 1.07 s | **13×** faster | 789 MB |
+| MobSlim DSim, 1 thread | 12.1 s | 1.2× faster | 610 MB |
+| MobSlim DSim, 16 threads | 2.78 s | 5.1× faster | 705 MB |

@@ -1,47 +1,30 @@
 # Performance
 
-How fast does utility rise, and where does it level off, when the same
-budget of processes runs one simulation per iteration or several strands?
-Both experiments run an 80×80 grid (26,240 links) with 103,680 car
-commuters leaving home between 06:00 and 08:00, with flow and storage
-capacity at 0.3 of the links' own: medium congestion. In the first
-iteration, car trips take about 50% longer than at full capacity
-(1,651 s against 1,104 s), and nothing gets stuck. Every run does 100
-iterations from the same routed plans with 10% plan innovation per strand
-(5% reroute, 5% time mutation plus reroute, 90% ChangeExpBeta), on:
+The following experiment considers the effectiveness of simulation parallelisation - aka **weaving**.
 
-```{include} ../_generated/weaving_machine.md
-```
+We use a scenario with 80×80 network grid (25,920 links) and 104,960 car commuters leaving home between 06:00 and 08:00, with flow and storage capacity at 0.3 resulting in some congestion.
 
-The scripts are `showcase/weaving/experiment.py` and
-`showcase/weaving/report.py` (`python -m showcase weaving`, then
-`python -m showcase weaving-report`).
+We compare a regular **Controller** run against **Weaves** with 1, 2, 4 and 8 strands, and **AsyncWeaves** with 2, 4 and 8 strands, with an 8 physical cores compute budget. Every run gets the same 3 minutes of wall-clock time from the same initially routed plans, with 30% plan innovation per strand (15% reroute, 15% time mutation plus reroute, 70% ChangeExpBeta).
 
-## Summary
+* **At this innovation rate, weaving does not beat the Controller within 3 minutes.**
+  2 strands, and 2 or 8 asynchronous strands, end level with it (132.1 to 132.3
+  against 132.15); 4 and 8 synchronous strands fall behind (130.5 and 130.4).
+* **Not waiting for the slowest strand matters more with more strands.** 8
+  asynchronous strands end at 132.21 against 130.44 for 8 synchronous strands, and
+  avoid the early dip in utility.
+* **Strands slow each other down.** An iteration takes 2.2 s for the Controller and
+  11 s for 8 strands: simulation is limited by memory bandwidth, and at 30%
+  innovation each strand also reroutes three times as many agents.
 
-* **Per iteration, `w` strands learn about `w` times faster.** With `w`
-  strands, `w`×10% of the population innovates each iteration. To reach the
-  Controller's final utility, 2 strands need 50 iterations, 4 strands 27 and
-  8 strands 16, against 97.
-* **In wall-clock time, weaving pays up to the physical cores.** On 4
-  physical cores, 4 strands reach the Controller's final utility 1.26× sooner,
-  and are higher at every time after the first 15 s. With 8 strands, the
-  extra strands share cores, and an iteration costs 5× more than the
-  Controller's. That cancels the gain in wall time, but 8 strands climb
-  furthest in 100 iterations.
-* **More strands settle higher in 100 iterations.** The Controller and a
-  single strand are still climbing at the end (129.2). 8 strands are
-  levelling off near 137.
-* **Strands use cores better than PSim threads at this size.** PSim with 8
-  threads is no faster per iteration than single-threaded HermesSim
-  (0.52 s against 0.47 s), so 4 threads × 2 strands is the best split of the
-  8-process budget.
+Every run is still improving at 3 minutes. Differences of about 0.3 are within
+run-to-run noise: 1 strand runs the Controller's loop, and ends 0.24 lower.
 
-## Experiment 1: strands
+## Experiment
 
-HermesSim (single-threaded), with 1, 2, 4 and 8 strands, and the plain
-`Controller` for reference. One strand is the Controller's loop run through
-`Weave`, and runs at the same speed.
+Utility against wall-clock time for the synchronous `Weave`, and for `AsyncWeave`
+(see [Don't wait for the slowest strand](examples.md#dont-wait-for-the-slowest-strand)),
+which merges each strand as it finishes and starts it again straight away.
+All runs use single-threaded HermesSim.
 
 ```{image} ../_static/showcase/weaving_weaving_time_light.svg
 :class: only-light
@@ -52,53 +35,27 @@ HermesSim (single-threaded), with 1, 2, 4 and 8 strands, and the plain
 :alt: Utility against wall-clock time for the Controller and 1, 2, 4 and 8 strands
 ```
 
-Against iterations, each doubling of the strands roughly halves the
-iterations needed:
-
-```{image} ../_static/showcase/weaving_weaving_iteration_light.svg
+```{image} ../_static/showcase/weaving_async_time_light.svg
 :class: only-light
-:alt: Utility against iteration for the Controller and 1, 2, 4 and 8 strands
+:alt: Utility against wall-clock time for the Controller, 8 strands and 2, 4 and 8 asynchronous strands
 ```
-```{image} ../_static/showcase/weaving_weaving_iteration_dark.svg
+```{image} ../_static/showcase/weaving_async_time_dark.svg
 :class: only-dark
-:alt: Utility against iteration for the Controller and 1, 2, 4 and 8 strands
+:alt: Utility against wall-clock time for the Controller, 8 strands and 2, 4 and 8 asynchronous strands
 ```
 
-```{include} ../_generated/weaving_weaving.md
+```{include} ../_generated/weaving_summary.md
 ```
 
-An iteration with `w` strands costs more than one simulation. Its
-replanning reroutes `w` times as many people, in the main process. Its `w`
-simulations run side by side, so each runs slower once they outnumber the
-physical cores.
+`python -m benchmarks.weave_profile` prints where each iteration's time goes.
 
-## Experiment 2: threads × strands
+## Reproduce it
 
-PSim, with the budget of 8 split between threads per simulation `p` and
-strands `w`, with `p × w = 8`.
+Every comparison here is at equal wall-clock time with the following hardware:
 
-```{image} ../_static/showcase/weaving_budget_time_light.svg
-:class: only-light
-:alt: Utility against wall-clock time for PSim with p threads and w strands, p times w equal to 8
-```
-```{image} ../_static/showcase/weaving_budget_time_dark.svg
-:class: only-dark
-:alt: Utility against wall-clock time for PSim with p threads and w strands, p times w equal to 8
+```{include} ../_generated/weaving_machine.md
 ```
 
-```{image} ../_static/showcase/weaving_budget_iteration_light.svg
-:class: only-light
-:alt: Utility against iteration for PSim with p threads and w strands, p times w equal to 8
-```
-```{image} ../_static/showcase/weaving_budget_iteration_dark.svg
-:class: only-dark
-:alt: Utility against iteration for PSim with p threads and w strands, p times w equal to 8
-```
-
-```{include} ../_generated/weaving_budget.md
-```
-
-On this machine, 8 is twice the physical cores, so every split
-oversubscribes them. Two or four strands still beat one 8-thread
-simulation. Eight single-threaded strands are the slowest in wall time, but
-reach the highest utility in 100 iterations.
+The scripts are `showcase/weaving/experiment.py` and
+`showcase/weaving/report.py` (`python -m showcase weaving`, then
+`python -m showcase weaving-report`).

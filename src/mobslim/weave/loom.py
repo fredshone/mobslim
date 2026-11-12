@@ -14,6 +14,12 @@ job, never on the loom or on completion order.
   store and the iteration's travel times are written once per snapshot to a
   file in shared memory (``/dev/shm``, where available); a job carries only
   its strand's rows and innovations, and each worker reads the snapshot once.
+  :class:`~mobslim.weave.Weave` first slims the store to the rows its
+  strands use (:func:`~mobslim.weave.strand.slim_jobs`). Each worker routes
+  on ``router_threads`` threads. Results come back with a sparse travel-time
+  aggregate (only the cells used), and with the time spent reading the
+  snapshot and job and the result's size and unpickling time in their
+  metrics; ``snapshot_s`` adds up the time spent writing snapshots.
 
 The pool's size is independent of the number of strands: jobs queue when
 there are more strands than workers.
@@ -24,6 +30,7 @@ from __future__ import annotations
 import os
 import pickle
 import tempfile
+import time
 from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import replace
 from multiprocessing import get_context
@@ -75,23 +82,46 @@ _shared: Optional[tuple[str, StrandContext]] = None
 _store: Optional[tuple[str, tuple]] = None
 
 
-def _run_job(token: str, path: str, store_path: str, job: StrandJob) -> StrandResult:
+def _run_job(token: str, path: str, store_path: str, job: bytes) -> bytes:
+    """Runs a pickled job; returns the pickled result (so that the main
+    process can measure and time its transfer)."""
     global _shared, _store
+    t0 = time.perf_counter()
     if _shared is None or _shared[0] != token:
         with open(path, "rb") as f:
             _shared = (token, pickle.load(f))
+    t1 = time.perf_counter()
     if _store is None or _store[0] != store_path:
         _store = None  # free the previous store first
         with open(store_path, "rb") as f:
             _store = (store_path, pickle.load(f))
+    t2 = time.perf_counter()
+    job = pickle.loads(job)
+    t3 = time.perf_counter()
     store, travel_time = _store[1]
-    return run_strand(_shared[1], replace(job, store=store, travel_time=travel_time))
+    result = run_strand(_shared[1], replace(job, store=store, travel_time=travel_time),
+                        cross_process=True)
+    result.metrics.update(context_read_s=t1 - t0, snapshot_read_s=t2 - t1, job_unpickle_s=t3 - t2)
+    return pickle.dumps(result, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-def _init_worker():
+def _unpickle_result(future: Future, out: Future, submitted: float) -> None:
+    """``out`` gets ``future``'s pickled result, unpickled."""
+    try:
+        data = future.result()
+        t = time.perf_counter()
+        result = pickle.loads(data)
+        result.metrics.update(result_mb=len(data) / 1e6, result_unpickle_s=time.perf_counter() - t,
+                              worker_wall_s=t - submitted)
+        out.set_result(result)
+    except BaseException as e:  # noqa: BLE001 - delivered through the future
+        out.set_exception(e)
+
+
+def _init_worker(threads: int = 1):
     from mobslim.routing.compiled import THREADS_ENV
 
-    os.environ.setdefault(THREADS_ENV, "1")
+    os.environ.setdefault(THREADS_ENV, str(threads))
 
 
 def physical_cores() -> int:
@@ -109,6 +139,14 @@ def physical_cores() -> int:
         except OSError:
             return len(cpus) or 1
     return len(cores) or 1
+
+
+def logical_cpus() -> int:
+    """Logical CPUs this process may use (hyperthreads counted)."""
+    try:
+        return len(os.sched_getaffinity(0)) or 1
+    except AttributeError:
+        return os.cpu_count() or 1
 
 
 def default_workers(strands: int) -> int:
@@ -137,25 +175,33 @@ class ProcessLoom:
     workers. With the default ``spawn`` start method, scripts need an
     ``if __name__ == "__main__":`` guard. Mind the core budget: ``workers``
     times the mobsim's own threads (``PSim``, ``DSim``) should not exceed
-    the cores.
+    the cores. ``router_threads``: routing threads per strand (default: the
+    logical CPUs shared out between the workers and the main process,
+    which runs a strand too: routing waits on memory, so hyperthreads
+    nearly double it while the other strands simulate);
+    ``$MOBSLIM_ROUTER_THREADS`` overrides it.
     """
 
-    def __init__(self, workers: Optional[int] = None, start_method: str = "spawn"):
+    def __init__(self, workers: Optional[int] = None, start_method: str = "spawn",
+                 router_threads: Optional[int] = None):
         self.workers = workers or os.cpu_count() or 1
+        self.router_threads = router_threads or max(1, logical_cpus() // (self.workers + 1))
         self.start_method = start_method
         self._pool: Optional[ProcessPoolExecutor] = None
         self._path: Optional[str] = None
         self._token: Optional[str] = None
         self._runs = 0
-        self._store_key = None
+        self._store_ref = None
         self._store_path: Optional[str] = None
         self._store_jobs: dict[str, list] = {}
+        self.snapshot_s = 0.0  # seconds spent writing snapshots (main process)
 
     def _executor(self) -> ProcessPoolExecutor:
         if self._pool is None:
             self._pool = ProcessPoolExecutor(max_workers=self.workers,
                                              mp_context=get_context(self.start_method),
-                                             initializer=_init_worker)
+                                             initializer=_init_worker,
+                                             initargs=(self.router_threads,))
         return self._pool
 
     def start(self, ctx: StrandContext) -> None:
@@ -172,17 +218,23 @@ class ProcessLoom:
             raise RuntimeError("ProcessLoom.submit before start.")
         if job.store is None:
             raise ValueError("ProcessLoom needs jobs that carry the ledger store.")
+        t = time.perf_counter()
         store_path = self._store_file(job.store, job.travel_time)
-        future = self._executor().submit(_run_job, self._token, self._path, store_path,
-                                         replace(job, store=None, travel_time=None))
+        self.snapshot_s += time.perf_counter() - t
+        data = pickle.dumps(replace(job, store=None, travel_time=None),
+                            protocol=pickle.HIGHEST_PROTOCOL)
+        submitted = time.perf_counter()
+        future = self._executor().submit(_run_job, self._token, self._path, store_path, data)
         self._store_jobs[store_path].append(future)
-        return future
+        out: Future = Future()
+        future.add_done_callback(lambda f: _unpickle_result(f, out, submitted))
+        return out
 
     def _store_file(self, store, travel_time) -> str:
         """The store and travel times, written once per snapshot; files of
         older snapshots are removed once their jobs are done."""
-        key = (id(store), len(store), id(travel_time))
-        if self._store_key != key:
+        ref = self._store_ref
+        if ref is None or ref[0] is not store or ref[1] != len(store) or ref[2] is not travel_time:
             for path, futures in list(self._store_jobs.items()):
                 if all(f.done() for f in futures):
                     _unlink(path)
@@ -190,7 +242,8 @@ class ProcessLoom:
             fd, path = tempfile.mkstemp(prefix="mobslim-store-", suffix=".pkl", dir=_shm_dir())
             with os.fdopen(fd, "wb") as f:
                 pickle.dump((store, travel_time), f, protocol=pickle.HIGHEST_PROTOCOL)
-            self._store_key, self._store_path = key, path
+            # references, not ids: an id can be reused once its object is freed
+            self._store_ref, self._store_path = (store, len(store), travel_time), path
             self._store_jobs[path] = []
         return self._store_path
 
@@ -200,7 +253,7 @@ class ProcessLoom:
             self._path = None
         for path in self._store_jobs:
             _unlink(path)
-        self._store_jobs, self._store_key, self._store_path = {}, None, None
+        self._store_jobs, self._store_ref, self._store_path = {}, None, None
 
     def close(self) -> None:
         if self._pool is not None:

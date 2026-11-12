@@ -88,6 +88,12 @@ from mobslim.mobsim._common import (
 from mobslim.mobsim._transit_tables import transit_times
 from mobslim.planbatch import PlanBatch
 from mobslim.routing.teleport import teleport_many
+from mobslim.routing.traveltime import (
+    Bins,
+    SparseAggregate,
+    n_bins_of,
+    slots_of,
+)
 from mobslim.scenario import Scenario
 from mobslim.trajectories import Trajectories
 
@@ -180,30 +186,74 @@ class HermesSim:
             return "rust" if _rust is not None else "python"
         return self.params.backend
 
-    def run(self, scenario: Scenario, events: EventsManager) -> Trajectories:
-        plans = scenario.population.selected_batch()
-        return self.run_batch(scenario, plans, events)
+    sums_traversals = True  # takes ``traversal_bins`` (see run_mobsim)
 
-    def run_batch(self, scenario: Scenario, plans: PlanBatch, events: EventsManager) -> Trajectories:
-        """Run already-encoded plans (``plans`` row ``i`` = person index ``i``)."""
+    def run(self, scenario: Scenario, events: EventsManager,
+            traversal_bins: Optional[tuple[float, float]] = None,
+            link_times: bool = True) -> Trajectories:
+        plans = scenario.population.selected_batch()
+        return self.run_batch(scenario, plans, events, traversal_bins, link_times)
+
+    def run_batch(self, scenario: Scenario, plans: PlanBatch, events: EventsManager,
+                  traversal_bins: Optional[tuple[float, float]] = None,
+                  link_times: bool = True) -> Trajectories:
+        """Run already-encoded plans (``plans`` row ``i`` = person index ``i``).
+        ``traversal_bins``, ``link_times``: see
+        :func:`~mobslim.mobsim.base.run_mobsim` (the Python backend always
+        records link times)."""
         if plans.n_plans != len(scenario.population):
             raise ValueError("PlanBatch must have one plan per person.")
         cfg = self.params
         if cfg.validate_routes:
             validate(scenario, plans)
         inputs, tele_distance = kernel_inputs(scenario, plans, cfg, _event_mask(events))
-        kernel = _rust.run if self.backend == "rust" else run_kernel
-        return kernel_results(scenario, plans, events, inputs, tele_distance, kernel(**inputs))
+        if self.backend != "rust":
+            out = run_kernel(**inputs)
+            return kernel_results(scenario, plans, events, inputs, tele_distance, out)
+        bins = traversal_bins and kernel_bins(*traversal_bins)
+        out = _rust.run(**inputs, **(bins or {}), link_times=bool(link_times))
+        return kernel_results(scenario, plans, events, inputs, tele_distance, out,
+                              traversal_bins, link_times)
+
+
+def kernel_bins(bin_size: Bins, horizon: float) -> dict:
+    """The compiled kernels' traversal-sum arguments for bins of
+    ``bin_size`` (seconds, up to ``horizon``, or a ``TimeBins``): uniform
+    slots and each slot's bin."""
+    slot, slot_bin = slots_of(bin_size, n_bins_of(bin_size, horizon))
+    return dict(traversal_slot=float(slot),
+                traversal_slot_bin=np.ascontiguousarray(slot_bin, dtype=np.int64))
 
 
 def kernel_results(scenario: Scenario, plans: PlanBatch, events: EventsManager, inputs: dict,
-                   tele_distance: np.ndarray, out: tuple) -> Trajectories:
+                   tele_distance: np.ndarray, out: tuple,
+                   traversal_bins: Optional[tuple] = None,
+                   link_times: bool = True) -> Trajectories:
     """Trajectories from a kernel's results (see :func:`run_kernel`), and the
-    recorded events handed to ``events``. Shared by the kernel mobsims."""
+    recorded events handed to ``events``. Shared by the kernel mobsims.
+
+    The compiled kernels return two more results: the traversal sums, when
+    asked for them (``traversal_bins=(bin_size, horizon)``, passed to the
+    kernel by :func:`kernel_bins`): ``(cells, total, count, sum_sq)``, else
+    ``None``; and the links entered per leg. Run
+    with ``link_times=False``, their link entries cover the trips' links
+    only (the persons' entry times are not recorded)."""
     (act_start, act_end, dep, arr, enter, stuck, ev_time, ev_code, stuck_leg, stuck_link,
-     last_time, ride_wait, ride_board, ride_alight, ride_trip, stop_arr, stop_dep) = out
-    arr, enter = np.asarray(arr), np.asarray(enter)
-    n_plan_links = len(plans.route_links)
+     last_time, ride_wait, ride_board, ride_alight, ride_trip, stop_arr, stop_dep) = out[:17]
+    sums = out[17] if len(out) > 17 else None
+    leg_entered = out[18] if len(out) > 18 else None
+    aggregate = None
+    if traversal_bins and sums is not None:
+        cells, total, count, sum_sq = sums
+        bin_size, horizon = traversal_bins
+        aggregate = SparseAggregate(cells, total, count, sum_sq,
+                                    (scenario.network.n_links, n_bins_of(bin_size, horizon)),
+                                    bin_size)
+    # the compiled kernels return link entries as float32 (whole seconds,
+    # exact): half the writes of their most written output
+    arr, enter = np.asarray(arr), np.asarray(enter, dtype=np.float64)
+    n_plan_links = len(plans.route_links) if link_times else 0
+    link_enter = enter[:n_plan_links] if link_times else None
     teleported = ~plans.network_legs(scenario.modes.network_modes)
     distance = np.where(teleported & ~np.isnan(arr), tele_distance, 0.0)
     transit = {}
@@ -218,9 +268,9 @@ def kernel_results(scenario: Scenario, plans: PlanBatch, events: EventsManager, 
         )
     trajectories = Trajectories.build(
         plans, scenario.network, act_start=act_start, act_end=act_end,
-        leg_departure=dep, leg_arrival=arr, link_enter=enter[:n_plan_links],
+        leg_departure=dep, leg_arrival=arr, link_enter=link_enter, leg_entered=leg_entered,
         stuck=np.asarray(stuck, dtype=bool), teleport_distance=distance,
-        network_modes=scenario.modes.network_modes, **transit,
+        network_modes=scenario.modes.network_modes, aggregate=aggregate, **transit,
     )
     if inputs["event_mask"]:
         _dispatch(events, scenario, plans, tele_distance, ev_time, ev_code,
@@ -282,7 +332,7 @@ def kernel_inputs(scenario: Scenario, plans: PlanBatch, cfg: HermesSimParams,
         leg_network=is_net.astype(np.uint8),
         leg_teleport_steps=round_steps(tele_time, rounding),
         route_offsets=plans.route_offsets.astype(np.int64),
-        route_links=plans.route_links.astype(np.int64),
+        route_links=np.ascontiguousarray(plans.route_links, dtype=np.int32),  # no int64 copy
         stuck_time=float(cfg.stuck_time),
         end_time=math.inf if cfg.end_time is None else float(cfg.end_time),
         event_mask=int(event_mask),

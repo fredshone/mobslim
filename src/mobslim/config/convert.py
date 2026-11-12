@@ -213,8 +213,9 @@ def matsim_to_mobslim(cfg: MatsimConfig, attribute_names=None) -> tuple[dict, li
             name = "qsim"
     unsupported += u
     out["mobsim"] = {"type": name, **kwargs}
-    if controller.travel_time_bin_size != 900.0:
-        out["travel_time"] = {"bin_size": controller.travel_time_bin_size}
+    # MATSim's travel-time bins are uniform
+    out["travel_time"] = {"bin_size": controller.travel_time_bin_size,
+                          "off_peak_bin_size": controller.travel_time_bin_size}
 
     out["scoring"] = _scoring(cfg, unsupported)
     out["replanning"], respects_car = _replanning(cfg, unsupported)

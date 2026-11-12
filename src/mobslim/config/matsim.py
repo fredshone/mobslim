@@ -559,6 +559,8 @@ def controller_params(cfg: MatsimConfig):
     )
     if (v := cfg.get("travelTimeCalculator", "traveltimeBinSize")) is not None:
         kwargs["travel_time_bin_size"] = float(parse_time(v)) if ":" in v else float(v)
+    # MATSim's bins are uniform
+    kwargs["travel_time_off_peak_bin_size"] = kwargs.get("travel_time_bin_size", 900.0)
     return ControllerParams(**kwargs), unsupported
 
 

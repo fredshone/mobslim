@@ -638,7 +638,7 @@ class Population:
         """The same persons with new plan tables (what vectorised replanning
         builds): ``plans`` must extend this population's store (or replace
         it), ``plan_ids`` index it. Trailing empty slot columns are dropped
-        and the store is compacted if more than half its rows are unused."""
+        and the store is compacted if more than a third of its rows are unused."""
         plan_ids = np.asarray(plan_ids, dtype=np.int32)
         n_plans = np.asarray(n_plans, dtype=np.int32)
         width = max(int(n_plans.max(initial=1)), 1)
@@ -663,7 +663,7 @@ class Population:
 
         Plans that are rows of this population's store (views read from it,
         unchanged) keep their rows; only new plans are appended. The store
-        is then compacted if more than half its rows are unused."""
+        is then compacted if more than a third of its rows are unused."""
         persons = tuple(persons)
         if len(persons) != len(self) or any(
             a.id != b for a, b in zip(persons, self.ids)
@@ -901,13 +901,21 @@ def _remap(plan_ids: np.ndarray, live: np.ndarray, n_rows: int) -> np.ndarray:
 
 
 def _maybe_compact(store: PlanStore, plan_ids: np.ndarray, n_plans: np.ndarray):
-    """Compact ``store`` if it has more than twice as many rows as the
+    """Compact ``store`` if it has more than 1.5 times as many rows as the
     persons hold plans (order-preserving, so results do not depend on it)."""
+    store, plan_ids, _ = compact_plans(store, plan_ids, n_plans)
+    return store, plan_ids
+
+
+def compact_plans(store: PlanStore, plan_ids: np.ndarray, n_plans: np.ndarray):
+    """``(store, plan_ids, live)``: as :meth:`Population.with_tables`
+    compacts, plus the rows kept (sorted; old row ``live[i]`` becomes row
+    ``i``), or ``None`` if the store was not compacted."""
     held = max(int(n_plans.sum()), len(n_plans), 1)
-    if len(store) <= 2 * held:
-        return store, plan_ids
+    if len(store) <= 1.5 * held:
+        return store, plan_ids, None
     live = np.unique(plan_ids[plan_ids >= 0]).astype(np.int64)
-    return store.compact(live), _remap(plan_ids, live, len(store))
+    return store.compact(live), _remap(plan_ids, live, len(store)), live
 
 
 def locate_activities(plan: Plan, network: Network) -> Plan:

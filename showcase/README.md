@@ -32,8 +32,8 @@ else heavy at the same time.
 | `dsim.py`, `java/dsim/` | MATSim's DSim, which is only in weekly builds: `pom.xml` pins `2027.0-2026w45` (used only for its classpath) and `DSimRun.java` runs it in one JVM, in place of `RunCase` and `PerfRun` |
 | `java/src/PerfRun.java` | MATSim with no replanning and no output, timing each iteration's mobsim (compiled with `javac` against the verification runner's classpath) |
 | `networks.py` | One HermesSim run per performance case, drawn as a network snapshot: every car at the busiest minute, moving or queued |
-| `weaving/experiment.py` | Weaving on the 80x80 grid at 0.3 capacity, medium congestion (inputs made on first use): 100 iterations at 10% innovation under a budget of 8 processes; HermesSim with 1-8 strands, and PSim threads x strands; one fresh process per run |
-| `weaving/report.py` | Tables and SVG charts (utility against wall time and against iteration) from `results/weaving.json` |
+| `weaving/experiment.py` | Weaving on the 80x80 grid at 0.3 capacity, medium congestion (inputs made on first use): 3 minutes of wall-clock time per run at 30% innovation under a budget of 8 processes; HermesSim with 1-8 strands, and `AsyncWeave` with 2-8 strands; one fresh process per run. `benchmarks/weave_profile.py` runs the same setup for a few iterations and prints where each iteration's time goes |
+| `weaving/report.py` | Tables and SVG charts (utility against wall-clock time) from `results/weaving.json` |
 | `perf_report.py` | Markdown tables and SVG charts (light and dark) from `results/perf.json` |
 | `results/weaving.json` | The last weaving results (machine-specific; committed so the docs build) |
 | `results/perf.json` | The last measured results, committed so the docs build without Java (machine-specific) |
