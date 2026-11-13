@@ -12,9 +12,9 @@ Simulations are fast and memory light. The following experiments compare MobSlim
 
 ## Speed
 
-* **MobSlim's HermesSim is 8.5–14x faster than MATSim Hermes**; PSim and DSim are 1.2–19x faster.
+* **MobSlim's HermesSim is 8–14x faster than MATSim Hermes**; PSim and DSim are 1.1–18x faster.
 * **On the largest scenarios, grid-80 and grid-80-congested, PSim on 16 threads is the fastest**:
-  13–19x faster than MATSim Hermes.
+  12–18x faster than MATSim Hermes.
 
 ```{image} ../_static/showcase/perf_time_light.svg
 :class: only-light
@@ -27,7 +27,7 @@ Simulations are fast and memory light. The following experiments compare MobSlim
 
 ## Max memory
 
-* **Every MobSlim mobsim needs 71–91% less memory than MATSim Hermes**.
+* **Every MobSlim mobsim needs 69–90% less memory than MATSim Hermes**.
 
 ```{image} ../_static/showcase/perf_memory_light.svg
 :class: only-light
@@ -181,7 +181,7 @@ snapshot shows cars only.
   QSim's traffic model.
 * **The multi-threaded runs use all 16 logical CPUs,** on 8 physical cores.
   On the smaller scenarios they gain little over one thread, and sometimes lose;
-  on the grid-80 scenarios they are 2.4–4.3x faster than one thread.
+  on the grid-80 scenarios they are 2.4–4.5x faster than one thread.
 * **Timings depend on the machine.** Run on mains power, with nothing else
   heavy running.
 
