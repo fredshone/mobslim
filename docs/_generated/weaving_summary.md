@@ -1,12 +1,13 @@
-| run | iterations | utility at 1 min | utility at 2 min | utility at 3 min |
-|---|---|---|---|---|
-| Controller | 96 | 129.75 | 131.50 | 132.49 |
-| 1 strand | 99 | 129.71 | 131.08 | 132.21 |
-| 2 strands | 62 | 129.71 | 130.74 | 132.26 |
-| 4 strands | 35 | 129.37 | 130.28 | 130.99 |
-| 8 strands | 18 | 128.32 | 130.14 | 130.44 |
-| async, 2 strands | 65 | 129.61 | 131.21 | 132.19 |
-| async, 4 strands | 43 | 128.60 | 130.87 | 131.88 |
-| async, 8 strands | 29 | 129.89 | 131.31 | 132.31 |
+| run | iterations in 60 s | utility at 15 s | utility at 30 s | utility at 45 s | utility at 60 s |
+|---|---|---|---|---|---|
+| Controller | 255 | 137.52 | 138.02 | 138.20 | 138.26 |
+| MATSim Hermes | 44 | 136.54 | 136.74 | 136.95 | 137.11 |
+| 1 strand | 254 | 137.44 | 137.96 | 138.18 | 138.27 |
+| 2 strands | 174 | 137.65 | 138.13 | 138.28 | 138.33 |
+| 4 strands | 117 | 137.80 | 138.25 | 138.34 | 138.37 |
+| 8 strands | 68 | 137.74 | 138.25 | 138.34 | 138.37 |
+| async, 2 strands | 186 | 137.70 | 138.16 | 138.29 | 138.33 |
+| async, 4 strands | 144 | 137.86 | 138.23 | 138.31 | 138.33 |
+| async, 8 strands | 101 | 137.60 | 138.12 | 138.26 | 138.31 |
 
 Utility is the mean score of everything simulated in an iteration (all strands), as a 5-iteration rolling mean.

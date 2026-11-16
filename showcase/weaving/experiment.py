@@ -1,21 +1,20 @@
-"""Weaving on a grid with medium congestion: utility against wall-clock time.
+"""Weaving on a congested grid: utility against wall-clock time.
 
-The scenario is the performance showcase's ``grid-80`` inputs (an 80x80
-grid, 25,920 links, 104,960 car commuters;
-``showcase/output/perf/grid-80/input``, made with ``showcase.perf`` on
-first use) with flow and storage capacity
-scaled by :data:`CAPACITY`, so that the first iteration's car travel time is
-about 50% above free flow, with nothing stuck. Each run gets the same
-wall-clock time, :data:`TIME_LIMIT` seconds (``$WEAVING_TIME_LIMIT``; it
-stops after the iteration that reaches it, or after :data:`ITERATIONS`),
-with 30% plan innovation (15% reroute, 15% time mutation plus reroute, 70%
-ChangeExpBeta) under a budget of :data:`BUDGET` simulation
-processes (``$WEAVING_BUDGET``, default 8; set it to the machine's
-physical cores). Two experiments:
+The scenario is the performance showcase's ``grid-40-congested`` inputs (a
+40x40 grid with jittered link lengths, 6,560 links, 26,240 car commuters, at
+flow and storage capacity :data:`CAPACITY`; ``showcase/output/perf/
+grid-40-congested/input``, made with ``showcase.perf`` when missing or out of date). Each
+run gets the same wall-clock time, :data:`TIME_LIMIT` seconds
+(``$WEAVING_TIME_LIMIT``; it stops after the iteration that reaches it, or
+after :data:`ITERATIONS`), with 30% plan innovation (15% reroute, 15% time
+mutation plus reroute, 70% ChangeExpBeta) under a budget of :data:`BUDGET`
+simulation processes (``$WEAVING_BUDGET``, default 8; set it to the
+machine's physical cores). Two experiments:
 
 * ``weaving``: HermesSim (single-threaded) with 1, 2, 4, ... strands, up to
-  the budget, plus
-  the plain :class:`~mobslim.Controller` for reference.
+  the budget, plus the plain :class:`~mobslim.Controller` and Java MATSim
+  with its Hermes mobsim (``ReplanRun``, ``showcase/java/src``; the same
+  strategies, :data:`BUDGET` threads) for reference.
 * ``async``: HermesSim with :class:`~mobslim.weave.AsyncWeave` (strands
   merged one at a time, never waiting for the slowest) with 2, 4, ...
   strands, against the synchronous runs.
@@ -23,7 +22,9 @@ physical cores). Two experiments:
 Each run is a fresh process. It records, per iteration, the wall-clock time
 since the loop started (after the one-off routing of the input plans, the
 same for every run) and the average utility of the plans performed in that
-iteration (over every strand). Results go to ``showcase/results/weaving.json``.
+iteration (over every strand); and the start and end of every mobsim run, in
+whichever process ran it (``sims``: ``[start_s, end_s, pid]``). Results go to
+``showcase/results/weaving.json``.
 """
 
 from __future__ import annotations
@@ -37,14 +38,17 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from mobslim import HermesSim
+
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "showcase" / "output" / "perf" / "grid-80" / "input" / "config.xml"
+CASE = "grid-40-congested"  # of showcase.perf.CASES
+CONFIG = ROOT / "showcase" / "output" / "perf" / CASE / "input" / "config.xml"
 OUT = ROOT / "showcase" / "output" / "weaving"
 RESULTS = ROOT / "showcase" / "results" / "weaving.json"
 ITERATIONS = int(os.environ.get("WEAVING_ITERATIONS", 10_000))  # env: for a quick trial
-TIME_LIMIT = float(os.environ.get("WEAVING_TIME_LIMIT", 180))  # wall seconds per run
+TIME_LIMIT = float(os.environ.get("WEAVING_TIME_LIMIT", 60))  # wall seconds per run
 INNOVATION = 0.3
-CAPACITY = 0.3  # flow and storage capacity factor: medium congestion
+CAPACITY = 0.3  # flow and storage capacity factor (the case's own)
 BUDGET = int(os.environ.get("WEAVING_BUDGET", 8))  # processes; best: the physical cores
 SEED = 4711
 TIMING = ("_s", "_mb")  # metric keys recorded per strand
@@ -54,8 +58,8 @@ TIMING = ("_s", "_mb")  # metric keys recorded per strand
 class Run:
     name: str
     experiment: str
-    strands: int = 1  # 0: the plain Controller
-    loop: str = "sync"  # sync: Weave | async: AsyncWeave
+    strands: int = 1  # 0: the plain Controller (or MATSim)
+    loop: str = "sync"  # sync: Weave | async: AsyncWeave | matsim: Java MATSim
 
     @property
     def slug(self) -> str:
@@ -65,10 +69,32 @@ class Run:
 POWERS = [2**i for i in range(BUDGET.bit_length()) if 2**i <= BUDGET]  # 1, 2, 4, ... <= BUDGET
 RUNS = [
     Run("Controller", "weaving", strands=0),
+    Run("MATSim Hermes", "weaving", strands=0, loop="matsim"),
     *(Run(f"{w} strand{'s' if w > 1 else ''}", "weaving", strands=w) for w in POWERS),
     *(Run(f"async, {w} strands", "async", strands=w, loop="async")
       for w in POWERS if w > 1),
 ]
+
+
+class TimedHermesSim(HermesSim):
+    """HermesSim that appends each run's wall-clock start and end (epoch
+    seconds) and its process id to ``log``, from whichever process runs it."""
+
+    def __init__(self, params, log: str):
+        super().__init__(params)
+        self.log = log
+
+    def run(self, *args, **kwargs):
+        t0 = time.time()
+        out = super().run(*args, **kwargs)
+        with open(self.log, "a") as f:  # one short append per sim
+            f.write(f"{t0},{time.time()},{os.getpid()}\n")
+        return out
+
+
+# MATSim's names for the same strategies as :func:`strategies`
+MATSIM_STRATEGIES = {"ChangeExpBeta": 1 - INNOVATION, "ReRoute": INNOVATION / 2,
+                     "TimeAllocationMutator_ReRoute": INNOVATION / 2}
 
 
 def strategies():
@@ -94,17 +120,21 @@ def child(slug: str, out: str) -> None:
         Controller,
         ControllerListener,
         ControllerParams,
-        HermesSim,
         HermesSimParams,
     )
     from mobslim.config.matsim import MatsimConfig, mobsim_params
     from mobslim.weave import AsyncWeave, Weave
 
+    # by its module path, not __main__'s, so worker processes can unpickle it
+    from showcase.weaving.experiment import TimedHermesSim
+
     run = next(r for r in RUNS if r.slug == slug)
     cfg = MatsimConfig.load(CONFIG)
     kw, _ = mobsim_params(cfg)
     kw.update(flow_capacity_factor=CAPACITY, storage_capacity_factor=CAPACITY)
-    mobsim = HermesSim(HermesSimParams(**kw, backend="rust"))
+    sims = Path(out).with_suffix(".sims.csv")
+    sims.unlink(missing_ok=True)
+    mobsim = TimedHermesSim(HermesSimParams(**kw, backend="rust"), str(sims))
     params = ControllerParams(iterations=ITERATIONS, seed=SEED)
 
     class TimeUp(Exception):
@@ -116,6 +146,7 @@ def child(slug: str, out: str) -> None:
 
         def on_startup(self, controller):
             self.t0 = time.perf_counter()
+            self.epoch = time.time()
 
         def on_iteration_end(self, state):
             m = state.metrics
@@ -154,9 +185,49 @@ def child(slug: str, out: str) -> None:
     except TimeUp:
         pass
     total_s = time.perf_counter() - t
+    rows = [line.split(",") for line in sims.read_text().splitlines()] if sims.exists() else []
     Path(out).write_text(json.dumps({**asdict(run), "load_s": load_s, "total_s": total_s,
                                      "persons": len(controller.scenario.population),
-                                     "iterations": record.rows}))
+                                     "iterations": record.rows,
+                                     "sims": sorted([float(a) - record.epoch, float(b) - record.epoch,
+                                                     int(pid)] for a, b, pid in rows)}))
+
+
+def run_matsim(run: Run, out: Path, log: Path) -> int:
+    """Java MATSim (Hermes) for :data:`TIME_LIMIT` seconds; writes the same
+    record as :func:`child` to ``out``. Returns the exit code."""
+    from mobslim.config.matsim import MatsimConfig
+    from showcase.perf import _java_classpath
+    from verification.runner import _hermes_config
+
+    d = OUT / run.slug
+    d.mkdir(parents=True, exist_ok=True)
+    cfg = _hermes_config(MatsimConfig.load(CONFIG))
+    for module in ("qsim", "hermes"):
+        cfg.set(module, "flowCapacityFactor", CAPACITY).set(module, "storageCapacityFactor", CAPACITY)
+    cfg.set("global", "randomSeed", SEED).set("global", "numberOfThreads", BUDGET)
+    cfg.set("controller", "lastIteration", ITERATIONS - 1)
+    record = d / "record.csv"
+    record.unlink(missing_ok=True)
+    cmd = ["java", "-Xmx10g", "-cp", _java_classpath(), "ReplanRun", "--config",
+           str(cfg.write(d / "config.xml")), "--output", str(d / "output"), "--record", str(record),
+           "--time-limit", str(TIME_LIMIT)]
+    for name, weight in MATSIM_STRATEGIES.items():
+        cmd += ["--strategy", f"{name}={weight}"]
+    t = time.perf_counter()
+    with open(log, "w") as f:
+        code = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=ROOT).returncode
+    if code != 0 or not record.exists():
+        return code or 1
+    rows = [dict(zip(("iteration", "wall_s", "start", "end", "executed", "best"), map(float, r.split(","))))
+            for r in record.read_text().splitlines()[1:]]
+    out.write_text(json.dumps({
+        **asdict(run), "total_s": time.perf_counter() - t,
+        "iterations": [{"iteration": int(r["iteration"]), "wall_s": r["wall_s"],
+                        "score_performed": r["executed"], "score_executed": r["executed"],
+                        "score_best": r["best"]} for r in rows],
+        "sims": [[r["start"], r["end"], 0] for r in rows]}))
+    return 0
 
 
 def machine() -> dict:
@@ -172,16 +243,17 @@ def machine() -> dict:
 
 
 def main(only: list[str] = ()) -> None:
-    if not CONFIG.exists():
-        from showcase.perf import PerfCase, prepare
+    from showcase.perf import CASES, prepare
 
-        prepare(PerfCase("grid-80", "80x80 grid: 25,920 links, 104,960 car commuters",
-                         grid=80, persons=104_960))
+    prepare(next(c for c in CASES if c.name == CASE))  # made or remade if out of date
     OUT.mkdir(parents=True, exist_ok=True)
     results = json.loads(RESULTS.read_text()) if RESULTS.exists() else {"runs": {}}
     results["machine"] = machine()
-    results["settings"] = {"time_limit_s": TIME_LIMIT, "innovation_rate": INNOVATION,
-                           "budget": BUDGET, "seed": SEED, "capacity": CAPACITY}
+    settings = {"case": CASE, "time_limit_s": TIME_LIMIT, "innovation_rate": INNOVATION,
+                "budget": BUDGET, "seed": SEED, "capacity": CAPACITY}
+    if results.get("settings") != settings:  # runs made otherwise are not comparable
+        results["runs"] = {}
+    results["settings"] = settings
     for run in RUNS:
         if only and not any(k in run.slug or k in run.experiment for k in only):
             continue
@@ -189,10 +261,13 @@ def main(only: list[str] = ()) -> None:
         out.unlink(missing_ok=True)
         print(f"{run.experiment}: {run.name} ...", flush=True)
         t = time.perf_counter()
-        with open(OUT / f"{run.slug}.log", "w") as log:
-            code = subprocess.run([sys.executable, "-m", "showcase.weaving.experiment", "child",
-                                   run.slug, str(out)], stdout=log, stderr=subprocess.STDOUT,
-                                  cwd=ROOT).returncode
+        if run.loop == "matsim":
+            code = run_matsim(run, out, OUT / f"{run.slug}.log")
+        else:
+            with open(OUT / f"{run.slug}.log", "w") as log:
+                code = subprocess.run([sys.executable, "-m", "showcase.weaving.experiment", "child",
+                                       run.slug, str(out)], stdout=log, stderr=subprocess.STDOUT,
+                                      cwd=ROOT).returncode
         if code != 0 or not out.exists():
             print(f"  failed (exit {code}), see {OUT / (run.slug + '.log')}")
             continue

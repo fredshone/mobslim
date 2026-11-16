@@ -10,7 +10,7 @@ resident memory (the whole process: interpreter or JVM, scenario, mobsim).
 
 * **MATSim**: ``PerfRun`` (``showcase/java``) runs ``REPEATS`` iterations
   with no replanning and no output files, and times each iteration's mobsim.
-  The JVM gets ``-Xmx`` = :data:`JAVA_XMX`.
+  The JVM gets ``-Xmx`` = the case's ``xmx``.
 * **MobSlim**: :func:`child` loads the same files, then runs the mobsim
   ``REPEATS`` times with no event handlers, as the controller does in an
   iteration that is not an output iteration (:func:`~mobslim.mobsim.run_mobsim`):
@@ -26,6 +26,7 @@ build without rerunning.
 from __future__ import annotations
 
 import json
+import math
 import os
 import platform
 import random
@@ -38,9 +39,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = Path(__file__).parent / "output" / "perf"
 RESULTS = Path(__file__).parent / "results" / "perf.json"
-JAVA_SRC = Path(__file__).parent / "java" / "src" / "PerfRun.java"
+JAVA_SRCS = sorted((Path(__file__).parent / "java" / "src").glob("*.java"))
 JAVA_CLASSES = Path(__file__).parent / "java" / "classes"
-JAVA_XMX = "10g"
 REPEATS = 3
 SLOW = 60.0  # s: a MobSlim run slower than this is not repeated
 CPUS = os.cpu_count() or 1
@@ -62,19 +62,42 @@ class PerfCase:
     learn_iterations: int = 0
     learn_mobsim: str = "hermes"
     learn_weights: dict = field(default_factory=dict)  # strategyName -> weight while learning
+    optional: bool = False  # run only when asked for (see :func:`selected`)
+    variants: tuple = ()  # run only the variants whose label contains one of these
+    xmx: str = "10g"  # the JVM's heap (MATSim)
 
 
 def _cap(f):
     return {("qsim", "flowCapacityFactor"): f, ("qsim", "storageCapacityFactor"): f}
 
 
+CONGESTED = 0.3  # flow and storage capacity factor of the congested grids
+
+
+def _grid(n: int, congested: bool = False, **kw) -> PerfCase:
+    """An n x n grid with 4 n (n + 1) links and 16.4 car commuters per cell
+    (26,240 on the 40x40 grid); ``congested``: at capacity x :data:`CONGESTED`."""
+    persons = 26_240 * n * n // 1600
+    if congested:
+        return PerfCase(f"grid-{n}-congested", f"the same at capacity x{CONGESTED}: queues and "
+                        "spillback", grid=n, persons=persons, capacity=CONGESTED, **kw)
+    return PerfCase(f"grid-{n}", f"{n}x{n} grid: {4 * n * (n + 1):,} links, {persons:,} car "
+                    "commuters", grid=n, persons=persons, **kw)
+
+
+# grid-320 only runs when asked for by size (``-k 320``), on the fast mobsims:
+# a 1.7 million person day takes MATSim's QSim and MobSlim's QSim and AgentSim hours
+FAST = ("MATSim Hermes", "HermesSim", "PSim", "MobSlim DSim")
+
 CASES = [
-    PerfCase("grid-40", "40x40 grid: 6,560 links, 26,240 car commuters", grid=40, persons=26_240),
-    PerfCase("grid-40-congested", "the same at capacity x0.1: queues and spillback everywhere",
-             grid=40, persons=26_240, capacity=0.1),
-    PerfCase("grid-80", "80x80 grid: 25,920 links, 104,960 car commuters", grid=80, persons=104_960),
-    PerfCase("grid-80-congested", "the same at capacity x0.1: queues and spillback everywhere",
-             grid=80, persons=104_960, capacity=0.1),
+    _grid(40),
+    _grid(40, congested=True),
+    _grid(80),
+    _grid(80, congested=True),
+    _grid(160, xmx="40g"),
+    _grid(160, congested=True, xmx="40g"),
+    _grid(320, optional=True, variants=FAST, xmx="100g"),
+    _grid(320, congested=True, optional=True, variants=FAST, xmx="100g"),
     # learned plans: the shipped iteration-0 plans gridlock the network on every mobsim
     PerfCase("siouxfalls", "MATSim Sioux Falls 2014: 84,110 agents, car and bus (2,040 departures)",
              "siouxfalls-2014", "config_default.xml", transit=True, learn_iterations=10,
@@ -82,6 +105,20 @@ CASES = [
              learn_weights={"ChangeExpBeta": 0.7, "ReRoute": 0.1, "SubtourModeChoice": 0.1,
                             "TimeAllocationMutator": 0.1}),
 ]
+
+
+def selected(case: PerfCase, patterns=()) -> bool:
+    """Whether ``case`` runs for ``-k patterns``: any case a pattern matches
+    (every case without one), except that optional cases need a pattern
+    naming their grid size."""
+    if case.optional:
+        return any(str(case.grid) in p and p in case.name for p in patterns)
+    return not patterns or any(p in case.name for p in patterns)
+
+
+def runs_variant(case: PerfCase, label: str) -> bool:
+    return not case.variants or any(v in label for v in case.variants)
+
 
 # label -> (mobsim, MATSim --set overrides | MobSlim params)
 MATSIM_VARIANTS = {
@@ -105,8 +142,11 @@ MOBSLIM_VARIANTS = {
 # ------------------------------------------------------------------ preparing
 
 
+JITTER = 0.1  # of the grid spacing: how far each node moves from its grid point
+
+
 def _grid_files(case: PerfCase, d: Path) -> None:
-    """A MATSim network and routed home-work-home car plans (as in benchmarks.mobsim_sweep)."""
+    """A MATSim network of a slightly irregular grid, and routed home-work-home car plans."""
     from mobslim import (
         Plan,
         Population,
@@ -117,8 +157,13 @@ def _grid_files(case: PerfCase, d: Path) -> None:
     from mobslim.formats.matsim_plans import write_population_xml
 
     n, spacing = case.grid, 200.0
-    nodes = [f'<node id="{i}_{j}" x="{j * spacing}" y="{i * spacing}"/>'
-             for i in range(n + 1) for j in range(n + 1)]
+    # each node moved up to JITTER x spacing in x and y, so link lengths vary
+    # (about 160-240 m) and routes are not ties between equal-length paths
+    geo = random.Random(2)
+    xy = {(i, j): (j * spacing + geo.uniform(-JITTER, JITTER) * spacing,
+                   i * spacing + geo.uniform(-JITTER, JITTER) * spacing)
+          for i in range(n + 1) for j in range(n + 1)}
+    nodes = [f'<node id="{i}_{j}" x="{x:.1f}" y="{y:.1f}"/>' for (i, j), (x, y) in xy.items()]
     links = []
     for i in range(n + 1):
         for j in range(n + 1):
@@ -126,9 +171,10 @@ def _grid_files(case: PerfCase, d: Path) -> None:
                 a, b = (i, j), (i + di, j + dj)
                 if b[0] > n or b[1] > n:
                     continue
+                length = math.dist(xy[a], xy[b])
                 for u, v in ((a, b), (b, a)):
                     links.append(f'<link id="{u[0]}_{u[1]}-{v[0]}_{v[1]}" from="{u[0]}_{u[1]}" '
-                                 f'to="{v[0]}_{v[1]}" length="{spacing}" freespeed="10.0" '
+                                 f'to="{v[0]}_{v[1]}" length="{length:.1f}" freespeed="10.0" '
                                  'capacity="600.0" permlanes="1" modes="car"/>')
     (d / "network.xml").write_text(
         '<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE network SYSTEM '
@@ -219,11 +265,17 @@ def prepare(case: PerfCase, force: bool = False) -> Path:
 
     d = OUT / case.name / "input"
     cfg_path = d / "config.xml"
-    if cfg_path.exists() and not force:
+    # grids: remade when the generator or the case changes
+    stamp = d / "grid.json"
+    key = json.dumps({"grid": case.grid, "persons": case.persons, "capacity": case.capacity,
+                      "jitter": JITTER})
+    if cfg_path.exists() and not force and (not case.grid or
+                                            (stamp.exists() and stamp.read_text() == key)):
         return cfg_path
     d.mkdir(parents=True, exist_ok=True)
     if case.grid:
         _grid_files(case, d)
+        stamp.write_text(key)
         return cfg_path
     from verification.cases import SCENARIOS
     from verification.matsim import run_matsim
@@ -263,9 +315,10 @@ def _java_classpath() -> str:
     from verification.matsim import classpath
 
     cp = classpath()
-    cls = JAVA_CLASSES / "PerfRun.class"
-    if not cls.exists() or cls.stat().st_mtime < JAVA_SRC.stat().st_mtime:
-        subprocess.run(["javac", "-d", str(JAVA_CLASSES), "-cp", cp, str(JAVA_SRC)], check=True)
+    stale = [src for src in JAVA_SRCS if not (cls := JAVA_CLASSES / f"{src.stem}.class").exists()
+             or cls.stat().st_mtime < src.stat().st_mtime]
+    if stale:
+        subprocess.run(["javac", "-d", str(JAVA_CLASSES), "-cp", cp, *map(str, stale)], check=True)
     return f"{JAVA_CLASSES}:{cp}"
 
 
@@ -288,10 +341,10 @@ def run_matsim(case: PerfCase, cfg_path: Path, label: str) -> dict:
         from showcase import dsim
 
         threads = sets[("dsim", "threads")]
-        cmd = dsim.command(run_cfg, d / "output", threads, timings, xmx=JAVA_XMX,
+        cmd = dsim.command(run_cfg, d / "output", threads, timings, xmx=case.xmx,
                            sets={"controller.lastIteration": REPEATS - 1})
     else:
-        cmd = ["java", f"-Xmx{JAVA_XMX}", "-cp", _java_classpath(), "PerfRun", "--config",
+        cmd = ["java", f"-Xmx{case.xmx}", "-cp", _java_classpath(), "PerfRun", "--config",
                str(run_cfg), "--output", str(d / "output"), "--timings", str(timings),
                "--set", f"controller.lastIteration={REPEATS - 1}"]
         for (m, p), v in sets.items():
@@ -302,7 +355,8 @@ def run_matsim(case: PerfCase, cfg_path: Path, label: str) -> dict:
     if code != 0 or not timings.exists():
         return {"error": f"exit {code}, see {d / 'run.log'}"}
     runs = [int(line.split(",")[1]) / 1e9 for line in timings.read_text().splitlines()[1:]]
-    return {"time_s": min(runs), "runs_s": runs, "peak_rss_mb": rss / 1024, "process_wall_s": wall}
+    return {"time_s": min(runs), "runs_s": runs, "peak_rss_mb": rss / 1024, "process_wall_s": wall,
+            "xmx": case.xmx}
 
 
 def run_mobslim(case: PerfCase, cfg_path: Path, label: str) -> dict:
@@ -415,7 +469,8 @@ def machine() -> dict:
                    if line.startswith("MemTotal")))
     return {"cpu": model, "cpus": CPUS, "memory_gb": round(mem / 1024 ** 2), "os": platform.platform(),
             "python": platform.python_version(), "java": java, "commit": commit, "dirty": dirty,
-            "date": time.strftime("%Y-%m-%d"), "matsim": "2025.0", "xmx": JAVA_XMX, "repeats": REPEATS}
+            "date": time.strftime("%Y-%m-%d"), "matsim": "2025.0", "repeats": REPEATS,
+            "xmx": {c.name: c.xmx for c in CASES}}
 
 
 def main(patterns=(), force: bool = False, only=()) -> None:
@@ -423,12 +478,13 @@ def main(patterns=(), force: bool = False, only=()) -> None:
     whose label contains one of them, kept alongside the case's other results."""
     results = json.loads(RESULTS.read_text()) if RESULTS.exists() else {"cases": {}}
     results["machine"] = machine()
-    cases = [c for c in CASES if not patterns or any(p in c.name for p in patterns)]
+    cases = [c for c in CASES if selected(c, patterns)]
     for case in cases:
         print(f"== {case.name}", flush=True)
         cfg_path = prepare(case, force)
         old = results["cases"].get(case.name, {}).get("runs", {}) if only else {}
-        keep = lambda label: not only or any(o in label for o in only)  # noqa: E731
+        keep = lambda label: (runs_variant(case, label)  # noqa: E731
+                              and (not only or any(o in label for o in only)))
         rows = dict(old)
         for label in filter(keep, MATSIM_VARIANTS):
             rows[label] = {"family": "matsim", **run_matsim(case, cfg_path, label)}

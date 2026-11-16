@@ -1,7 +1,9 @@
 | Scenario | MATSim Hermes | Fastest MobSlim | Speed-up | Peak memory: MATSim Hermes → that MobSlim |
 |---|---|---|---|---|
-| grid-40 | 1.01 s | 126 ms (HermesSim) | **8.0×** | 1.47 GB → 221 MB |
-| grid-40-congested | 1.21 s | 138 ms (HermesSim) | **8.8×** | 1.50 GB → 229 MB |
-| grid-80 | 13.4 s | 734 ms (PSim, 16 threads) | **18.3×** | 5.46 GB → 736 MB |
-| grid-80-congested | 13.3 s | 1.10 s (PSim, 16 threads) | **12.1×** | 5.93 GB → 788 MB |
-| siouxfalls | 1.63 s | 185 ms (HermesSim) | **8.8×** | 3.55 GB → 540 MB |
+| grid-40 | 1.08 s | 127 ms (HermesSim) | **8.5×** | 1.54 GB → 222 MB |
+| grid-40-congested | 934 ms | 136 ms (HermesSim) | **6.9×** | 1.59 GB → 227 MB |
+| grid-80 | 11.4 s | 906 ms (PSim, 16 threads) | **12.6×** | 6.63 GB → 727 MB |
+| grid-80-congested | 10.1 s | 1.13 s (HermesSim) | **8.9×** | 6.34 GB → 653 MB |
+| grid-160 | 109 s | 8.01 s (PSim, 16 threads) | **13.6×** | 40.68 GB → 3.18 GB |
+| grid-160-congested | 73.7 s | 8.48 s (PSim, 16 threads) | **8.7×** | 38.12 GB → 3.28 GB |
+| siouxfalls | 1.60 s | 185 ms (HermesSim) | **8.7×** | 3.58 GB → 553 MB |

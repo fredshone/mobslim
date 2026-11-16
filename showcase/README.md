@@ -9,7 +9,9 @@ Generates the evidence behind three documentation pages:
 | [How the mobsims work](../docs/simulation/overview.md) | hand-written | |
 | [Optimisation: performance](../docs/optimisation/performance.md) | `uv run python -m showcase weaving` (then `weaving-report`) | `showcase/results/weaving.json`, `docs/_generated/weaving_*.md`, `docs/_static/showcase/weaving_*.svg` |
 
-`python -m showcase perf -k grid` runs only the matching cases;
+`python -m showcase perf -k grid` runs only the matching cases. The grid-320
+cases run only when asked for by size (`-k 320`), and then only MATSim Hermes
+and MobSlim's HermesSim, PSim and DSim;
 `python -m showcase report` redraws the tables and charts from the saved
 results without rerunning anything. `python -m showcase networks` redraws the network snapshots
 (a few minutes; it simulates each case once). `python -m showcase all` does everything.
@@ -18,8 +20,11 @@ results without rerunning anything. `python -m showcase networks` redraws the ne
 build needs 25, the rest 21), Maven and a `matsim-libs` checkout, as for
 `verification/` (see its README): the MATSim side reuses its runner and
 cache. Sioux Falls comes from `matsim-libs/examples/scenarios/siouxfalls-2014`.
-The full `perf` run takes about 40 minutes on an 8-core desktop, most of it
-the grid-80 cases, plus a few minutes the first time to prepare the inputs. Do not run anything
+The grids are slightly irregular (each node moved up to 10% of the spacing,
+so link lengths vary from about 160 to 240 m); their inputs are remade when
+the case or the generator changes. The full `perf` run takes several hours on
+an 8-core desktop, most of it the grid-160 cases (about 8 times the work of
+grid-80), plus time to prepare the inputs. Do not run anything
 else heavy at the same time.
 
 ## Layout
@@ -32,8 +37,9 @@ else heavy at the same time.
 | `dsim.py`, `java/dsim/` | MATSim's DSim, which is only in weekly builds: `pom.xml` pins `2027.0-2026w45` (used only for its classpath) and `DSimRun.java` runs it in one JVM, in place of `RunCase` and `PerfRun` |
 | `java/src/PerfRun.java` | MATSim with no replanning and no output, timing each iteration's mobsim (compiled with `javac` against the verification runner's classpath) |
 | `networks.py` | One HermesSim run per performance case, drawn as a network snapshot: every car at the busiest minute, moving or queued |
-| `weaving/experiment.py` | Weaving on the 80x80 grid at 0.3 capacity, medium congestion (inputs made on first use): 3 minutes of wall-clock time per run at 30% innovation under a budget of 8 processes; HermesSim with 1-8 strands, and `AsyncWeave` with 2-8 strands; one fresh process per run. `benchmarks/weave_profile.py` runs the same setup for a few iterations and prints where each iteration's time goes |
-| `weaving/report.py` | Tables and SVG charts (utility against wall-clock time) from `results/weaving.json` |
+| `weaving/experiment.py` | Weaving on `grid-40-congested` (0.3 capacity; inputs made by `perf.prepare` when missing or out of date): 1 minute of wall-clock time per run at 30% innovation under a budget of 8 processes; the Controller, HermesSim with 1-8 strands, `AsyncWeave` with 2-8 strands, and MATSim Hermes; one fresh process per run, recording every mobsim run's start and end. `benchmarks/weave_profile.py` runs the same setup for a few iterations and prints where each iteration's time goes |
+| `java/src/ReplanRun.java` | MATSim with replanning for a fixed wall-clock time: per iteration, the mean executed score and the mobsim's start and end |
+| `weaving/report.py` | Tables and SVG charts from `results/weaving.json`: each run's mobsim runs in its first 10 s (cadence) above utility over the whole run |
 | `perf_report.py` | Markdown tables and SVG charts (light and dark) from `results/perf.json` |
 | `results/weaving.json` | The last weaving results (machine-specific; committed so the docs build) |
 | `results/perf.json` | The last measured results, committed so the docs build without Java (machine-specific) |

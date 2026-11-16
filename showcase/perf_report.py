@@ -97,8 +97,8 @@ def headline(results: dict) -> str:
 
 
 def chart(results: dict, metric: str, mode: str, path: Path) -> None:
-    """One full-width column chart per scenario, stacked; memory on one shared y range,
-    time on each scenario's own (its values span 0.1 s to 45 s)."""
+    """One full-width column chart per scenario, stacked, each on its own y
+    range (time spans 0.1 s to minutes, memory 200 MB to tens of GB)."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -108,7 +108,7 @@ def chart(results: dict, metric: str, mode: str, path: Path) -> None:
 
     th = THEMES[mode]
     cases = [c for c in CASES if c.name in results["cases"]]
-    labels = list(next(iter(results["cases"].values()))["runs"])
+    labels = list(dict.fromkeys(lab for c in cases for lab in results["cases"][c.name]["runs"]))
     n = len(cases)
     plt.rcParams.update({"font.family": "sans-serif", "font.size": 9, "svg.fonttype": "none"})
     fig, axes = plt.subplots(n, 1, figsize=(9.6, 3.9 * n), squeeze=False)
@@ -118,8 +118,6 @@ def chart(results: dict, metric: str, mode: str, path: Path) -> None:
             return math.nan
         return r["time_s"] + (r.get("post_s") or 0) if metric == "time" else r["peak_rss_mb"]
 
-    every = [value(r) for c in cases for r in results["cases"][c.name]["runs"].values()]
-    hi = max(v for v in every if v == v)
     for ax, c in zip(axes.flat, cases):
         runs = results["cases"][c.name]["runs"]
         vals = [value(runs.get(lab, {})) for lab in labels]
@@ -129,7 +127,7 @@ def chart(results: dict, metric: str, mode: str, path: Path) -> None:
                  for lab in labels]
         x = list(range(len(vals)))
         ax.bar(x, vals, color=colors, width=0.7, edgecolor="none")
-        top = (max(v for v in vals if v == v) if metric == "time" else hi) * 1.15
+        top = max(v for v in vals if v == v) * 1.15
         for xi, v in zip(x, vals):
             if v == v:
                 ax.text(xi, v + top * 0.02, _t(v) if metric == "time" else _mb(v),
@@ -140,7 +138,7 @@ def chart(results: dict, metric: str, mode: str, path: Path) -> None:
             ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: "0" if v == 0 else f"{v:g} s"))
         else:
             if top > 1500:  # round GB ticks (1 GB = 1024 MB, as in the labels)
-                step = next(g for g in (0.5, 1, 2, 4) if top / 1024 / g <= 5)
+                step = next(g for g in (0.5, 1, 2, 4, 5, 10, 20, 25, 50) if top / 1024 / g <= 5)
                 ax.yaxis.set_major_locator(FixedLocator(
                     [k * step * 1024 for k in range(int(top / 1024 / step) + 1)]))
                 ax.yaxis.set_major_formatter(FuncFormatter(
@@ -163,7 +161,7 @@ def chart(results: dict, metric: str, mode: str, path: Path) -> None:
                         Patch(color=th["mobslim"], label="MobSlim")],
                loc="upper right", ncol=2, frameon=False, labelcolor=th["text"], fontsize=10)
     fig.text(0.01, 0.995, ("Mobsim time per iteration (each scenario on its own scale, lower is faster)" if metric == "time"
-                           else "Peak memory of the whole process (lower is smaller)"),
+                           else "Peak memory of the whole process (each scenario on its own scale, lower is smaller)"),
              color=th["text"], fontsize=10, va="top")
     fig.patch.set_alpha(0)
     fig.tight_layout(rect=(0, 0, 1, 0.975), h_pad=2.5)
@@ -171,10 +169,22 @@ def chart(results: dict, metric: str, mode: str, path: Path) -> None:
     plt.close(fig)
 
 
+def _xmx(xmx) -> str:
+    """``-Xmx10g`` (one heap), or the most common heap and the exceptions."""
+    if isinstance(xmx, str):
+        return f"`-Xmx{xmx}`"
+    common = max(set(xmx.values()), key=list(xmx.values()).count)
+    other = {}
+    for case, x in xmx.items():
+        if x != common:
+            other.setdefault(x, []).append(case)
+    return f"`-Xmx{common}`" + "".join(f" ({', '.join(cs)}: `-Xmx{x}`)" for x, cs in other.items())
+
+
 def machine_md(m: dict) -> str:
     return (f"*Measured {m['date']} on {m['cpu']} ({m['cpus']} logical CPUs, {m['memory_gb']} GB), "
             f"{m['os'].split('-with')[0]}; Python {m['python']}; {m['java']}, MATSim {m['matsim']} "
-            f"(DSim: weekly build {DSIM_MATSIM}) with `-Xmx{m['xmx']}`; MobSlim commit `{m['commit']}`"
+            f"(DSim: weekly build {DSIM_MATSIM}) with {_xmx(m['xmx'])}; MobSlim commit `{m['commit']}`"
             f"{' (with uncommitted changes)' if m['dirty'] else ''}. Best of {m['repeats']} "
             "iterations or runs.*\n")
 

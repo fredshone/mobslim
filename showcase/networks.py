@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from showcase.perf import CASES, OUT, prepare
+from showcase.perf import CASES, OUT, prepare, selected
 from showcase.perf_report import STATIC, THEMES
 
 QUEUE_SLACK = 2.0  # s past free-speed time before a car counts as queued
@@ -91,8 +91,9 @@ def draw(case, snap: dict, mode: str, path: Path) -> None:
     net, xy, queued = snap["network"], snap["xy"], snap["queued"]
     segs = np.stack([net.node_xy[net.from_node], net.node_xy[net.to_node]], axis=1)
     fig, ax = plt.subplots(figsize=(7.2, 7.2))
-    ax.add_collection(LineCollection(segs, colors=th["grid"], linewidths=0.5, zorder=1))
-    ms = 2.0 if len(xy) < 20_000 else 1.2
+    lw = 0.5 if net.n_links < 50_000 else 0.25 if net.n_links < 200_000 else 0.12
+    ax.add_collection(LineCollection(segs, colors=th["grid"], linewidths=lw, zorder=1))
+    ms = 2.0 if len(xy) < 20_000 else 1.2 if len(xy) < 100_000 else 0.5
     ax.scatter(*xy[~queued].T, s=ms, c=th["mobslim"], linewidths=0, zorder=2, rasterized=True)
     ax.scatter(*xy[queued].T, s=ms, c=th["matsim"], linewidths=0, zorder=3, rasterized=True)
     ax.set_aspect("equal")
@@ -112,7 +113,7 @@ def draw(case, snap: dict, mode: str, path: Path) -> None:
 def main(patterns=()) -> None:
     STATIC.mkdir(parents=True, exist_ok=True)
     for case in CASES:
-        if patterns and not any(p in case.name for p in patterns):
+        if not selected(case, patterns):
             continue
         snap = snapshot(case)
         for mode in THEMES:
