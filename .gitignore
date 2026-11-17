@@ -31,3 +31,9 @@ docs/_build/
 showcase/java/classes/
 showcase/java/classes-dsim/
 showcase/java/dsim/classpath.txt
+
+# openDD (CC BY-ND 4.0) and TGSIM trajectories: download separately, see showcase/opendd, showcase/tgsim
+data/
+# observed tracks in the replays (openDD: CC BY-ND 4.0; TGSIM: licence unstated): built locally by
+# `python -m showcase opendd|tgsim|tgsim-i90`, not committed
+docs/_static/showcase/replay-*-obs.js

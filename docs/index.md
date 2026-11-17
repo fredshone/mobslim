@@ -10,8 +10,10 @@ files are described in the
     interface, and why they are fast.
   * [Examples](simulation/examples.md): the mobsims from Python and from a config.
   * [Design detail](simulation/design-detail.md): how the engines differ.
-  * [Correctness](simulation/correctness.md): Java MATSim and every MobSlim
-    mobsim, animated side by side on the same scenario.
+  * [Comparison to MATSim](simulation/matsim.md): Java MATSim and MobSlim,
+    animated side by side on the same scenario.
+  * [Correctness](simulation/correctness/index.md): observed traffic at seven
+    roundabouts and on three highway sections, replayed through HermesSim.
   * [Performance](simulation/performance.md): speed and memory against
     MATSim Hermes, QSim and DSim, from 26,000 to 84,000 agents.
 

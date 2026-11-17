@@ -1,15 +1,13 @@
 # Overview
 
-## The controller
+## Vanilla controller
 
 `Controller` runs MATSim's co-evolutionary loop. Every person holds a few
 plans with scores. Each iteration:
 
-1. **(Re)plan.** Each person draws a strategy by weight. Most *select* one of
-   their existing good plans. A share *innovate*: they copy a plan,
-   change it (reroute, shift activity times, change mode) and execute the
-   new plan.
-2. **Simulate** everyone's selected plan once.
+1. **(Re)plan.** Each person draws a strategy by weight. Either they select one of
+   their existing good plans or they *innovate*. Example innovations are reroute, shift times, and change mode.
+2. **Simulate** everyone's plans.
 3. **Score** what happened, and store each executed plan's score.
 4. **Extract travel times** from the simulation, for the next routing.
 
@@ -35,8 +33,8 @@ iteration. Each world, or *strand*, has a different cohort innovating:
   <line x1="150" y1="125" x2="198" y2="125" class="ov-line" marker-end="url(#wv-arrow)"/>
   <rect x="200" y="85" width="130" height="80" rx="8" class="ov-box"/>
   <text x="265" y="115" class="ov-title">Innovate</text>
-  <text x="265" y="135" class="ov-sub">K cohorts, routed</text>
-  <text x="265" y="150" class="ov-sub">in one batch</text>
+  <text x="265" y="135" class="ov-sub">K cohorts: who,</text>
+  <text x="265" y="150" class="ov-sub">how, from which plan</text>
   <rect x="360" y="10" width="200" height="230" rx="10" class="ov-group"/>
   <text x="460" y="32" class="ov-title">Strands (in parallel)</text>
   <rect x="375" y="45" width="170" height="40" rx="6" class="ov-rs"/>
@@ -59,11 +57,15 @@ iteration. Each world, or *strand*, has a different cohort innovating:
 1. **Allocate.** A scheduler picks `K` cohorts of persons who innovate, one
    per strand. People who have waited longest since their last innovation
    are more likely to be picked.
-2. **Innovate** every cohort's new plans at once, routed in one batch.
+2. **Plan** every cohort's innovations: each innovator's strategy and the
+   plan it starts from. Nothing is mutated or routed yet.
 3. **Build the strands.** In strand `j`, cohort `j` executes its new plans
    and everyone else executes a plan that ChangeExpBeta picks from the
    ledger, with strand `j`'s own random draws.
-4. **Simulate and score** the strands in parallel worker processes.
+4. **Innovate, simulate and score** the strands in parallel: strand 0 in
+   the main process, the others in worker processes. Each strand mutates and
+   routes its own cohort's new plans before simulating them, so routing, the
+   costly part of innovation, runs in parallel too.
 5. **Merge** into the ledger. Each executed plan's score is the mean of its
    samples across strands, blended with its old score. New plans join as
    scored plans, and each person's worst plans are dropped back to

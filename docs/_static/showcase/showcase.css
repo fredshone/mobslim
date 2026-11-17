@@ -1,4 +1,4 @@
-/* Showcase pages: corridor animation and benchmark figures. Colours follow furo's light/dark theme. */
+/* Showcase pages: corridor and replay animations and benchmark figures. Colours follow furo's light/dark theme. */
 .mobsim-anim {
   --ma-road: #c9ccd1; --ma-text: #222; --ma-muted: #6b7078;
   --ma-main: #2a6fdb; --ma-side: #e07a1f; --ma-busc: #1b9e5a; --ma-paxc: #8e44ad;
@@ -63,3 +63,20 @@ body[data-theme="dark"] .ov-diagram { --ov-ink: #e8e8e8; --ov-sub: #b9b9b9; --ov
 .ov-dash { stroke-dasharray: 4 3; }
 .ov-ink-fill { fill: var(--ov-ink); }
 .mobsim-anim .ma-stop { display: inline-block; width: 10px; height: 7px; border: 1.5px solid var(--ma-busc); margin-right: 0.3rem; box-sizing: border-box; }
+
+/* replays of observed traffic: observed and simulated side by side (roundabouts) or one above the other (freeways) */
+.replay-anim { --rp-obs: #2a78d6; --rp-sim: #1baf7a; --ma-road-faded: #e8eaed; }
+body[data-theme="dark"] .replay-anim { --rp-obs: #3987e5; --rp-sim: #199e70; --ma-road-faded: #26292e; }
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme="light"]) .replay-anim { --rp-obs: #3987e5; --rp-sim: #199e70; --ma-road-faded: #26292e; }
+}
+.replay-anim.rp-side .od-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+.replay-anim.rp-stack .od-panels { display: grid; grid-template-columns: 1fr; gap: 0.6rem; }
+@media (max-width: 640px) { .replay-anim.rp-side .od-panels { grid-template-columns: 1fr; } }
+.replay-anim .od-panel { margin: 0; min-width: 0; }
+.replay-anim .od-panel figcaption { font-weight: 600; margin-bottom: 0.2rem; font-variant-numeric: tabular-nums; }
+.replay-anim canvas { display: block; width: 100%; border-radius: 6px; background: var(--ma-band); }
+.replay-anim .rp-strip { margin-top: 0.6rem; cursor: pointer; }
+.replay-anim .rp-title { color: var(--ma-muted); }
+.replay-anim .rp-c-obs { background: var(--rp-obs); }
+.replay-anim .rp-c-sim { background: var(--rp-sim); }

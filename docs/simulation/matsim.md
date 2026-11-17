@@ -1,6 +1,10 @@
-# Correctness
+# Comparison to MATSim
 
-The following animations show simulated vehice movements from the various MobSlim and MATSim simulations on the same small scenario with identical initial conditions.
+Every MobSlim mobsim (QSim, AgentSim, HermesSim, PSim and DSim) against
+Java MATSim's QSim, Hermes and DSim on the same small scenario, with
+identical initial conditions: the same network, the same routed plans and
+the same buses. Click a car to compare its door-to-door time across all
+eight simulations.
 
 ## Congested
 
@@ -41,14 +45,15 @@ For each variant, `python -m showcase correctness`:
    [choosing the clock](design-detail.md#choosing-the-clock)).
 4. reads every simulation's MATSim-format `events` XML with **the same
    parser**, and writes the animation data to
-   `docs/_static/showcase/corridor-data.js`. Vehicle positions come from
+   `docs/_static/showcase/corridor-data.js`, one animated row per
+   simulation. Vehicle positions come from
    link entry and exit times alone: a vehicle drives at the link's speed
    limit, then waits at the end of the link, behind the vehicles in front,
    until the moment it left.
 
-It also prints a summary per variant: every car's arrival time compared
-with MATSim QSim, bus arrival times at the stops, and which bus each
-passenger caught.
+It also prints a summary per variant for all eight simulations: every car's
+arrival time compared with MATSim QSim, bus arrival times at the stops, and
+which bus each passenger caught.
 
 Running it needs Java 21+, Maven and a `matsim-libs` checkout, as for the
 verification suite (see `verification/README.md`). It takes about a minute.

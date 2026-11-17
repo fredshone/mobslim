@@ -1,0 +1,165 @@
+{
+ "meta": {
+  "runs": {
+   "1": {
+    "site": "diverge",
+    "duration": 815.3,
+    "vehicles": 1521,
+    "groups": {
+     "left": 780,
+     "right": 741
+    },
+    "s_in": 53.9,
+    "s_out": 197.2,
+    "links": 2,
+    "link_length": 71.6,
+    "minutes": 12
+   },
+   "2": {
+    "site": "weave",
+    "duration": 815.0,
+    "vehicles": 1773,
+    "groups": {
+     "right": 1029,
+     "left": 744
+    },
+    "s_in": 109.9,
+    "s_out": 563.9,
+    "links": 6,
+    "link_length": 75.7,
+    "minutes": 12
+   },
+   "3": {
+    "site": "diverge",
+    "duration": 815.3,
+    "vehicles": 1655,
+    "groups": {
+     "left": 840,
+     "right": 815
+    },
+    "s_in": 37.7,
+    "s_out": 224.6,
+    "links": 2,
+    "link_length": 93.4,
+    "minutes": 12
+   },
+   "4": {
+    "site": "weave",
+    "duration": 814.7,
+    "vehicles": 1812,
+    "groups": {
+     "right": 1015,
+     "left": 797
+    },
+    "s_in": 155.2,
+    "s_out": 501.4,
+    "links": 4,
+    "link_length": 86.5,
+    "minutes": 12
+   },
+   "5": {
+    "site": "diverge",
+    "duration": 620.3,
+    "vehicles": 1234,
+    "groups": {
+     "right": 644,
+     "left": 590
+    },
+    "s_in": 17.6,
+    "s_out": 120.9,
+    "links": 2,
+    "link_length": 51.7,
+    "minutes": 9
+   },
+   "6": {
+    "site": "weave",
+    "duration": 814.1,
+    "vehicles": 1962,
+    "groups": {
+     "right": 1082,
+     "left": 880
+    },
+    "s_in": 149.2,
+    "s_out": 528.4,
+    "links": 5,
+    "link_length": 75.8,
+    "minutes": 12
+   }
+  },
+  "sites": {
+   "diverge": [
+    1,
+    3,
+    5
+   ],
+   "weave": [
+    2,
+    4,
+    6
+   ]
+  },
+  "shown": {
+   "diverge": [
+    3,
+    6
+   ],
+   "weave": [
+    4,
+    6
+   ]
+  },
+  "window": 60.0,
+  "warm": 60.0,
+  "exit": {
+   "left": 1000.0,
+   "right": null
+  },
+  "attribution": "Observed data: Third Generation Simulation Data (TGSIM) I-90/I-94 Stationary Trajectories, Federal Highway Administration, U.S. DOT ITS JPO (data.transportation.gov)."
+ },
+ "headline": [
+  {
+   "what": "Highway I-90/I-94, diverge",
+   "trips": 3235,
+   "obs": 21.2,
+   "sim": 22.3,
+   "error": 4.7
+  },
+  {
+   "what": "Highway I-90/I-94, weave",
+   "trips": 3862,
+   "obs": 50.0,
+   "sim": 46.8,
+   "error": 10.7
+  }
+ ],
+ "groups": [
+  {
+   "what": "Diverge, left lanes",
+   "trips": 1649,
+   "obs": 32.6,
+   "sim": 36.3,
+   "error": 14.1
+  },
+  {
+   "what": "Diverge, right lanes",
+   "trips": 1586,
+   "obs": 9.3,
+   "sim": 7.7,
+   "error": 1.3
+  },
+  {
+   "what": "Weave, left lanes",
+   "trips": 1696,
+   "obs": 76.5,
+   "sim": 81.2,
+   "error": 18.2
+  },
+  {
+   "what": "Weave, right lanes",
+   "trips": 2166,
+   "obs": 29.3,
+   "sim": 19.8,
+   "error": 7.7
+  }
+ ]
+}

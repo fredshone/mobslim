@@ -1,0 +1,58 @@
+{
+ "meta": {
+  "vehicles": 10637,
+  "duration": 7197.6,
+  "lines": {
+   "A": 161.0,
+   "D": 200.0,
+   "M": 291.0,
+   "Q": 500.0,
+   "E": 583.0,
+   "X": 281.0
+  },
+  "view_lines": {
+   "A: 95% of freeway vehicles first seen by": 161.0,
+   "M: 95% of on-ramp vehicles first seen by": 290.8,
+   "D: off-ramp vehicles start to enter its lane (5%)": 200.1,
+   "Q: 99% of the added lane's track points before": 500.0,
+   "E: 95% of freeway vehicles still seen at": 583.5,
+   "X: 95% of off-ramp vehicles still seen at": 281.1
+  },
+  "lengths": {
+   "up": 39.0,
+   "mid": 91.0,
+   "off": 82.1,
+   "merge": 209.0,
+   "down": 83.0,
+   "added": 209.1
+  },
+  "lanes": {
+   "up": 3,
+   "mid": 3,
+   "off": 1,
+   "merge": 4,
+   "down": 3
+  },
+  "capacity_lanes": {
+   "up": 3,
+   "mid": 3,
+   "off": 1,
+   "merge": 3,
+   "down": 3
+  },
+  "minutes": 119,
+  "shown": 31,
+  "window": 60.0,
+  "warm": 60.0,
+  "attribution": "Observed data: Third Generation Simulation Data (TGSIM) I-395 Trajectories, Federal Highway Administration, U.S. DOT ITS JPO (data.transportation.gov)."
+ },
+ "headline": [
+  {
+   "what": "Highway I-395",
+   "trips": 9541,
+   "obs": 38.0,
+   "sim": 38.4,
+   "error": 5.1
+  }
+ ]
+}

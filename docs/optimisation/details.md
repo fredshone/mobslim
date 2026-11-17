@@ -33,9 +33,7 @@ cores. Hyperthreads count for less than cores (see
 innovators before simulating them, so routing runs in parallel too. Each
 strand routes on its share of the logical CPUs (logical CPUs divided by
 workers plus one, for the main process; `ProcessLoom(router_threads=...)`
-or `$MOBSLIM_ROUTER_THREADS` to override). Routing waits on memory, so
-while the other strands simulate, a second routing thread on each core's
-hyperthread routes about twice as fast. Only the choice of who innovates,
+or `$MOBSLIM_ROUTER_THREADS` to override). Only the choice of who innovates,
 with which strategy and from which plan, is made in the main process.
 
 **Pool size.** The pool's size is independent of the number of strands: jobs
@@ -56,6 +54,8 @@ guard. `ProcessLoom(start_method="fork")` avoids the guard on Linux.
 
 **Limits.** Strategies run through the vectorised replanning path. Custom
 innovative strategies without `mutate_batch` modules run per person, which
-is slower. Each iteration waits for all its strands; there is no
-asynchronous loop yet, but strands are built from the ledger alone and carry
-the ledger version they were built from, ready for one.
+is slower. `Weave` waits for all its strands each iteration;
+[`AsyncWeave`](examples.md#dont-wait-for-the-slowest-strand) does not.
+Routing a strand's innovators usually takes longer than simulating it, and
+is repeated in every strand, so the routing work per iteration grows with
+`strands × innovation_rate`.

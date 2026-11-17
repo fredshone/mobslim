@@ -1,0 +1,50 @@
+{
+ "meta": {
+  "site": "rdb4",
+  "recordings": 69,
+  "held_out": [
+   "rdb4_267",
+   "rdb4_276",
+   "rdb4_281",
+   "rdb4_285",
+   "rdb4_288",
+   "rdb4_293",
+   "rdb4_300",
+   "rdb4_320",
+   "rdb4_325",
+   "rdb4_327"
+  ],
+  "shown": "rdb4_325",
+  "tracked": 6763,
+  "matched": 6594,
+  "cuts": {
+   "129": [
+    18.5,
+    null
+   ],
+   "125": [
+    20.5,
+    null
+   ],
+   "130": [
+    null,
+    21.5
+   ],
+   "123": [
+    null,
+    21.0
+   ]
+  },
+  "outside": [],
+  "attribution": "Observed data: openDD (Breuer et al., 2020, \"openDD: A Large-Scale Roundabout Drone Dataset\", ITSC), roundabout rdb4, CC BY-ND 4.0."
+ },
+ "headline": [
+  {
+   "what": "Roundabout rdb4",
+   "trips": 847,
+   "obs": 13.5,
+   "sim": 13.9,
+   "error": 1.7
+  }
+ ]
+}

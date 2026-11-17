@@ -37,8 +37,10 @@ All MobSlim runs use single-threaded HermesSim.
 
 Above each chart is every run's cadence over its first 10 seconds: one bar
 per mobsim run, with one lane per process running them at the same time. The gaps
-are time spent on anything else: replanning, merging, and, for the synchronous
-`Weave`, waiting for the slowest strand. More strands simulate more plans at
+are time spent on anything else: mostly each strand routing its innovators
+(with 8 strands, about 0.45 s against 0.17 s of mobsim per iteration), then
+the main process building jobs and merging, and, for the synchronous `Weave`,
+waiting for the slowest strand. More strands simulate more plans at
 once, but each iteration takes longer.
 
 ```{image} ../_static/showcase/weaving_weaving_time_light.svg

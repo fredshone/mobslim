@@ -76,8 +76,8 @@ def case_table(name: str, case: dict) -> str:
 
 
 def headline(results: dict) -> str:
-    lines = ["| Scenario | MATSim Hermes | Fastest MobSlim | Speed-up "
-             "| Peak memory: MATSim Hermes → that MobSlim |", "|---|---|---|---|---|"]
+    lines = ["| Scenario | Agents | MATSim Hermes | Fastest MobSlim | Speed-up "
+             "| Peak memory: MATSim Hermes → that MobSlim |", "|---|--:|---|---|---|---|"]
     for c in CASES:
         case = results["cases"].get(c.name)
         if not case:
@@ -89,7 +89,7 @@ def headline(results: dict) -> str:
         if not ms or "time_s" not in ref:
             continue
         label, t, best = min(ms, key=lambda x: x[1])
-        lines.append(f"| {c.name} | {_t(ref['time_s'])} "
+        lines.append(f"| {c.name} | {best['persons']:,} | {_t(ref['time_s'])} "
                      f"| {_t(t)} ({label.removeprefix('MobSlim ')}) "
                      f"| **{ref['time_s'] / t:.1f}×** "
                      f"| {_mb(ref['peak_rss_mb'])} → {_mb(best['peak_rss_mb'])} |")

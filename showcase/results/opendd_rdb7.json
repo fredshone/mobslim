@@ -1,0 +1,71 @@
+{
+ "meta": {
+  "site": "rdb7",
+  "recordings": 57,
+  "held_out": [
+   "rdb7_447",
+   "rdb7_451",
+   "rdb7_462",
+   "rdb7_465",
+   "rdb7_485",
+   "rdb7_491",
+   "rdb7_492",
+   "rdb7_493",
+   "rdb7_498"
+  ],
+  "shown": "rdb7_485",
+  "tracked": 7783,
+  "matched": 7723,
+  "cuts": {
+   "188": [
+    13.5,
+    null
+   ],
+   "204": [
+    20.5,
+    null
+   ],
+   "183": [
+    5.0,
+    null
+   ],
+   "205": [
+    7.5,
+    null
+   ],
+   "202": [
+    null,
+    12.5
+   ],
+   "185": [
+    null,
+    15.5
+   ],
+   "192": [
+    null,
+    19.5
+   ],
+   "197": [
+    null,
+    16.5
+   ]
+  },
+  "outside": [
+   182,
+   194,
+   196,
+   206,
+   207
+  ],
+  "attribution": "Observed data: openDD (Breuer et al., 2020, \"openDD: A Large-Scale Roundabout Drone Dataset\", ITSC), roundabout rdb7, CC BY-ND 4.0."
+ },
+ "headline": [
+  {
+   "what": "Roundabout rdb7",
+   "trips": 1118,
+   "obs": 11.0,
+   "sim": 12.9,
+   "error": 2.6
+  }
+ ]
+}

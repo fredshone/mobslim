@@ -49,7 +49,9 @@ MobSlim provides a variety of differently designed simulation engines.
 * **[Overview](overview.md)** and core design features.
 * **[Examples](examples.md)**: the API and configuration options, in code.
 * **[Performance](performance.md)**: we are up to 18x faster and use up to 90% less memory than MATSim Hermes in our tested scenarios.
-* **[Correctness](correctness.md)**: simulations are comparable to MATSim.
+* **[Comparison to MATSim](matsim.md)**: MobSlim and MATSim, animated side by side on the same scenario.
+* **[Correctness](correctness/index.md)**: observed traffic replayed through HermesSim, against drone and
+  camera recordings of seven roundabouts and three highway sections.
 * **[Design detail](design-detail.md)**: key differences.
 
 
@@ -59,6 +61,7 @@ MobSlim provides a variety of differently designed simulation engines.
 overview
 examples
 performance
-correctness
+matsim
+correctness/index
 design-detail
 ```

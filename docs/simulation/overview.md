@@ -65,7 +65,7 @@ Where possible data is held as python numpy arrays to allow easy parallelisation
 
 * **Plans go in as arrays.** `PlanBatch` encodes selected plans as activity ends, modes, and routes as packed link indices.
 * **Trajectories come out as arrays.** Each vehicle's link entry and exit times, and each activity's start and end. Travel times, scores and experienced plans are numpy operations.
-* **Events are optional.** MATSim-style events (`entered link`, `PersonEntersVehicle` and so on) are built only for handlers that ask for them, for example to write the `events.xml` used on the [correctness page](correctness.md). A normal iteration builds none.
+* **Events are optional.** MATSim-style events (`entered link`, `PersonEntersVehicle` and so on) are built only for handlers that ask for them, for example to write the `events.xml` used on the [comparison to MATSim](matsim.md). A normal iteration builds none.
 
 ## Verification
 
