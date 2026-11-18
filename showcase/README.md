@@ -28,7 +28,9 @@ results without rerunning anything. `python -m showcase networks` redraws the ne
 **Requirements.** Java 25+ (a JDK, not just a JRE: MATSim's DSim weekly
 build needs 25, the rest 21), Maven and a `matsim-libs` checkout, as for
 `verification/` (see its README): the MATSim side reuses its runner and
-cache. Sioux Falls comes from `matsim-libs/examples/scenarios/siouxfalls-2014`.
+cache. Open Berlin v6.4 (network, schedule, facilities, config and the 1% and 10%
+plans, about 1.2 GB) is downloaded from VSP's public SVN on first use
+(`showcase/open_berlin.py`) into `showcase/output/perf/open-berlin-v6.4/download/`.
 The grids are slightly irregular (each node moved up to 10% of the spacing,
 so link lengths vary from about 160 to 240 m); their inputs are remade when
 the case or the generator changes. The full `perf` run takes several hours on

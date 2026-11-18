@@ -6,4 +6,5 @@
 | grid-80-congested | 104,960 | 10.1 s | 1.13 s (HermesSim) | **8.9×** | 6.34 GB → 653 MB |
 | grid-160 | 419,840 | 109 s | 8.01 s (PSim, 16 threads) | **13.6×** | 40.68 GB → 3.18 GB |
 | grid-160-congested | 419,840 | 73.7 s | 8.48 s (PSim, 16 threads) | **8.7×** | 38.12 GB → 3.28 GB |
-| siouxfalls | 84,110 | 1.60 s | 185 ms (HermesSim) | **8.7×** | 3.58 GB → 553 MB |
+| open-berlin-1pct | 52,263 | 9.54 s | 1.94 s (HermesSim) | **4.9×** | 9.97 GB → 3.55 GB |
+| open-berlin-10pct | 526,111 | 91.8 s | 7.63 s (PSim, 16 threads) | **12.0×** | 49.27 GB → 7.26 GB |

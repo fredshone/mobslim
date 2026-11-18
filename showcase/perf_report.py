@@ -63,15 +63,16 @@ def _ordered(runs: dict) -> list[tuple[str, dict]]:
 def case_table(name: str, case: dict) -> str:
     runs = case["runs"]
     ref = runs.get(REF, {}).get("time_s")
-    lines = ["| Simulation | Mobsim time | vs MATSim Hermes | Peak memory (whole process) |",
-             "|---|---|---|---|"]
+    lines = ["| Simulation | Mobsim time | vs MATSim Hermes | Peak memory (whole process) "
+             "| Stuck |", "|---|---|---|---|--:|"]
     for label, r in runs.items():
         if "error" in r:
-            lines.append(f"| {label} | failed | | |")
+            lines.append(f"| {label} | failed | | | |")
             continue
         t = r["time_s"] + (r.get("post_s") or 0)
+        stuck = f"{r['stuck']:,}" if r.get("stuck") is not None else "–"  # not counted: –
         lines.append(f"| {label} | {_t(t)} | {_speedup(ref, t) if label != REF else 'reference'} "
-                     f"| {_mb(r['peak_rss_mb'])} |")
+                     f"| {_mb(r['peak_rss_mb'])} | {stuck} |")
     return "\n".join(lines) + "\n"
 
 

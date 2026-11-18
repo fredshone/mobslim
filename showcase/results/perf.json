@@ -1,1271 +1,1380 @@
 {
- "cases": {
-  "grid-40": {
-   "description": "40x40 grid: 6,560 links, 26,240 car commuters",
-   "runs": {
-    "MATSim QSim": {
-     "family": "matsim",
-     "time_s": 3.377309091,
-     "runs_s": [
-      3.760441891,
-      3.377309091,
-      3.413979309
-     ],
-     "peak_rss_mb": 1420.11328125,
-     "process_wall_s": 13.574525913922116,
-     "xmx": "10g"
+  "cases": {
+    "grid-40": {
+      "description": "40x40 grid: 6,560 links, 26,240 car commuters",
+      "runs": {
+        "MATSim QSim": {
+          "family": "matsim",
+          "time_s": 3.377309091,
+          "runs_s": [
+            3.760441891,
+            3.377309091,
+            3.413979309
+          ],
+          "peak_rss_mb": 1420.11328125,
+          "process_wall_s": 13.574525913922116,
+          "xmx": "10g"
+        },
+        "MATSim Hermes": {
+          "family": "matsim",
+          "time_s": 1.084563255,
+          "runs_s": [
+            1.311287769,
+            1.084563255,
+            1.105142658
+          ],
+          "peak_rss_mb": 1575.0078125,
+          "process_wall_s": 6.580967256100848,
+          "xmx": "10g"
+        },
+        "MATSim DSim, 1 thread": {
+          "family": "matsim",
+          "time_s": 3.454110345,
+          "runs_s": [
+            3.858659385,
+            3.610428681,
+            3.454110345
+          ],
+          "peak_rss_mb": 1587.65625,
+          "process_wall_s": 16.54123723716475,
+          "xmx": "10g"
+        },
+        "MATSim DSim, 16 threads": {
+          "family": "matsim",
+          "time_s": 3.66949594,
+          "runs_s": [
+            6.02604553,
+            3.66949594,
+            5.017068448
+          ],
+          "peak_rss_mb": 2268.28125,
+          "process_wall_s": 20.399211406940594,
+          "xmx": "10g"
+        },
+        "MobSlim QSim": {
+          "family": "mobslim",
+          "time_s": 3.054514497052878,
+          "runs_s": [
+            3.0746320569887757,
+            3.054514497052878,
+            3.0661540790461004
+          ],
+          "post_s": 0.024106970988214016,
+          "load_s": 0.4032801149878651,
+          "rss_before_mobsim_mb": 187.453125,
+          "mobsim_peak_mb": 181.703125,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 376.14453125,
+          "process_wall_s": 9.97397331520915
+        },
+        "MobSlim AgentSim": {
+          "family": "mobslim",
+          "time_s": 2.067582641961053,
+          "runs_s": [
+            2.0971778391394764,
+            2.067582641961053,
+            2.076168118044734
+          ],
+          "post_s": 0.02700743800960481,
+          "load_s": 0.4141854450572282,
+          "rss_before_mobsim_mb": 187.08203125,
+          "mobsim_peak_mb": 127.29296875,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 319.87109375,
+          "process_wall_s": 7.072858375031501
+        },
+        "MobSlim HermesSim": {
+          "family": "mobslim",
+          "time_s": 0.11489653494209051,
+          "runs_s": [
+            0.11489653494209051,
+            0.11563200294040143,
+            0.11544931796379387
+          ],
+          "post_s": 0.012109091971069574,
+          "load_s": 0.40227706683799624,
+          "rss_before_mobsim_mb": 187.21484375,
+          "mobsim_peak_mb": 19.890625,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 222.0703125,
+          "process_wall_s": 1.1054986591916531
+        },
+        "MobSlim PSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 0.24726360803470016,
+          "runs_s": [
+            0.2526309872046113,
+            0.24726360803470016,
+            0.2491119501646608
+          ],
+          "post_s": 0.011456537060439587,
+          "load_s": 0.3994246560614556,
+          "rss_before_mobsim_mb": 187.265625,
+          "mobsim_peak_mb": 27.3671875,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 231.64453125,
+          "process_wall_s": 1.5068258300889283
+        },
+        "MobSlim PSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 0.14813162107020617,
+          "runs_s": [
+            0.1493067010305822,
+            0.14813162107020617,
+            0.15077752899378538
+          ],
+          "post_s": 0.01276376680471003,
+          "load_s": 0.40176315209828317,
+          "rss_before_mobsim_mb": 187.48828125,
+          "mobsim_peak_mb": 48.0078125,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 257.8671875,
+          "process_wall_s": 1.2106303651817143
+        },
+        "MobSlim DSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 0.36065720906481147,
+          "runs_s": [
+            0.3679554790724069,
+            0.36662194901145995,
+            0.36065720906481147
+          ],
+          "post_s": 0.012438118923455477,
+          "load_s": 0.39945374499075115,
+          "rss_before_mobsim_mb": 188.5234375,
+          "mobsim_peak_mb": 28.11328125,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 234.7734375,
+          "process_wall_s": 1.8535283990204334
+        },
+        "MobSlim DSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 0.187162364134565,
+          "runs_s": [
+            0.21284503093920648,
+            0.21942633716389537,
+            0.187162364134565
+          ],
+          "post_s": 0.013654074864462018,
+          "load_s": 0.4006503389682621,
+          "rss_before_mobsim_mb": 186.9375,
+          "mobsim_peak_mb": 40.44921875,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 235.1953125,
+          "process_wall_s": 1.3858434150461107
+        }
+      }
     },
-    "MATSim Hermes": {
-     "family": "matsim",
-     "time_s": 1.084563255,
-     "runs_s": [
-      1.311287769,
-      1.084563255,
-      1.105142658
-     ],
-     "peak_rss_mb": 1575.0078125,
-     "process_wall_s": 6.580967256100848,
-     "xmx": "10g"
+    "grid-40-congested": {
+      "description": "the same at capacity x0.3: queues and spillback",
+      "runs": {
+        "MATSim QSim": {
+          "family": "matsim",
+          "time_s": 4.5736762,
+          "runs_s": [
+            5.144849079,
+            4.5736762,
+            4.600097781
+          ],
+          "peak_rss_mb": 1459.3515625,
+          "process_wall_s": 17.21848910395056,
+          "xmx": "10g"
+        },
+        "MATSim Hermes": {
+          "family": "matsim",
+          "time_s": 0.934012608,
+          "runs_s": [
+            1.329750174,
+            1.05415213,
+            0.934012608
+          ],
+          "peak_rss_mb": 1632.98046875,
+          "process_wall_s": 6.183973581995815,
+          "xmx": "10g"
+        },
+        "MATSim DSim, 1 thread": {
+          "family": "matsim",
+          "time_s": 4.094697389,
+          "runs_s": [
+            4.481696609,
+            4.219018311,
+            4.094697389
+          ],
+          "peak_rss_mb": 1598.01953125,
+          "process_wall_s": 18.39213847089559,
+          "xmx": "10g"
+        },
+        "MATSim DSim, 16 threads": {
+          "family": "matsim",
+          "time_s": 4.62596327,
+          "runs_s": [
+            6.558062658,
+            6.2039872,
+            4.62596327
+          ],
+          "peak_rss_mb": 2406.453125,
+          "process_wall_s": 23.072555399034172,
+          "xmx": "10g"
+        },
+        "MobSlim QSim": {
+          "family": "mobslim",
+          "time_s": 3.1484626980964094,
+          "runs_s": [
+            3.1793288921471685,
+            3.1581211460288614,
+            3.1484626980964094
+          ],
+          "post_s": 0.025354925077408552,
+          "load_s": 0.40325198019854724,
+          "rss_before_mobsim_mb": 188.33203125,
+          "mobsim_peak_mb": 181.046875,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 376.5859375,
+          "process_wall_s": 10.270846429048106
+        },
+        "MobSlim AgentSim": {
+          "family": "mobslim",
+          "time_s": 2.3223948841914535,
+          "runs_s": [
+            2.33470038510859,
+            2.3404069249518216,
+            2.3223948841914535
+          ],
+          "post_s": 0.025255671003833413,
+          "load_s": 0.40081176604144275,
+          "rss_before_mobsim_mb": 187.515625,
+          "mobsim_peak_mb": 127.15625,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 320.46875,
+          "process_wall_s": 7.773358399048448
+        },
+        "MobSlim HermesSim": {
+          "family": "mobslim",
+          "time_s": 0.12270389287732542,
+          "runs_s": [
+            0.12270389287732542,
+            0.12374092498794198,
+            0.1241765150334686
+          ],
+          "post_s": 0.013169385958462954,
+          "load_s": 0.4035334950312972,
+          "rss_before_mobsim_mb": 187.16015625,
+          "mobsim_peak_mb": 30.72265625,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 227.265625,
+          "process_wall_s": 1.1363406858872622
+        },
+        "MobSlim PSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 0.2615725230425596,
+          "runs_s": [
+            0.2706064300145954,
+            0.2641801049467176,
+            0.2615725230425596
+          ],
+          "post_s": 0.012423382140696049,
+          "load_s": 0.403062148950994,
+          "rss_before_mobsim_mb": 188.34765625,
+          "mobsim_peak_mb": 36.6875,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 236.421875,
+          "process_wall_s": 1.5578509820625186
+        },
+        "MobSlim PSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 0.24562813993543386,
+          "runs_s": [
+            0.2973433448933065,
+            0.24562813993543386,
+            0.28189114504493773
+          ],
+          "post_s": 0.012919744942337275,
+          "load_s": 0.40133168012835085,
+          "rss_before_mobsim_mb": 187.296875,
+          "mobsim_peak_mb": 69.62109375,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 277.21484375,
+          "process_wall_s": 1.5861057271249592
+        },
+        "MobSlim DSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 0.5596003960818052,
+          "runs_s": [
+            0.5638891921844333,
+            0.5596003960818052,
+            0.5601658718660474
+          ],
+          "post_s": 0.013539996929466724,
+          "load_s": 0.40147575503215194,
+          "rss_before_mobsim_mb": 188.48046875,
+          "mobsim_peak_mb": 38.45703125,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 241.31640625,
+          "process_wall_s": 2.445776244159788
+        },
+        "MobSlim DSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 0.26785310986451805,
+          "runs_s": [
+            0.27954121096991,
+            0.26785310986451805,
+            0.2717471420764923
+          ],
+          "post_s": 0.015095868846401572,
+          "load_s": 0.4030708149075508,
+          "rss_before_mobsim_mb": 187.46875,
+          "mobsim_peak_mb": 45.78125,
+          "persons": 26240,
+          "links": 6560,
+          "stuck": 0,
+          "peak_rss_mb": 246.04296875,
+          "process_wall_s": 1.5889255199581385
+        }
+      }
     },
-    "MATSim DSim, 1 thread": {
-     "family": "matsim",
-     "time_s": 3.454110345,
-     "runs_s": [
-      3.858659385,
-      3.610428681,
-      3.454110345
-     ],
-     "peak_rss_mb": 1587.65625,
-     "process_wall_s": 16.54123723716475,
-     "xmx": "10g"
+    "grid-80": {
+      "description": "80x80 grid: 25,920 links, 104,960 car commuters",
+      "runs": {
+        "MATSim QSim": {
+          "family": "matsim",
+          "time_s": 39.876035685,
+          "runs_s": [
+            41.182323418,
+            39.876035685,
+            40.617377106
+          ],
+          "peak_rss_mb": 2528.62890625,
+          "process_wall_s": 127.57227251888253,
+          "xmx": "10g"
+        },
+        "MATSim Hermes": {
+          "family": "matsim",
+          "time_s": 11.375640555,
+          "runs_s": [
+            11.688854697,
+            11.55377232,
+            11.375640555
+          ],
+          "peak_rss_mb": 6785.046875,
+          "process_wall_s": 40.20302033587359,
+          "xmx": "10g"
+        },
+        "MATSim DSim, 1 thread": {
+          "family": "matsim",
+          "time_s": 39.442768187,
+          "runs_s": [
+            40.396558675,
+            40.181738543,
+            39.442768187
+          ],
+          "peak_rss_mb": 2529.55078125,
+          "process_wall_s": 141.8708131320309,
+          "xmx": "10g"
+        },
+        "MATSim DSim, 16 threads": {
+          "family": "matsim",
+          "time_s": 13.535503931,
+          "runs_s": [
+            14.16755896,
+            13.535503931,
+            14.337770685
+          ],
+          "peak_rss_mb": 4689.69140625,
+          "process_wall_s": 64.04316474799998,
+          "xmx": "10g"
+        },
+        "MobSlim QSim": {
+          "family": "mobslim",
+          "time_s": 34.78174007218331,
+          "runs_s": [
+            34.78174007218331,
+            34.82342802500352,
+            34.87246614997275
+          ],
+          "post_s": 0.24100527097471058,
+          "load_s": 1.833327000029385,
+          "rss_before_mobsim_mb": 362.28515625,
+          "mobsim_peak_mb": 1349.8984375,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 1720.13671875,
+          "process_wall_s": 106.94971824111417
+        },
+        "MobSlim AgentSim": {
+          "family": "mobslim",
+          "time_s": 27.557936730096117,
+          "runs_s": [
+            27.599165417952463,
+            27.557936730096117,
+            27.703964236890897
+          ],
+          "post_s": 0.2414010539650917,
+          "load_s": 1.8099718489684165,
+          "rss_before_mobsim_mb": 352.765625,
+          "mobsim_peak_mb": 959.22265625,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 1319.796875,
+          "process_wall_s": 85.2873417600058
+        },
+        "MobSlim HermesSim": {
+          "family": "mobslim",
+          "time_s": 0.9995730710215867,
+          "runs_s": [
+            0.9995730710215867,
+            1.0044300849549472,
+            1.0103698319289833
+          ],
+          "post_s": 0.06167409894987941,
+          "load_s": 1.8029657150618732,
+          "rss_before_mobsim_mb": 353.5546875,
+          "mobsim_peak_mb": 228.26953125,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 643.05078125,
+          "process_wall_s": 5.2586231250315905
+        },
+        "MobSlim PSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 2.2669760501012206,
+          "runs_s": [
+            2.2962891350034624,
+            2.281949742231518,
+            2.2669760501012206
+          ],
+          "post_s": 0.06167881586588919,
+          "load_s": 1.8002326900605112,
+          "rss_before_mobsim_mb": 354.38671875,
+          "mobsim_peak_mb": 289.28125,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 708.125,
+          "process_wall_s": 9.095732297981158
+        },
+        "MobSlim PSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 0.8477738969959319,
+          "runs_s": [
+            0.8680472110863775,
+            0.8642427858430892,
+            0.8477738969959319
+          ],
+          "post_s": 0.05863940599374473,
+          "load_s": 1.7869213719386607,
+          "rss_before_mobsim_mb": 354.21875,
+          "mobsim_peak_mb": 283.8984375,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 727.0859375,
+          "process_wall_s": 4.80714139319025
+        },
+        "MobSlim DSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 4.118198025971651,
+          "runs_s": [
+            4.123418821953237,
+            4.118198025971651,
+            4.122114018071443
+          ],
+          "post_s": 0.06779759307391942,
+          "load_s": 1.8083847989328206,
+          "rss_before_mobsim_mb": 351.21875,
+          "mobsim_peak_mb": 183.63671875,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 543.140625,
+          "process_wall_s": 14.615301514044404
+        },
+        "MobSlim DSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 1.1225679779890925,
+          "runs_s": [
+            1.1585696069523692,
+            1.128229791065678,
+            1.1225679779890925
+          ],
+          "post_s": 0.06146448105573654,
+          "load_s": 1.807798895984888,
+          "rss_before_mobsim_mb": 351.609375,
+          "mobsim_peak_mb": 269.140625,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 670.8671875,
+          "process_wall_s": 5.665953893912956
+        }
+      }
     },
-    "MATSim DSim, 16 threads": {
-     "family": "matsim",
-     "time_s": 3.66949594,
-     "runs_s": [
-      6.02604553,
-      3.66949594,
-      5.017068448
-     ],
-     "peak_rss_mb": 2268.28125,
-     "process_wall_s": 20.399211406940594,
-     "xmx": "10g"
+    "grid-80-congested": {
+      "description": "the same at capacity x0.3: queues and spillback",
+      "runs": {
+        "MATSim QSim": {
+          "family": "matsim",
+          "time_s": 48.42331857,
+          "runs_s": [
+            49.221469568,
+            48.42331857,
+            49.048920736
+          ],
+          "peak_rss_mb": 2547.16796875,
+          "process_wall_s": 152.916241889121,
+          "xmx": "10g"
+        },
+        "MATSim Hermes": {
+          "family": "matsim",
+          "time_s": 10.05030617,
+          "runs_s": [
+            10.899665644,
+            10.187979724,
+            10.05030617
+          ],
+          "peak_rss_mb": 6492.78515625,
+          "process_wall_s": 36.70014333096333,
+          "xmx": "10g"
+        },
+        "MATSim DSim, 1 thread": {
+          "family": "matsim",
+          "time_s": 38.595155224,
+          "runs_s": [
+            39.267530339,
+            39.402531586,
+            38.595155224
+          ],
+          "peak_rss_mb": 2349.8125,
+          "process_wall_s": 138.2998625470791,
+          "xmx": "10g"
+        },
+        "MATSim DSim, 16 threads": {
+          "family": "matsim",
+          "time_s": 15.512745279,
+          "runs_s": [
+            15.883690427,
+            15.546418412,
+            15.512745279
+          ],
+          "peak_rss_mb": 4258.0859375,
+          "process_wall_s": 68.00217225588858,
+          "xmx": "10g"
+        },
+        "MobSlim QSim": {
+          "family": "mobslim",
+          "time_s": 33.4870816571638,
+          "runs_s": [
+            33.509195271879435,
+            33.4870816571638,
+            33.61640160996467
+          ],
+          "post_s": 0.28942977800033987,
+          "load_s": 1.8129233119543642,
+          "rss_before_mobsim_mb": 353.46875,
+          "mobsim_peak_mb": 1351.4375,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 1712.5859375,
+          "process_wall_s": 103.10534369712695
+        },
+        "MobSlim AgentSim": {
+          "family": "mobslim",
+          "time_s": 25.68197438493371,
+          "runs_s": [
+            25.68197438493371,
+            25.79438588488847,
+            25.750093487091362
+          ],
+          "post_s": 0.2857643358875066,
+          "load_s": 1.793010971043259,
+          "rss_before_mobsim_mb": 362.72265625,
+          "mobsim_peak_mb": 957.953125,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 1328.44140625,
+          "process_wall_s": 79.67674725013785
+        },
+        "MobSlim HermesSim": {
+          "family": "mobslim",
+          "time_s": 1.0561828990466893,
+          "runs_s": [
+            1.0561828990466893,
+            1.0705551649443805,
+            1.0651316079311073
+          ],
+          "post_s": 0.07837882288731635,
+          "load_s": 1.8048178439494222,
+          "rss_before_mobsim_mb": 354.6796875,
+          "mobsim_peak_mb": 258.83984375,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 652.50390625,
+          "process_wall_s": 5.456727009033784
+        },
+        "MobSlim PSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 2.38768108910881,
+          "runs_s": [
+            2.3896265579387546,
+            2.38768108910881,
+            2.391255648806691
+          ],
+          "post_s": 0.07613549707457423,
+          "load_s": 1.801901085069403,
+          "rss_before_mobsim_mb": 361.64453125,
+          "mobsim_peak_mb": 300.03125,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 705.61328125,
+          "process_wall_s": 9.43444256996736
+        },
+        "MobSlim PSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 1.233885165071115,
+          "runs_s": [
+            1.2713732270058244,
+            1.233885165071115,
+            1.2385047159623355
+          ],
+          "post_s": 0.06686598295345902,
+          "load_s": 1.8098075489979237,
+          "rss_before_mobsim_mb": 354.953125,
+          "mobsim_peak_mb": 363.08984375,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 786.85546875,
+          "process_wall_s": 6.007055800175294
+        },
+        "MobSlim DSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 5.708833433920518,
+          "runs_s": [
+            5.86533214780502,
+            5.708833433920518,
+            5.711889564990997
+          ],
+          "post_s": 0.08160556084476411,
+          "load_s": 1.8077624321449548,
+          "rss_before_mobsim_mb": 363.59375,
+          "mobsim_peak_mb": 230.02734375,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 611.81640625,
+          "process_wall_s": 19.551232993835583
+        },
+        "MobSlim DSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 1.5788015201687813,
+          "runs_s": [
+            1.5983992859255522,
+            1.5788015201687813,
+            1.6317837398964912
+          ],
+          "post_s": 0.06681472598575056,
+          "load_s": 1.789940773975104,
+          "rss_before_mobsim_mb": 351.6171875,
+          "mobsim_peak_mb": 319.5859375,
+          "persons": 104960,
+          "links": 25920,
+          "stuck": 0,
+          "peak_rss_mb": 703.171875,
+          "process_wall_s": 7.055666400119662
+        }
+      }
     },
-    "MobSlim QSim": {
-     "family": "mobslim",
-     "time_s": 3.054514497052878,
-     "runs_s": [
-      3.0746320569887757,
-      3.054514497052878,
-      3.0661540790461004
-     ],
-     "post_s": 0.024106970988214016,
-     "load_s": 0.4032801149878651,
-     "rss_before_mobsim_mb": 187.453125,
-     "mobsim_peak_mb": 181.703125,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 376.14453125,
-     "process_wall_s": 9.97397331520915
+    "grid-160": {
+      "description": "160x160 grid: 103,040 links, 419,840 car commuters",
+      "runs": {
+        "MATSim QSim": {
+          "family": "matsim",
+          "time_s": 524.343309722,
+          "runs_s": [
+            535.002583617,
+            524.343309722,
+            545.839231949
+          ],
+          "peak_rss_mb": 15616.6875,
+          "process_wall_s": 1631.2749322571326,
+          "xmx": "40g"
+        },
+        "MATSim Hermes": {
+          "family": "matsim",
+          "time_s": 109.222973725,
+          "runs_s": [
+            117.731648723,
+            109.222973725,
+            111.786233273
+          ],
+          "peak_rss_mb": 41659.46875,
+          "process_wall_s": 357.073293015128,
+          "xmx": "40g"
+        },
+        "MATSim DSim, 1 thread": {
+          "family": "matsim",
+          "time_s": 483.159269622,
+          "runs_s": [
+            483.159269622,
+            491.024377774,
+            487.984934538
+          ],
+          "peak_rss_mb": 15490.71875,
+          "process_wall_s": 1710.3679017219692,
+          "xmx": "40g"
+        },
+        "MATSim DSim, 16 threads": {
+          "family": "matsim",
+          "time_s": 94.573057481,
+          "runs_s": [
+            97.087332889,
+            95.271906539,
+            94.573057481
+          ],
+          "peak_rss_mb": 22198.4140625,
+          "process_wall_s": 540.4604850290343,
+          "xmx": "40g"
+        },
+        "MobSlim QSim": {
+          "family": "mobslim",
+          "time_s": 388.9785700519569,
+          "runs_s": [
+            388.9785700519569
+          ],
+          "post_s": 2.798081882065162,
+          "load_s": 8.313702502055094,
+          "rss_before_mobsim_mb": 1435.73046875,
+          "mobsim_peak_mb": 9856.31640625,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 11292.046875,
+          "process_wall_s": 400.5458329250105
+        },
+        "MobSlim AgentSim": {
+          "family": "mobslim",
+          "time_s": 358.8607916771434,
+          "runs_s": [
+            358.8607916771434
+          ],
+          "post_s": 2.801099473843351,
+          "load_s": 8.22524618008174,
+          "rss_before_mobsim_mb": 1432.640625,
+          "mobsim_peak_mb": 6950.45703125,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 8383.09765625,
+          "process_wall_s": 370.30714367097244
+        },
+        "MobSlim HermesSim": {
+          "family": "mobslim",
+          "time_s": 12.12275685602799,
+          "runs_s": [
+            12.12275685602799,
+            12.212545816088095,
+            12.231589317088947
+          ],
+          "post_s": 0.3763054059818387,
+          "load_s": 8.207138287834823,
+          "rss_before_mobsim_mb": 1435.03125,
+          "mobsim_peak_mb": 1319.25390625,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 2778.62109375,
+          "process_wall_s": 45.71884092804976
+        },
+        "MobSlim PSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 31.698879793984815,
+          "runs_s": [
+            31.885550876148045,
+            31.698879793984815,
+            31.76162680797279
+          ],
+          "post_s": 0.39929894101805985,
+          "load_s": 8.221245200140402,
+          "rss_before_mobsim_mb": 1502.4296875,
+          "mobsim_peak_mb": 1502.875,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 3128.3984375,
+          "process_wall_s": 104.44591271597892
+        },
+        "MobSlim PSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 7.7119768229313195,
+          "runs_s": [
+            7.853183690924197,
+            7.763348998967558,
+            7.7119768229313195
+          ],
+          "post_s": 0.30176358693279326,
+          "load_s": 8.268700822954997,
+          "rss_before_mobsim_mb": 1436.4375,
+          "mobsim_peak_mb": 1388.2890625,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 3255.66796875,
+          "process_wall_s": 32.41106168390252
+        },
+        "MobSlim DSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 57.136277778074145,
+          "runs_s": [
+            57.136277778074145,
+            57.1713271769695,
+            57.29495583497919
+          ],
+          "post_s": 0.36139055201783776,
+          "load_s": 8.229757531080395,
+          "rss_before_mobsim_mb": 1499.8828125,
+          "mobsim_peak_mb": 1106.37109375,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 2670.734375,
+          "process_wall_s": 180.69312191009521
+        },
+        "MobSlim DSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 11.876697216881439,
+          "runs_s": [
+            12.146376395132393,
+            12.053625140106305,
+            11.876697216881439
+          ],
+          "post_s": 0.30434622382745147,
+          "load_s": 8.398127441992983,
+          "rss_before_mobsim_mb": 1437.00390625,
+          "mobsim_peak_mb": 1194.98828125,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 2631.9921875,
+          "process_wall_s": 45.25526243285276
+        }
+      }
     },
-    "MobSlim AgentSim": {
-     "family": "mobslim",
-     "time_s": 2.067582641961053,
-     "runs_s": [
-      2.0971778391394764,
-      2.067582641961053,
-      2.076168118044734
-     ],
-     "post_s": 0.02700743800960481,
-     "load_s": 0.4141854450572282,
-     "rss_before_mobsim_mb": 187.08203125,
-     "mobsim_peak_mb": 127.29296875,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 319.87109375,
-     "process_wall_s": 7.072858375031501
+    "grid-160-congested": {
+      "description": "the same at capacity x0.3: queues and spillback",
+      "runs": {
+        "MATSim QSim": {
+          "family": "matsim",
+          "time_s": 647.009249518,
+          "runs_s": [
+            650.650025277,
+            647.009249518,
+            670.075102164
+          ],
+          "peak_rss_mb": 15624.8984375,
+          "process_wall_s": 1994.2264811049681,
+          "xmx": "40g"
+        },
+        "MATSim Hermes": {
+          "family": "matsim",
+          "time_s": 73.660502455,
+          "runs_s": [
+            77.669023303,
+            73.743254325,
+            73.660502455
+          ],
+          "peak_rss_mb": 39037.15234375,
+          "process_wall_s": 243.00012842891738,
+          "xmx": "40g"
+        },
+        "MATSim DSim, 1 thread": {
+          "family": "matsim",
+          "time_s": 417.83221821,
+          "runs_s": [
+            417.83221821,
+            421.514193347,
+            421.325829542
+          ],
+          "peak_rss_mb": 14862.4609375,
+          "process_wall_s": 1492.8265746128745,
+          "xmx": "40g"
+        },
+        "MATSim DSim, 16 threads": {
+          "family": "matsim",
+          "time_s": 77.091312367,
+          "runs_s": [
+            78.920983047,
+            77.99236259,
+            77.091312367
+          ],
+          "peak_rss_mb": 20130.671875,
+          "process_wall_s": 466.52762475283816,
+          "xmx": "40g"
+        },
+        "MobSlim QSim": {
+          "family": "mobslim",
+          "time_s": 357.0696810251102,
+          "runs_s": [
+            357.0696810251102
+          ],
+          "post_s": 2.468169623054564,
+          "load_s": 8.260274925036356,
+          "rss_before_mobsim_mb": 1434.984375,
+          "mobsim_peak_mb": 9884.1171875,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 11319.1015625,
+          "process_wall_s": 368.23432909999974
+        },
+        "MobSlim AgentSim": {
+          "family": "mobslim",
+          "time_s": 283.0716871470213,
+          "runs_s": [
+            283.0716871470213
+          ],
+          "post_s": 2.5925253219902515,
+          "load_s": 8.250782479066402,
+          "rss_before_mobsim_mb": 1436.36328125,
+          "mobsim_peak_mb": 6943.66015625,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 8380.0234375,
+          "process_wall_s": 294.3315979319159
+        },
+        "MobSlim HermesSim": {
+          "family": "mobslim",
+          "time_s": 11.21787626389414,
+          "runs_s": [
+            11.21787626389414,
+            11.261388516053557,
+            11.287577350856736
+          ],
+          "post_s": 0.42704355902969837,
+          "load_s": 8.271945083979517,
+          "rss_before_mobsim_mb": 1434.3125,
+          "mobsim_peak_mb": 1249.9296875,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 2715.63671875,
+          "process_wall_s": 43.026293909177184
+        },
+        "MobSlim PSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 28.441128427162766,
+          "runs_s": [
+            28.441128427162766,
+            28.513117876835167,
+            28.63036083895713
+          ],
+          "post_s": 0.3802635439205915,
+          "load_s": 8.304885775782168,
+          "rss_before_mobsim_mb": 1434.25,
+          "mobsim_peak_mb": 1193.20703125,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 2678.27734375,
+          "process_wall_s": 94.74520054110326
+        },
+        "MobSlim PSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 8.176184633048251,
+          "runs_s": [
+            8.176184633048251,
+            8.215571155073121,
+            8.33836299693212
+          ],
+          "post_s": 0.30818588193506,
+          "load_s": 8.253536628792062,
+          "rss_before_mobsim_mb": 1434.14453125,
+          "mobsim_peak_mb": 1728.87109375,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 3359.9765625,
+          "process_wall_s": 33.82989538786933
+        },
+        "MobSlim DSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 68.92950299102813,
+          "runs_s": [
+            68.92950299102813
+          ],
+          "post_s": 0.3860841952264309,
+          "load_s": 8.311523382086307,
+          "rss_before_mobsim_mb": 1433.41796875,
+          "mobsim_peak_mb": 1125.203125,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 2558.62109375,
+          "process_wall_s": 78.062239930965
+        },
+        "MobSlim DSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 14.144987086066976,
+          "runs_s": [
+            14.144987086066976,
+            14.157947656000033,
+            14.221633536973968
+          ],
+          "post_s": 0.31666571111418307,
+          "load_s": 8.19157575792633,
+          "rss_before_mobsim_mb": 1434.7890625,
+          "mobsim_peak_mb": 1221.671875,
+          "persons": 419840,
+          "links": 103040,
+          "stuck": 0,
+          "peak_rss_mb": 2656.4609375,
+          "process_wall_s": 51.51277336990461
+        }
+      }
     },
-    "MobSlim HermesSim": {
-     "family": "mobslim",
-     "time_s": 0.11489653494209051,
-     "runs_s": [
-      0.11489653494209051,
-      0.11563200294040143,
-      0.11544931796379387
-     ],
-     "post_s": 0.012109091971069574,
-     "load_s": 0.40227706683799624,
-     "rss_before_mobsim_mb": 187.21484375,
-     "mobsim_peak_mb": 19.890625,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 222.0703125,
-     "process_wall_s": 1.1054986591916531
+    "open-berlin-1pct": {
+      "description": "MATSim Open Berlin v6.4, 1% sample: about 52,000 agents (residents, commercial traffic, freight); car, truck and freight on the roads, pt",
+      "runs": {
+        "MATSim QSim": {
+          "family": "matsim",
+          "time_s": 41.902256962,
+          "runs_s": [
+            42.520410824,
+            41.902256962,
+            42.022280838
+          ],
+          "peak_rss_mb": 8420.61328125,
+          "process_wall_s": 159.72686225618236,
+          "xmx": "20g",
+          "stuck": 158
+        },
+        "MATSim Hermes": {
+          "family": "matsim",
+          "time_s": 9.535307428,
+          "runs_s": [
+            10.491784152,
+            10.178882047,
+            9.535307428
+          ],
+          "peak_rss_mb": 10205.67578125,
+          "process_wall_s": 62.95218870206736,
+          "xmx": "20g",
+          "stuck": 160
+        },
+        "MATSim DSim, 1 thread": {
+          "family": "matsim",
+          "time_s": 33.520575664,
+          "runs_s": [
+            35.057536314,
+            34.058791349,
+            33.520575664
+          ],
+          "peak_rss_mb": 7524.56640625,
+          "process_wall_s": 143.114796128124,
+          "xmx": "20g"
+        },
+        "MATSim DSim, 16 threads": {
+          "family": "matsim",
+          "time_s": 16.99334182,
+          "runs_s": [
+            16.99334182,
+            18.731460782,
+            17.803568578
+          ],
+          "peak_rss_mb": 10284.90625,
+          "process_wall_s": 94.47495666495524,
+          "xmx": "20g"
+        },
+        "MobSlim QSim": {
+          "family": "mobslim",
+          "time_s": 38.19121815892868,
+          "runs_s": [
+            38.24541484401561,
+            38.37703219917603,
+            38.19121815892868
+          ],
+          "post_s": 0.41173338890075684,
+          "load_s": 23.047444377094507,
+          "rss_before_mobsim_mb": 2024.16015625,
+          "mobsim_peak_mb": 1736.18359375,
+          "persons": 52263,
+          "links": 283885,
+          "stuck": 246,
+          "peak_rss_mb": 4934.95703125,
+          "process_wall_s": 143.52855053497478
+        },
+        "MobSlim AgentSim": {
+          "family": "mobslim",
+          "time_s": 33.50811040517874,
+          "runs_s": [
+            33.76315605384298,
+            33.50811040517874,
+            33.705801052972674
+          ],
+          "post_s": 0.40227379789575934,
+          "load_s": 22.98494413588196,
+          "rss_before_mobsim_mb": 2021.609375,
+          "mobsim_peak_mb": 1153.01171875,
+          "persons": 52263,
+          "links": 283885,
+          "stuck": 246,
+          "peak_rss_mb": 3731.58984375,
+          "process_wall_s": 125.45330816996284
+        },
+        "MobSlim HermesSim": {
+          "family": "mobslim",
+          "time_s": 1.5918680340982974,
+          "runs_s": [
+            1.7186971900518984,
+            1.6154019490350038,
+            1.5918680340982974
+          ],
+          "post_s": 0.3455527750775218,
+          "load_s": 23.042033049976453,
+          "rss_before_mobsim_mb": 2023.24609375,
+          "mobsim_peak_mb": 974.01953125,
+          "persons": 52263,
+          "links": 283885,
+          "stuck": 244,
+          "peak_rss_mb": 3634.4296875,
+          "process_wall_s": 29.430453615961596
+        },
+        "MobSlim PSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 4.252093598013744,
+          "runs_s": [
+            4.366655759047717,
+            4.252093598013744,
+            4.266734516946599
+          ],
+          "post_s": 0.34526685206219554,
+          "load_s": 23.008110226830468,
+          "rss_before_mobsim_mb": 2022.05078125,
+          "mobsim_peak_mb": 985.20703125,
+          "persons": 52263,
+          "links": 283885,
+          "stuck": 249,
+          "peak_rss_mb": 3586.17578125,
+          "process_wall_s": 37.34180077817291
+        },
+        "MobSlim PSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 3.089816677151248,
+          "runs_s": [
+            3.1050044239964336,
+            3.089816677151248,
+            3.1361918321345
+          ],
+          "post_s": 0.3368941149674356,
+          "load_s": 22.870432849042118,
+          "rss_before_mobsim_mb": 2025.0078125,
+          "mobsim_peak_mb": 959.69140625,
+          "persons": 52263,
+          "links": 283885,
+          "stuck": 249,
+          "peak_rss_mb": 3703.60546875,
+          "process_wall_s": 33.660753172123805
+        },
+        "MobSlim DSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 10.561335270991549,
+          "runs_s": [
+            10.590311402920634,
+            10.561335270991549,
+            10.65544286207296
+          ],
+          "post_s": 0.34255236899480224,
+          "load_s": 22.928026294801384,
+          "rss_before_mobsim_mb": 2021.16015625,
+          "mobsim_peak_mb": 976.87890625,
+          "persons": 52263,
+          "links": 283885,
+          "stuck": 251,
+          "peak_rss_mb": 3559.83984375,
+          "process_wall_s": 56.19772393302992
+        },
+        "MobSlim DSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 4.287425434915349,
+          "runs_s": [
+            4.78165043098852,
+            4.287425434915349,
+            4.649017306044698
+          ],
+          "post_s": 0.33142846007831395,
+          "load_s": 22.8874865679536,
+          "rss_before_mobsim_mb": 2022.328125,
+          "mobsim_peak_mb": 880.7890625,
+          "persons": 52263,
+          "links": 283885,
+          "stuck": 251,
+          "peak_rss_mb": 3709.0234375,
+          "process_wall_s": 38.07574731996283
+        }
+      }
     },
-    "MobSlim PSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 0.24726360803470016,
-     "runs_s": [
-      0.2526309872046113,
-      0.24726360803470016,
-      0.2491119501646608
-     ],
-     "post_s": 0.011456537060439587,
-     "load_s": 0.3994246560614556,
-     "rss_before_mobsim_mb": 187.265625,
-     "mobsim_peak_mb": 27.3671875,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 231.64453125,
-     "process_wall_s": 1.5068258300889283
-    },
-    "MobSlim PSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 0.14813162107020617,
-     "runs_s": [
-      0.1493067010305822,
-      0.14813162107020617,
-      0.15077752899378538
-     ],
-     "post_s": 0.01276376680471003,
-     "load_s": 0.40176315209828317,
-     "rss_before_mobsim_mb": 187.48828125,
-     "mobsim_peak_mb": 48.0078125,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 257.8671875,
-     "process_wall_s": 1.2106303651817143
-    },
-    "MobSlim DSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 0.36065720906481147,
-     "runs_s": [
-      0.3679554790724069,
-      0.36662194901145995,
-      0.36065720906481147
-     ],
-     "post_s": 0.012438118923455477,
-     "load_s": 0.39945374499075115,
-     "rss_before_mobsim_mb": 188.5234375,
-     "mobsim_peak_mb": 28.11328125,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 234.7734375,
-     "process_wall_s": 1.8535283990204334
-    },
-    "MobSlim DSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 0.187162364134565,
-     "runs_s": [
-      0.21284503093920648,
-      0.21942633716389537,
-      0.187162364134565
-     ],
-     "post_s": 0.013654074864462018,
-     "load_s": 0.4006503389682621,
-     "rss_before_mobsim_mb": 186.9375,
-     "mobsim_peak_mb": 40.44921875,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 235.1953125,
-     "process_wall_s": 1.3858434150461107
+    "open-berlin-10pct": {
+      "description": "MATSim Open Berlin v6.4, 10% sample: about 520,000 agents",
+      "runs": {
+        "MATSim Hermes": {
+          "family": "matsim",
+          "time_s": 91.752049638,
+          "runs_s": [
+            93.503440326,
+            91.752049638,
+            93.387091126
+          ],
+          "peak_rss_mb": 50451.765625,
+          "process_wall_s": 360.81320567894727,
+          "xmx": "100g",
+          "stuck": 1624
+        },
+        "MobSlim HermesSim": {
+          "family": "mobslim",
+          "time_s": 9.534158869180828,
+          "runs_s": [
+            9.534158869180828,
+            9.850760504836217,
+            9.8863178959582
+          ],
+          "post_s": 0.7431409761775285,
+          "load_s": 136.23531612893566,
+          "rss_before_mobsim_mb": 4854.7578125,
+          "mobsim_peak_mb": 1542.625,
+          "persons": 526111,
+          "links": 283885,
+          "stuck": 2159,
+          "peak_rss_mb": 6738.6796875,
+          "process_wall_s": 167.56571579305455
+        },
+        "MobSlim PSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 26.35707294405438,
+          "runs_s": [
+            26.749561846023425,
+            26.35707294405438,
+            26.451941245002672
+          ],
+          "post_s": 0.7425098880194128,
+          "load_s": 137.1118430700153,
+          "rss_before_mobsim_mb": 4643.9921875,
+          "mobsim_peak_mb": 1818.765625,
+          "persons": 526111,
+          "links": 283885,
+          "stuck": 2239,
+          "peak_rss_mb": 6588.96484375,
+          "process_wall_s": 218.71295802108943
+        },
+        "MobSlim PSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 6.944841468939558,
+          "runs_s": [
+            7.15122117404826,
+            7.121358223026618,
+            6.944841468939558
+          ],
+          "post_s": 0.6825062450952828,
+          "load_s": 136.43688848405145,
+          "rss_before_mobsim_mb": 5322.24609375,
+          "mobsim_peak_mb": 1365.0703125,
+          "persons": 526111,
+          "links": 283885,
+          "stuck": 2239,
+          "peak_rss_mb": 7438.54296875,
+          "process_wall_s": 159.66597053501755
+        },
+        "MobSlim DSim, 1 thread": {
+          "family": "mobslim",
+          "time_s": 66.8032625860069,
+          "runs_s": [
+            66.8032625860069
+          ],
+          "post_s": 0.7384489469695836,
+          "load_s": 135.5138684939593,
+          "rss_before_mobsim_mb": 4873.9453125,
+          "mobsim_peak_mb": 1250.60546875,
+          "persons": 526111,
+          "links": 283885,
+          "stuck": 2247,
+          "peak_rss_mb": 6413.953125,
+          "process_wall_s": 204.02267864183523
+        },
+        "MobSlim DSim, 16 threads": {
+          "family": "mobslim",
+          "time_s": 15.701344590168446,
+          "runs_s": [
+            15.701344590168446,
+            16.042469910811633,
+            15.79268360696733
+          ],
+          "post_s": 0.6920195810962468,
+          "load_s": 137.1027063159272,
+          "rss_before_mobsim_mb": 4993.4921875,
+          "mobsim_peak_mb": 1171.39453125,
+          "persons": 526111,
+          "links": 283885,
+          "stuck": 2247,
+          "peak_rss_mb": 6810.453125,
+          "process_wall_s": 186.65796287800185
+        }
+      }
     }
-   }
   },
-  "grid-40-congested": {
-   "description": "the same at capacity x0.3: queues and spillback",
-   "runs": {
-    "MATSim QSim": {
-     "family": "matsim",
-     "time_s": 4.5736762,
-     "runs_s": [
-      5.144849079,
-      4.5736762,
-      4.600097781
-     ],
-     "peak_rss_mb": 1459.3515625,
-     "process_wall_s": 17.21848910395056,
-     "xmx": "10g"
-    },
-    "MATSim Hermes": {
-     "family": "matsim",
-     "time_s": 0.934012608,
-     "runs_s": [
-      1.329750174,
-      1.05415213,
-      0.934012608
-     ],
-     "peak_rss_mb": 1632.98046875,
-     "process_wall_s": 6.183973581995815,
-     "xmx": "10g"
-    },
-    "MATSim DSim, 1 thread": {
-     "family": "matsim",
-     "time_s": 4.094697389,
-     "runs_s": [
-      4.481696609,
-      4.219018311,
-      4.094697389
-     ],
-     "peak_rss_mb": 1598.01953125,
-     "process_wall_s": 18.39213847089559,
-     "xmx": "10g"
-    },
-    "MATSim DSim, 16 threads": {
-     "family": "matsim",
-     "time_s": 4.62596327,
-     "runs_s": [
-      6.558062658,
-      6.2039872,
-      4.62596327
-     ],
-     "peak_rss_mb": 2406.453125,
-     "process_wall_s": 23.072555399034172,
-     "xmx": "10g"
-    },
-    "MobSlim QSim": {
-     "family": "mobslim",
-     "time_s": 3.1484626980964094,
-     "runs_s": [
-      3.1793288921471685,
-      3.1581211460288614,
-      3.1484626980964094
-     ],
-     "post_s": 0.025354925077408552,
-     "load_s": 0.40325198019854724,
-     "rss_before_mobsim_mb": 188.33203125,
-     "mobsim_peak_mb": 181.046875,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 376.5859375,
-     "process_wall_s": 10.270846429048106
-    },
-    "MobSlim AgentSim": {
-     "family": "mobslim",
-     "time_s": 2.3223948841914535,
-     "runs_s": [
-      2.33470038510859,
-      2.3404069249518216,
-      2.3223948841914535
-     ],
-     "post_s": 0.025255671003833413,
-     "load_s": 0.40081176604144275,
-     "rss_before_mobsim_mb": 187.515625,
-     "mobsim_peak_mb": 127.15625,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 320.46875,
-     "process_wall_s": 7.773358399048448
-    },
-    "MobSlim HermesSim": {
-     "family": "mobslim",
-     "time_s": 0.12270389287732542,
-     "runs_s": [
-      0.12270389287732542,
-      0.12374092498794198,
-      0.1241765150334686
-     ],
-     "post_s": 0.013169385958462954,
-     "load_s": 0.4035334950312972,
-     "rss_before_mobsim_mb": 187.16015625,
-     "mobsim_peak_mb": 30.72265625,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 227.265625,
-     "process_wall_s": 1.1363406858872622
-    },
-    "MobSlim PSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 0.2615725230425596,
-     "runs_s": [
-      0.2706064300145954,
-      0.2641801049467176,
-      0.2615725230425596
-     ],
-     "post_s": 0.012423382140696049,
-     "load_s": 0.403062148950994,
-     "rss_before_mobsim_mb": 188.34765625,
-     "mobsim_peak_mb": 36.6875,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 236.421875,
-     "process_wall_s": 1.5578509820625186
-    },
-    "MobSlim PSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 0.24562813993543386,
-     "runs_s": [
-      0.2973433448933065,
-      0.24562813993543386,
-      0.28189114504493773
-     ],
-     "post_s": 0.012919744942337275,
-     "load_s": 0.40133168012835085,
-     "rss_before_mobsim_mb": 187.296875,
-     "mobsim_peak_mb": 69.62109375,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 277.21484375,
-     "process_wall_s": 1.5861057271249592
-    },
-    "MobSlim DSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 0.5596003960818052,
-     "runs_s": [
-      0.5638891921844333,
-      0.5596003960818052,
-      0.5601658718660474
-     ],
-     "post_s": 0.013539996929466724,
-     "load_s": 0.40147575503215194,
-     "rss_before_mobsim_mb": 188.48046875,
-     "mobsim_peak_mb": 38.45703125,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 241.31640625,
-     "process_wall_s": 2.445776244159788
-    },
-    "MobSlim DSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 0.26785310986451805,
-     "runs_s": [
-      0.27954121096991,
-      0.26785310986451805,
-      0.2717471420764923
-     ],
-     "post_s": 0.015095868846401572,
-     "load_s": 0.4030708149075508,
-     "rss_before_mobsim_mb": 187.46875,
-     "mobsim_peak_mb": 45.78125,
-     "persons": 26240,
-     "links": 6560,
-     "stuck": 0,
-     "peak_rss_mb": 246.04296875,
-     "process_wall_s": 1.5889255199581385
+  "machine": {
+    "cpu": "11th Gen Intel(R) Core(TM) i9-11900K @ 3.50GHz",
+    "cpus": 16,
+    "memory_gb": 126,
+    "os": "Linux-7.0.0-38-generic-x86_64-with-glibc2.39",
+    "python": "3.12.6",
+    "java": "openjdk version \"25.0.5.0.3\" 2026-10-24",
+    "commit": "9cc1145",
+    "dirty": false,
+    "date": "2026-11-18",
+    "matsim": "2025.0",
+    "repeats": 3,
+    "xmx": {
+      "grid-40": "10g",
+      "grid-40-congested": "10g",
+      "grid-80": "10g",
+      "grid-80-congested": "10g",
+      "grid-160": "40g",
+      "grid-160-congested": "40g",
+      "grid-320": "100g",
+      "grid-320-congested": "100g",
+      "open-berlin-1pct": "20g",
+      "open-berlin-10pct": "100g"
     }
-   }
-  },
-  "grid-80": {
-   "description": "80x80 grid: 25,920 links, 104,960 car commuters",
-   "runs": {
-    "MATSim QSim": {
-     "family": "matsim",
-     "time_s": 39.876035685,
-     "runs_s": [
-      41.182323418,
-      39.876035685,
-      40.617377106
-     ],
-     "peak_rss_mb": 2528.62890625,
-     "process_wall_s": 127.57227251888253,
-     "xmx": "10g"
-    },
-    "MATSim Hermes": {
-     "family": "matsim",
-     "time_s": 11.375640555,
-     "runs_s": [
-      11.688854697,
-      11.55377232,
-      11.375640555
-     ],
-     "peak_rss_mb": 6785.046875,
-     "process_wall_s": 40.20302033587359,
-     "xmx": "10g"
-    },
-    "MATSim DSim, 1 thread": {
-     "family": "matsim",
-     "time_s": 39.442768187,
-     "runs_s": [
-      40.396558675,
-      40.181738543,
-      39.442768187
-     ],
-     "peak_rss_mb": 2529.55078125,
-     "process_wall_s": 141.8708131320309,
-     "xmx": "10g"
-    },
-    "MATSim DSim, 16 threads": {
-     "family": "matsim",
-     "time_s": 13.535503931,
-     "runs_s": [
-      14.16755896,
-      13.535503931,
-      14.337770685
-     ],
-     "peak_rss_mb": 4689.69140625,
-     "process_wall_s": 64.04316474799998,
-     "xmx": "10g"
-    },
-    "MobSlim QSim": {
-     "family": "mobslim",
-     "time_s": 34.78174007218331,
-     "runs_s": [
-      34.78174007218331,
-      34.82342802500352,
-      34.87246614997275
-     ],
-     "post_s": 0.24100527097471058,
-     "load_s": 1.833327000029385,
-     "rss_before_mobsim_mb": 362.28515625,
-     "mobsim_peak_mb": 1349.8984375,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 1720.13671875,
-     "process_wall_s": 106.94971824111417
-    },
-    "MobSlim AgentSim": {
-     "family": "mobslim",
-     "time_s": 27.557936730096117,
-     "runs_s": [
-      27.599165417952463,
-      27.557936730096117,
-      27.703964236890897
-     ],
-     "post_s": 0.2414010539650917,
-     "load_s": 1.8099718489684165,
-     "rss_before_mobsim_mb": 352.765625,
-     "mobsim_peak_mb": 959.22265625,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 1319.796875,
-     "process_wall_s": 85.2873417600058
-    },
-    "MobSlim HermesSim": {
-     "family": "mobslim",
-     "time_s": 0.9995730710215867,
-     "runs_s": [
-      0.9995730710215867,
-      1.0044300849549472,
-      1.0103698319289833
-     ],
-     "post_s": 0.06167409894987941,
-     "load_s": 1.8029657150618732,
-     "rss_before_mobsim_mb": 353.5546875,
-     "mobsim_peak_mb": 228.26953125,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 643.05078125,
-     "process_wall_s": 5.2586231250315905
-    },
-    "MobSlim PSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 2.2669760501012206,
-     "runs_s": [
-      2.2962891350034624,
-      2.281949742231518,
-      2.2669760501012206
-     ],
-     "post_s": 0.06167881586588919,
-     "load_s": 1.8002326900605112,
-     "rss_before_mobsim_mb": 354.38671875,
-     "mobsim_peak_mb": 289.28125,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 708.125,
-     "process_wall_s": 9.095732297981158
-    },
-    "MobSlim PSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 0.8477738969959319,
-     "runs_s": [
-      0.8680472110863775,
-      0.8642427858430892,
-      0.8477738969959319
-     ],
-     "post_s": 0.05863940599374473,
-     "load_s": 1.7869213719386607,
-     "rss_before_mobsim_mb": 354.21875,
-     "mobsim_peak_mb": 283.8984375,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 727.0859375,
-     "process_wall_s": 4.80714139319025
-    },
-    "MobSlim DSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 4.118198025971651,
-     "runs_s": [
-      4.123418821953237,
-      4.118198025971651,
-      4.122114018071443
-     ],
-     "post_s": 0.06779759307391942,
-     "load_s": 1.8083847989328206,
-     "rss_before_mobsim_mb": 351.21875,
-     "mobsim_peak_mb": 183.63671875,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 543.140625,
-     "process_wall_s": 14.615301514044404
-    },
-    "MobSlim DSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 1.1225679779890925,
-     "runs_s": [
-      1.1585696069523692,
-      1.128229791065678,
-      1.1225679779890925
-     ],
-     "post_s": 0.06146448105573654,
-     "load_s": 1.807798895984888,
-     "rss_before_mobsim_mb": 351.609375,
-     "mobsim_peak_mb": 269.140625,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 670.8671875,
-     "process_wall_s": 5.665953893912956
-    }
-   }
-  },
-  "siouxfalls": {
-   "description": "MATSim Sioux Falls 2014: 84,110 agents, car and bus (2,040 departures)",
-   "runs": {
-    "MATSim QSim": {
-     "family": "matsim",
-     "time_s": 4.097186215,
-     "runs_s": [
-      4.582024745,
-      4.223313198,
-      4.097186215
-     ],
-     "peak_rss_mb": 2288.078125,
-     "process_wall_s": 21.802883961005136,
-     "xmx": "10g"
-    },
-    "MATSim Hermes": {
-     "family": "matsim",
-     "time_s": 1.601072453,
-     "runs_s": [
-      1.799844844,
-      1.767684972,
-      1.601072453
-     ],
-     "peak_rss_mb": 3668.17578125,
-     "process_wall_s": 14.006322141038254,
-     "xmx": "10g"
-    },
-    "MATSim DSim, 1 thread": {
-     "family": "matsim",
-     "time_s": 3.877202893,
-     "runs_s": [
-      4.572407619,
-      3.938248438,
-      3.877202893
-     ],
-     "peak_rss_mb": 2705.48828125,
-     "process_wall_s": 27.562220168067142,
-     "xmx": "10g"
-    },
-    "MATSim DSim, 16 threads": {
-     "family": "matsim",
-     "time_s": 5.961217499,
-     "runs_s": [
-      6.748730781,
-      6.466654782,
-      5.961217499
-     ],
-     "peak_rss_mb": 4539.859375,
-     "process_wall_s": 34.12159852916375,
-     "xmx": "10g"
-    },
-    "MobSlim QSim": {
-     "family": "mobslim",
-     "time_s": 3.35210121399723,
-     "runs_s": [
-      3.3627767730504274,
-      3.361810712143779,
-      3.35210121399723
-     ],
-     "post_s": 0.032572095980867743,
-     "load_s": 23.915742326062173,
-     "rss_before_mobsim_mb": 509.40234375,
-     "mobsim_peak_mb": 108.41015625,
-     "persons": 84110,
-     "links": 334,
-     "stuck": 0,
-     "peak_rss_mb": 616.515625,
-     "process_wall_s": 34.75397649803199
-    },
-    "MobSlim AgentSim": {
-     "family": "mobslim",
-     "time_s": 3.166449438780546,
-     "runs_s": [
-      3.166449438780546,
-      3.1714812780264765,
-      3.1854671800974756
-     ],
-     "post_s": 0.03384193289093673,
-     "load_s": 23.91008219309151,
-     "rss_before_mobsim_mb": 551.29296875,
-     "mobsim_peak_mb": 102.07421875,
-     "persons": 84110,
-     "links": 334,
-     "stuck": 6879,
-     "peak_rss_mb": 653.38671875,
-     "process_wall_s": 33.852350166998804
-    },
-    "MobSlim HermesSim": {
-     "family": "mobslim",
-     "time_s": 0.15936827193945646,
-     "runs_s": [
-      0.15936827193945646,
-      0.16229622811079025,
-      0.1628680438734591
-     ],
-     "post_s": 0.025713816983625293,
-     "load_s": 23.865427894052118,
-     "rss_before_mobsim_mb": 553.94921875,
-     "mobsim_peak_mb": 0.38671875,
-     "persons": 84110,
-     "links": 334,
-     "stuck": 0,
-     "peak_rss_mb": 553.171875,
-     "process_wall_s": 24.737873568898067
-    },
-    "MobSlim PSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 0.2766511421650648,
-     "runs_s": [
-      0.2766511421650648,
-      0.277393541065976,
-      0.2783364600036293
-     ],
-     "post_s": 0.024892803048714995,
-     "load_s": 24.02624653093517,
-     "rss_before_mobsim_mb": 572.8125,
-     "mobsim_peak_mb": 0.4609375,
-     "persons": 84110,
-     "links": 334,
-     "stuck": 0,
-     "peak_rss_mb": 572.12109375,
-     "process_wall_s": 25.248572865035385
-    },
-    "MobSlim PSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 0.333824397996068,
-     "runs_s": [
-      0.3904091550502926,
-      0.333824397996068,
-      0.3670651591382921
-     ],
-     "post_s": 0.0260295900516212,
-     "load_s": 23.87911061802879,
-     "rss_before_mobsim_mb": 576.73046875,
-     "mobsim_peak_mb": 29.80859375,
-     "persons": 84110,
-     "links": 334,
-     "stuck": 0,
-     "peak_rss_mb": 620.41796875,
-     "process_wall_s": 25.361728410003707
-    },
-    "MobSlim DSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 0.39493499393574893,
-     "runs_s": [
-      0.40268218610435724,
-      0.39493499393574893,
-      0.39885407011024654
-     ],
-     "post_s": 0.02555273100733757,
-     "load_s": 24.007633241126314,
-     "rss_before_mobsim_mb": 554.36328125,
-     "mobsim_peak_mb": 23.4921875,
-     "persons": 84110,
-     "links": 334,
-     "stuck": 0,
-     "peak_rss_mb": 576.80859375,
-     "process_wall_s": 25.598347163992003
-    },
-    "MobSlim DSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 0.3039108319208026,
-     "runs_s": [
-      0.31393378390930593,
-      0.3039108319208026,
-      0.34029473387636244
-     ],
-     "post_s": 0.025857863016426563,
-     "load_s": 23.907907739048824,
-     "rss_before_mobsim_mb": 508.66796875,
-     "mobsim_peak_mb": 9.53125,
-     "persons": 84110,
-     "links": 334,
-     "stuck": 0,
-     "peak_rss_mb": 525.359375,
-     "process_wall_s": 25.257430435158312
-    }
-   }
-  },
-  "grid-80-congested": {
-   "description": "the same at capacity x0.3: queues and spillback",
-   "runs": {
-    "MATSim QSim": {
-     "family": "matsim",
-     "time_s": 48.42331857,
-     "runs_s": [
-      49.221469568,
-      48.42331857,
-      49.048920736
-     ],
-     "peak_rss_mb": 2547.16796875,
-     "process_wall_s": 152.916241889121,
-     "xmx": "10g"
-    },
-    "MATSim Hermes": {
-     "family": "matsim",
-     "time_s": 10.05030617,
-     "runs_s": [
-      10.899665644,
-      10.187979724,
-      10.05030617
-     ],
-     "peak_rss_mb": 6492.78515625,
-     "process_wall_s": 36.70014333096333,
-     "xmx": "10g"
-    },
-    "MATSim DSim, 1 thread": {
-     "family": "matsim",
-     "time_s": 38.595155224,
-     "runs_s": [
-      39.267530339,
-      39.402531586,
-      38.595155224
-     ],
-     "peak_rss_mb": 2349.8125,
-     "process_wall_s": 138.2998625470791,
-     "xmx": "10g"
-    },
-    "MATSim DSim, 16 threads": {
-     "family": "matsim",
-     "time_s": 15.512745279,
-     "runs_s": [
-      15.883690427,
-      15.546418412,
-      15.512745279
-     ],
-     "peak_rss_mb": 4258.0859375,
-     "process_wall_s": 68.00217225588858,
-     "xmx": "10g"
-    },
-    "MobSlim QSim": {
-     "family": "mobslim",
-     "time_s": 33.4870816571638,
-     "runs_s": [
-      33.509195271879435,
-      33.4870816571638,
-      33.61640160996467
-     ],
-     "post_s": 0.28942977800033987,
-     "load_s": 1.8129233119543642,
-     "rss_before_mobsim_mb": 353.46875,
-     "mobsim_peak_mb": 1351.4375,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 1712.5859375,
-     "process_wall_s": 103.10534369712695
-    },
-    "MobSlim AgentSim": {
-     "family": "mobslim",
-     "time_s": 25.68197438493371,
-     "runs_s": [
-      25.68197438493371,
-      25.79438588488847,
-      25.750093487091362
-     ],
-     "post_s": 0.2857643358875066,
-     "load_s": 1.793010971043259,
-     "rss_before_mobsim_mb": 362.72265625,
-     "mobsim_peak_mb": 957.953125,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 1328.44140625,
-     "process_wall_s": 79.67674725013785
-    },
-    "MobSlim HermesSim": {
-     "family": "mobslim",
-     "time_s": 1.0561828990466893,
-     "runs_s": [
-      1.0561828990466893,
-      1.0705551649443805,
-      1.0651316079311073
-     ],
-     "post_s": 0.07837882288731635,
-     "load_s": 1.8048178439494222,
-     "rss_before_mobsim_mb": 354.6796875,
-     "mobsim_peak_mb": 258.83984375,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 652.50390625,
-     "process_wall_s": 5.456727009033784
-    },
-    "MobSlim PSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 2.38768108910881,
-     "runs_s": [
-      2.3896265579387546,
-      2.38768108910881,
-      2.391255648806691
-     ],
-     "post_s": 0.07613549707457423,
-     "load_s": 1.801901085069403,
-     "rss_before_mobsim_mb": 361.64453125,
-     "mobsim_peak_mb": 300.03125,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 705.61328125,
-     "process_wall_s": 9.43444256996736
-    },
-    "MobSlim PSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 1.233885165071115,
-     "runs_s": [
-      1.2713732270058244,
-      1.233885165071115,
-      1.2385047159623355
-     ],
-     "post_s": 0.06686598295345902,
-     "load_s": 1.8098075489979237,
-     "rss_before_mobsim_mb": 354.953125,
-     "mobsim_peak_mb": 363.08984375,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 786.85546875,
-     "process_wall_s": 6.007055800175294
-    },
-    "MobSlim DSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 5.708833433920518,
-     "runs_s": [
-      5.86533214780502,
-      5.708833433920518,
-      5.711889564990997
-     ],
-     "post_s": 0.08160556084476411,
-     "load_s": 1.8077624321449548,
-     "rss_before_mobsim_mb": 363.59375,
-     "mobsim_peak_mb": 230.02734375,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 611.81640625,
-     "process_wall_s": 19.551232993835583
-    },
-    "MobSlim DSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 1.5788015201687813,
-     "runs_s": [
-      1.5983992859255522,
-      1.5788015201687813,
-      1.6317837398964912
-     ],
-     "post_s": 0.06681472598575056,
-     "load_s": 1.789940773975104,
-     "rss_before_mobsim_mb": 351.6171875,
-     "mobsim_peak_mb": 319.5859375,
-     "persons": 104960,
-     "links": 25920,
-     "stuck": 0,
-     "peak_rss_mb": 703.171875,
-     "process_wall_s": 7.055666400119662
-    }
-   }
-  },
-  "grid-160": {
-   "description": "160x160 grid: 103,040 links, 419,840 car commuters",
-   "runs": {
-    "MATSim QSim": {
-     "family": "matsim",
-     "time_s": 524.343309722,
-     "runs_s": [
-      535.002583617,
-      524.343309722,
-      545.839231949
-     ],
-     "peak_rss_mb": 15616.6875,
-     "process_wall_s": 1631.2749322571326,
-     "xmx": "40g"
-    },
-    "MATSim Hermes": {
-     "family": "matsim",
-     "time_s": 109.222973725,
-     "runs_s": [
-      117.731648723,
-      109.222973725,
-      111.786233273
-     ],
-     "peak_rss_mb": 41659.46875,
-     "process_wall_s": 357.073293015128,
-     "xmx": "40g"
-    },
-    "MATSim DSim, 1 thread": {
-     "family": "matsim",
-     "time_s": 483.159269622,
-     "runs_s": [
-      483.159269622,
-      491.024377774,
-      487.984934538
-     ],
-     "peak_rss_mb": 15490.71875,
-     "process_wall_s": 1710.3679017219692,
-     "xmx": "40g"
-    },
-    "MATSim DSim, 16 threads": {
-     "family": "matsim",
-     "time_s": 94.573057481,
-     "runs_s": [
-      97.087332889,
-      95.271906539,
-      94.573057481
-     ],
-     "peak_rss_mb": 22198.4140625,
-     "process_wall_s": 540.4604850290343,
-     "xmx": "40g"
-    },
-    "MobSlim QSim": {
-     "family": "mobslim",
-     "time_s": 388.9785700519569,
-     "runs_s": [
-      388.9785700519569
-     ],
-     "post_s": 2.798081882065162,
-     "load_s": 8.313702502055094,
-     "rss_before_mobsim_mb": 1435.73046875,
-     "mobsim_peak_mb": 9856.31640625,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 11292.046875,
-     "process_wall_s": 400.5458329250105
-    },
-    "MobSlim AgentSim": {
-     "family": "mobslim",
-     "time_s": 358.8607916771434,
-     "runs_s": [
-      358.8607916771434
-     ],
-     "post_s": 2.801099473843351,
-     "load_s": 8.22524618008174,
-     "rss_before_mobsim_mb": 1432.640625,
-     "mobsim_peak_mb": 6950.45703125,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 8383.09765625,
-     "process_wall_s": 370.30714367097244
-    },
-    "MobSlim HermesSim": {
-     "family": "mobslim",
-     "time_s": 12.12275685602799,
-     "runs_s": [
-      12.12275685602799,
-      12.212545816088095,
-      12.231589317088947
-     ],
-     "post_s": 0.3763054059818387,
-     "load_s": 8.207138287834823,
-     "rss_before_mobsim_mb": 1435.03125,
-     "mobsim_peak_mb": 1319.25390625,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 2778.62109375,
-     "process_wall_s": 45.71884092804976
-    },
-    "MobSlim PSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 31.698879793984815,
-     "runs_s": [
-      31.885550876148045,
-      31.698879793984815,
-      31.76162680797279
-     ],
-     "post_s": 0.39929894101805985,
-     "load_s": 8.221245200140402,
-     "rss_before_mobsim_mb": 1502.4296875,
-     "mobsim_peak_mb": 1502.875,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 3128.3984375,
-     "process_wall_s": 104.44591271597892
-    },
-    "MobSlim PSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 7.7119768229313195,
-     "runs_s": [
-      7.853183690924197,
-      7.763348998967558,
-      7.7119768229313195
-     ],
-     "post_s": 0.30176358693279326,
-     "load_s": 8.268700822954997,
-     "rss_before_mobsim_mb": 1436.4375,
-     "mobsim_peak_mb": 1388.2890625,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 3255.66796875,
-     "process_wall_s": 32.41106168390252
-    },
-    "MobSlim DSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 57.136277778074145,
-     "runs_s": [
-      57.136277778074145,
-      57.1713271769695,
-      57.29495583497919
-     ],
-     "post_s": 0.36139055201783776,
-     "load_s": 8.229757531080395,
-     "rss_before_mobsim_mb": 1499.8828125,
-     "mobsim_peak_mb": 1106.37109375,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 2670.734375,
-     "process_wall_s": 180.69312191009521
-    },
-    "MobSlim DSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 11.876697216881439,
-     "runs_s": [
-      12.146376395132393,
-      12.053625140106305,
-      11.876697216881439
-     ],
-     "post_s": 0.30434622382745147,
-     "load_s": 8.398127441992983,
-     "rss_before_mobsim_mb": 1437.00390625,
-     "mobsim_peak_mb": 1194.98828125,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 2631.9921875,
-     "process_wall_s": 45.25526243285276
-    }
-   }
-  },
-  "grid-160-congested": {
-   "description": "the same at capacity x0.3: queues and spillback",
-   "runs": {
-    "MATSim QSim": {
-     "family": "matsim",
-     "time_s": 647.009249518,
-     "runs_s": [
-      650.650025277,
-      647.009249518,
-      670.075102164
-     ],
-     "peak_rss_mb": 15624.8984375,
-     "process_wall_s": 1994.2264811049681,
-     "xmx": "40g"
-    },
-    "MATSim Hermes": {
-     "family": "matsim",
-     "time_s": 73.660502455,
-     "runs_s": [
-      77.669023303,
-      73.743254325,
-      73.660502455
-     ],
-     "peak_rss_mb": 39037.15234375,
-     "process_wall_s": 243.00012842891738,
-     "xmx": "40g"
-    },
-    "MATSim DSim, 1 thread": {
-     "family": "matsim",
-     "time_s": 417.83221821,
-     "runs_s": [
-      417.83221821,
-      421.514193347,
-      421.325829542
-     ],
-     "peak_rss_mb": 14862.4609375,
-     "process_wall_s": 1492.8265746128745,
-     "xmx": "40g"
-    },
-    "MATSim DSim, 16 threads": {
-     "family": "matsim",
-     "time_s": 77.091312367,
-     "runs_s": [
-      78.920983047,
-      77.99236259,
-      77.091312367
-     ],
-     "peak_rss_mb": 20130.671875,
-     "process_wall_s": 466.52762475283816,
-     "xmx": "40g"
-    },
-    "MobSlim QSim": {
-     "family": "mobslim",
-     "time_s": 357.0696810251102,
-     "runs_s": [
-      357.0696810251102
-     ],
-     "post_s": 2.468169623054564,
-     "load_s": 8.260274925036356,
-     "rss_before_mobsim_mb": 1434.984375,
-     "mobsim_peak_mb": 9884.1171875,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 11319.1015625,
-     "process_wall_s": 368.23432909999974
-    },
-    "MobSlim AgentSim": {
-     "family": "mobslim",
-     "time_s": 283.0716871470213,
-     "runs_s": [
-      283.0716871470213
-     ],
-     "post_s": 2.5925253219902515,
-     "load_s": 8.250782479066402,
-     "rss_before_mobsim_mb": 1436.36328125,
-     "mobsim_peak_mb": 6943.66015625,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 8380.0234375,
-     "process_wall_s": 294.3315979319159
-    },
-    "MobSlim HermesSim": {
-     "family": "mobslim",
-     "time_s": 11.21787626389414,
-     "runs_s": [
-      11.21787626389414,
-      11.261388516053557,
-      11.287577350856736
-     ],
-     "post_s": 0.42704355902969837,
-     "load_s": 8.271945083979517,
-     "rss_before_mobsim_mb": 1434.3125,
-     "mobsim_peak_mb": 1249.9296875,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 2715.63671875,
-     "process_wall_s": 43.026293909177184
-    },
-    "MobSlim PSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 28.441128427162766,
-     "runs_s": [
-      28.441128427162766,
-      28.513117876835167,
-      28.63036083895713
-     ],
-     "post_s": 0.3802635439205915,
-     "load_s": 8.304885775782168,
-     "rss_before_mobsim_mb": 1434.25,
-     "mobsim_peak_mb": 1193.20703125,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 2678.27734375,
-     "process_wall_s": 94.74520054110326
-    },
-    "MobSlim PSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 8.176184633048251,
-     "runs_s": [
-      8.176184633048251,
-      8.215571155073121,
-      8.33836299693212
-     ],
-     "post_s": 0.30818588193506,
-     "load_s": 8.253536628792062,
-     "rss_before_mobsim_mb": 1434.14453125,
-     "mobsim_peak_mb": 1728.87109375,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 3359.9765625,
-     "process_wall_s": 33.82989538786933
-    },
-    "MobSlim DSim, 1 thread": {
-     "family": "mobslim",
-     "time_s": 68.92950299102813,
-     "runs_s": [
-      68.92950299102813
-     ],
-     "post_s": 0.3860841952264309,
-     "load_s": 8.311523382086307,
-     "rss_before_mobsim_mb": 1433.41796875,
-     "mobsim_peak_mb": 1125.203125,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 2558.62109375,
-     "process_wall_s": 78.062239930965
-    },
-    "MobSlim DSim, 16 threads": {
-     "family": "mobslim",
-     "time_s": 14.144987086066976,
-     "runs_s": [
-      14.144987086066976,
-      14.157947656000033,
-      14.221633536973968
-     ],
-     "post_s": 0.31666571111418307,
-     "load_s": 8.19157575792633,
-     "rss_before_mobsim_mb": 1434.7890625,
-     "mobsim_peak_mb": 1221.671875,
-     "persons": 419840,
-     "links": 103040,
-     "stuck": 0,
-     "peak_rss_mb": 2656.4609375,
-     "process_wall_s": 51.51277336990461
-    }
-   }
   }
- },
- "machine": {
-  "cpu": "11th Gen Intel(R) Core(TM) i9-11900K @ 3.50GHz",
-  "cpus": 16,
-  "memory_gb": 126,
-  "os": "Linux-7.0.0-38-generic-x86_64-with-glibc2.39",
-  "python": "3.12.6",
-  "java": "openjdk version \"25.0.5.0.3\" 2026-10-24",
-  "commit": "a2e0a1c",
-  "dirty": false,
-  "date": "2026-11-14",
-  "matsim": "2025.0",
-  "repeats": 3,
-  "xmx": {
-   "grid-40": "10g",
-   "grid-40-congested": "10g",
-   "grid-80": "10g",
-   "grid-80-congested": "10g",
-   "grid-160": "40g",
-   "grid-160-congested": "40g",
-   "grid-320": "100g",
-   "grid-320-congested": "100g",
-   "siouxfalls": "10g"
-  }
- }
 }

@@ -58,11 +58,6 @@ class PerfCase:
     persons: int = 0
     capacity: float = 1.0
     transit: bool = False
-    # > 0: plans learned by MATSim (this many iterations of the scenario's own
-    # replanning, on ``learn_mobsim``) instead of its iteration-0 plans
-    learn_iterations: int = 0
-    learn_mobsim: str = "hermes"
-    learn_weights: dict = field(default_factory=dict)  # strategyName -> weight while learning
     optional: bool = False  # run only when asked for (see :func:`selected`)
     variants: tuple = ()  # run only the variants whose label contains one of these
     xmx: str = "10g"  # the JVM's heap (MATSim)
@@ -245,21 +240,6 @@ GRID_CONFIG = """<?xml version="1.0" ?>
 """
 
 
-def _set_strategy_weights(cfg, weights: dict) -> None:
-    """Set the ``replanning`` strategies' weights by name (each must exist)."""
-    if not weights:
-        return
-    found = set()
-    for ps in cfg._module("replanning").findall("parameterset"):
-        params = {p.get("name"): p for p in ps.findall("param")}
-        name = params.get("strategyName")
-        if name is not None and name.get("value") in weights:
-            params["weight"].set("value", str(weights[name.get("value")]))
-            found.add(name.get("value"))
-    if found != set(weights):
-        raise ValueError(f"strategies not in the config: {set(weights) - found}")
-
-
 def prepare(case: PerfCase, force: bool = False) -> Path:
     """``<case>/input/config.xml`` with routed plans; returns its path."""
     from mobslim.config.matsim import MatsimConfig
@@ -288,16 +268,8 @@ def prepare(case: PerfCase, force: bool = False) -> Path:
     cfg = MatsimConfig.load(SCENARIOS / case.scenario / case.config)
     for (m, p), v in case.params.items():
         cfg.set(m, p, v)
-    if case.learn_iterations:
-        from verification.runner import _hermes_config
-
-        learn = _hermes_config(cfg) if case.learn_mobsim == "hermes" else cfg.copy()
-        learn.set("controller", "lastIteration", case.learn_iterations - 1)
-        _set_strategy_weights(learn, case.learn_weights)
-        routed = run_matsim(learn, OUT / case.name / "learning", force=force)
-    else:
-        cfg.set("controller", "lastIteration", 0)
-        routed = run_matsim(cfg, OUT / case.name / "routing", force=force)
+    cfg.set("controller", "lastIteration", 0)
+    routed = run_matsim(cfg, OUT / case.name / "routing", force=force)
     cfg.set("plans", "inputPlansFile", str(routed / "output_plans.xml.gz"))
     cfg.write(cfg_path)
     return cfg_path

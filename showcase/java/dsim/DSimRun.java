@@ -2,8 +2,11 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.matsim.api.core.v01.Scenario;
+import org.matsim.api.core.v01.population.Person;
 import org.matsim.core.communication.NullCommunicator;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigGroup;
@@ -18,6 +21,7 @@ import org.matsim.core.controler.events.AfterMobsimEvent;
 import org.matsim.core.controler.events.BeforeMobsimEvent;
 import org.matsim.core.controler.listener.AfterMobsimListener;
 import org.matsim.core.controler.listener.BeforeMobsimListener;
+import org.matsim.core.population.PopulationUtils;
 import org.matsim.core.scenario.ScenarioUtils;
 import org.matsim.core.serialization.NoopSerializationProvider;
 import org.matsim.dsim.DistributedContext;
@@ -76,13 +80,28 @@ public final class DSimRun {
 			config.controller().setCreateGraphsInterval(0);
 			config.controller().setDumpDataAtEnd(false);
 			config.replanning().clearStrategySettings();
-			StrategySettings keep = new StrategySettings();
-			keep.setStrategyName("KeepLastSelected");
-			keep.setWeight(1.0);
-			config.replanning().addStrategySettings(keep);
 		}
 
 		Scenario scenario = ScenarioUtils.loadScenario(config);
+		if (timings != null) {
+			// KeepLastSelected for persons without a subpopulation and for every
+			// subpopulation (MATSim needs a strategy per subpopulation)
+			Set<String> subpopulations = new TreeSet<>();
+			for (Person p : scenario.getPopulation().getPersons().values()) {
+				String s = PopulationUtils.getSubpopulation(p);
+				if (s != null) subpopulations.add(s);
+			}
+			List<String> groups = new ArrayList<>();
+			groups.add(null);
+			groups.addAll(subpopulations);
+			for (String s : groups) {
+				StrategySettings keep = new StrategySettings();
+				keep.setStrategyName("KeepLastSelected");
+				keep.setWeight(1.0);
+				keep.setSubpopulation(s);
+				config.replanning().addStrategySettings(keep);
+			}
+		}
 		Controler controler = new Controler(scenario,
 				DistributedContext.create(new NullCommunicator(), config, new NoopSerializationProvider()));
 		final List<long[]> rows = new ArrayList<>();
