@@ -1303,7 +1303,7 @@ fn err(msg: &str) -> PyErr {
                     trip_egress_steps, trip_parallel, door_open_steps, door_close_steps,
                     trip_network, rs_network,
                     junction_delay=0, traversal_slot=0.0, traversal_slot_bin=None,
-                    link_times=true))]
+                    link_times=true, person_pce=None))]
 #[allow(clippy::too_many_arguments)]
 fn run<'py>(
     py: Python<'py>,
@@ -1353,6 +1353,7 @@ fn run<'py>(
     traversal_slot: f64,
     traversal_slot_bin: Option<PyReadonlyArray1<'py, i64>>,
     link_times: bool,
+    person_pce: Option<PyReadonlyArray1<'py, f64>>,
 ) -> PyResult<Bound<'py, PyTuple>> {
     let n_links = free_steps.as_array().len();
     let net = network_vehicles != 0;
@@ -1398,7 +1399,12 @@ fn run<'py>(
     if !rides_ok || !trips_ok || ride_offsets.as_array().iter().any(|&o| o < 0 || o as usize > n_rides) {
         return Err(err("route stop index out of range"));
     }
-    let mut v_pce = vec![1.0; n_plans];
+    // per vehicle: each person's (their mode's PCE, default 1), then the trips'
+    let mut v_pce = match &person_pce {
+        Some(a) if a.as_array().len() == n_plans => a.as_array().to_vec(),
+        Some(_) => return Err(err("person_pce must have one entry per plan")),
+        None => vec![1.0; n_plans],
+    };
     v_pce.extend(trip_pce.as_array().iter());
     let inp = Inputs {
         free_steps: free_steps.as_array().to_vec(),

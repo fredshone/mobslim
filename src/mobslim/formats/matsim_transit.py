@@ -93,6 +93,15 @@ def read_transit_vehicles_xml(path) -> TransitVehicles:
     return build_vehicles(types, vehicles)
 
 
+def read_vehicle_types_xml(path) -> dict[str, dict]:
+    """The vehicle types of a MATSim vehicles file (``vehicleDefinitions``
+    v1/v2, ``.gz`` allowed): ``{type id: {"pce": ..., "length": ..., ...}}``
+    with what each type sets (see :func:`read_transit_vehicles_xml`)."""
+    with _open(path) as f:
+        root = ET.parse(f).getroot()
+    return {t["id"]: t for t in (_read_type(el) for el in root if _tag(el) == "vehicleType")}
+
+
 def _read_type(el) -> dict:
     t = {"id": el.get("id")}
     cap = _child(el, "capacity")

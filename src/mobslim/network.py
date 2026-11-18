@@ -175,6 +175,33 @@ class Network:
             self._cache["qt"] = qt
         return self._cache["qt"].nearest_neighbor((x, y)).obj
 
+    def mode_nodes(self, mode: str, outgoing: bool) -> np.ndarray:
+        """Bool per node: a ``mode`` link leaves it (``outgoing``) or enters it."""
+        key = ("mode_nodes", mode, outgoing)
+        if key not in self._cache:
+            has = np.zeros(self.n_nodes, dtype=bool)
+            has[(self.from_node if outgoing else self.to_node)[self.mode_mask(mode)]] = True
+            has.flags.writeable = False
+            self._cache[key] = has
+        return self._cache[key]
+
+    def nearest_mode_node(self, mode: str, x: float, y: float, outgoing: bool) -> int:
+        """Index of the node nearest to ``(x, y)`` that a ``mode`` link
+        leaves (``outgoing``) or enters (MATSim's access to a mode's network)."""
+        key = ("qt_mode", mode, outgoing)
+        if key not in self._cache:
+            from fastquadtree import QuadTreeObjects
+
+            nodes = np.flatnonzero(self.mode_nodes(mode, outgoing))
+            if not len(nodes):
+                raise ValueError(f"No link allows mode {mode!r}.")
+            xy = self.node_xy[nodes]
+            bounds = (xy[:, 0].min() - 1, xy[:, 1].min() - 1, xy[:, 0].max() + 1, xy[:, 1].max() + 1)
+            qt = QuadTreeObjects(bounds, capacity=16, dtype="f64")
+            qt.insert_many([tuple(p) for p in xy.tolist()], nodes.tolist())
+            self._cache[key] = qt
+        return self._cache[key].nearest_neighbor((x, y)).obj
+
     def beeline_distance(self, a: int, b: int) -> float:
         """Euclidean distance between two nodes."""
         (x0, y0), (x1, y1) = self.node_xy[a], self.node_xy[b]

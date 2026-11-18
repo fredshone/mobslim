@@ -185,6 +185,8 @@ struct Net {
     to_node: Vec<i64>,
     fstt: Vec<f64>,
     length: Vec<f64>,
+    /// facility id -> (x, y, link index or -1), for activities with only a facility
+    facilities: HashMap<String, (f64, f64, i32)>,
 }
 
 fn id_map(ids: Vec<Option<String>>) -> HashMap<String, i32> {
@@ -321,6 +323,8 @@ struct RouteInfo {
     typ: Option<String>,
     start: Option<String>,
     end: Option<String>,
+    trav_time: Option<String>,
+    distance: Option<String>,
     text: String,
 }
 
@@ -335,8 +339,10 @@ struct LegInfo {
 }
 
 enum TripLeg {
-    Mode(String),  // a leg to route
-    File(LegInfo), // a single leg, whose route may be kept
+    Mode(String), // a leg to route
+    // a leg whose route may be kept: a single leg, or (staged) the leg of the
+    // trip's mode between access and egress walks
+    File(LegInfo, bool),
 }
 
 struct Act {
@@ -347,6 +353,7 @@ struct Act {
     x: f64,
     y: f64,
     link: i32,
+    link_id: Option<String>, // the `link` attribute as written (staged routes' ends)
 }
 
 /// `_trip_leg`: one leg for a trip read as `leg (stage leg)*`.
@@ -367,20 +374,36 @@ fn trip_leg(trip: Vec<Option<LegInfo>>) -> R<TripLeg> {
         if leg.mode.is_none() {
             bail!("leg without mode");
         }
-        return Ok(TripLeg::File(leg));
+        return Ok(TripLeg::File(leg, false));
     }
-    if let Some(r) = legs.iter().find_map(|l| l.routing.clone()) {
-        return Ok(TripLeg::Mode(r));
-    }
-    let main = legs.iter().find(|l| !l.mode.as_deref().is_some_and(|m| TRIP_WALKS.contains(&m)));
-    let mode = match main {
-        Some(l) => l.mode.clone(),
-        None if legs.iter().any(|l| l.mode.as_deref() == Some("transit_walk")) => {
-            Some("pt".to_string())
+    let mode = match legs.iter().find_map(|l| l.routing.clone()) {
+        Some(r) => r,
+        None => {
+            let main =
+                legs.iter().find(|l| !l.mode.as_deref().is_some_and(|m| TRIP_WALKS.contains(&m)));
+            let mode = match main {
+                Some(l) => l.mode.clone(),
+                None if legs.iter().any(|l| l.mode.as_deref() == Some("transit_walk")) => {
+                    Some("pt".to_string())
+                }
+                None => legs[0].mode.clone(),
+            };
+            mode.ok_or_else(|| "leg without mode".to_string())?
         }
-        None => legs[0].mode.clone(),
     };
-    mode.map(TripLeg::Mode).ok_or_else(|| "leg without mode".to_string())
+    // walks to and from one leg of the trip's mode (MATSim's access and
+    // egress): that leg, whose route may be kept
+    let n_main = legs.iter().filter(|l| l.mode.as_deref() == Some(mode.as_str())).count();
+    let others_walk = legs.iter().all(|l| {
+        l.mode.as_deref() == Some(mode.as_str())
+            || l.mode.as_deref().is_some_and(|m| TRIP_WALKS.contains(&m))
+    });
+    if n_main == 1 && !TRIP_WALKS.contains(&mode.as_str()) && others_walk {
+        let mut main = legs.into_iter().find(|l| l.mode.as_deref() == Some(mode.as_str())).unwrap();
+        main.trav_time = None; // the trip's time is not the leg's
+        return Ok(TripLeg::File(main, true));
+    }
+    Ok(TripLeg::Mode(mode))
 }
 
 // ------------------------------------------------------------ output
@@ -465,8 +488,11 @@ impl Columns {
         self.route_offsets.push(self.route_links.len() as i64);
     }
 
-    /// A single-leg trip: `_file_route` if `keep_routes`, else unrouted.
-    fn file_leg(&mut self, leg: &LegInfo, net: &Net, keep_routes: bool) -> R<()> {
+    /// A single-leg trip, or the staged leg of a trip: `_file_route` if
+    /// `keep_routes`, else unrouted. `ends`: the `link` attributes of the
+    /// activities around it (a staged leg keeps only a route between them).
+    fn file_leg(&mut self, leg: &LegInfo, net: &Net, keep_routes: bool, staged: bool,
+                ends: (Option<&str>, Option<&str>)) -> R<()> {
         let mode = leg.mode.as_deref().unwrap();
         let tt = match non_empty(&leg.trav_time) {
             Some(t) => parse_time(t)?,
@@ -486,6 +512,10 @@ impl Columns {
             self.leg(mode, tt, None); // a generic/pt route: route it
             return Ok(());
         }
+        if staged && (route.start.as_deref() != ends.0 || route.end.as_deref() != ends.1) {
+            self.leg(mode, tt, None); // access/egress to other links than the activities'
+            return Ok(());
+        }
         let ids: Vec<&str> = route.text.split_whitespace().collect();
         if ids.is_empty()
             || Some(ids[0]) != route.start.as_deref()
@@ -497,9 +527,16 @@ impl Columns {
         let (rtt, rdist) = if links.is_empty() {
             (0.0, 0.0)
         } else {
-            let tt: Vec<f64> = links.iter().map(|&k| net.fstt[k as usize]).collect();
-            let len: Vec<f64> = links.iter().map(|&k| net.length[k as usize]).collect();
-            (np_sum(&tt), np_sum(&len))
+            // the route's own time and distance (MATSim's), else the free-speed sums
+            let rtt = match non_empty(&route.trav_time).filter(|&t| t != "undefined") {
+                Some(t) => parse_time(t)?, // ("undefined": MATSim's "no time")
+                None => np_sum(&links.iter().map(|&k| net.fstt[k as usize]).collect::<Vec<f64>>()),
+            };
+            let rdist = match non_empty(&route.distance) {
+                Some(d) => pyfloat(d)?,
+                None => np_sum(&links.iter().map(|&k| net.length[k as usize]).collect::<Vec<f64>>()),
+            };
+            (rtt, rdist)
         };
         self.leg(mode, tt, Some((links, rtt, rdist)));
         Ok(())
@@ -624,7 +661,8 @@ impl<'a> Parser<'a> {
                 }
             }
             Kind::Route => {
-                let [typ, start, end] = read_attrs(e, [b"type", b"start_link", b"end_link"])?;
+                let [typ, start, end, trav_time, distance] = read_attrs(
+                    e, [b"type", b"start_link", b"end_link", b"trav_time", b"distance"])?;
                 self.leg.route_seen = true;
                 if self.keep_routes {
                     // (without keep_routes the route only marks the leg's first <route>)
@@ -632,6 +670,8 @@ impl<'a> Parser<'a> {
                         typ: owned(typ),
                         start: owned(start),
                         end: owned(end),
+                        trav_time: owned(trav_time),
+                        distance: owned(distance),
                         text: String::new(),
                     });
                     self.capture();
@@ -715,8 +755,8 @@ impl<'a> Parser<'a> {
     }
 
     fn activity(&mut self, e: &BytesStart) -> R<()> {
-        let [typ, x, y, node, link, end_time, dur, max_dur] = read_attrs(
-            e, [b"type", b"x", b"y", b"node", b"link", b"end_time", b"dur", b"max_dur"])?;
+        let [typ, x, y, node, link, end_time, dur, max_dur, facility] = read_attrs(
+            e, [b"type", b"x", b"y", b"node", b"link", b"end_time", b"dur", b"max_dur", b"facility"])?;
         if typ.as_deref().unwrap_or("").ends_with(" interaction") {
             self.plan.trip.push(None);
             return Ok(());
@@ -729,7 +769,7 @@ impl<'a> Parser<'a> {
         }
         let typ = typ.ok_or("activity without type")?;
         let typ = code(&mut self.out.type_code, &mut self.out.act_types, &typ);
-        let (x, y) = match (&x, &y) {
+        let (mut x, mut y) = match (&x, &y) {
             (Some(x), Some(y)) => (pyfloat(x)?, pyfloat(y)?),
             _ => (f64::NAN, f64::NAN),
         };
@@ -741,10 +781,22 @@ impl<'a> Parser<'a> {
             let n = self.net.to_node[link_index as usize];
             i32::try_from(n).map_err(|_| "node index")?
         } else {
-            if x.is_nan() || y.is_nan() {
-                bail!("activity without location");
+            if x.is_nan() {
+                // only a facility: its link, or its coordinates
+                let (fx, fy, fl) = facility.as_deref()
+                    .and_then(|f| self.net.facilities.get(f).copied())
+                    .ok_or("activity without location")?;
+                (x, y, link_index) = (fx, fy, fl);
             }
-            -1
+            if link_index >= 0 {
+                let n = self.net.to_node[link_index as usize];
+                i32::try_from(n).map_err(|_| "node index")?
+            } else {
+                if y.is_nan() {
+                    bail!("activity without location");
+                }
+                -1
+            }
         };
         let end = match non_empty(&end_time) {
             Some(t) => parse_time(t)?,
@@ -754,7 +806,8 @@ impl<'a> Parser<'a> {
             Some(t) => parse_time(t)?,
             None => f64::NAN,
         };
-        self.plan.acts.push(Act { typ, node: node_index, end, dur, x, y, link: link_index });
+        self.plan.acts.push(Act { typ, node: node_index, end, dur, x, y, link: link_index,
+                                  link_id: owned(link) });
         Ok(())
     }
 
@@ -765,14 +818,19 @@ impl<'a> Parser<'a> {
         }
         // a trip after the last activity is dropped, as in the Python reader
         let mut acts = plan.acts.into_iter();
-        self.out.act(acts.next().unwrap());
+        let mut prev = acts.next().unwrap();
         for (leg, act) in plan.legs.into_iter().zip(acts) {
+            let start = prev.link_id.take();
+            self.out.act(prev);
             match leg {
                 TripLeg::Mode(mode) => self.out.leg(&mode, f64::NAN, None),
-                TripLeg::File(leg) => self.out.file_leg(&leg, self.net, self.keep_routes)?,
+                TripLeg::File(leg, staged) => self.out.file_leg(
+                    &leg, self.net, self.keep_routes, staged,
+                    (start.as_deref(), act.link_id.as_deref()))?,
             }
-            self.out.act(act);
+            prev = act;
         }
+        self.out.act(prev);
         self.out.act_offsets.push(self.out.a_type.len() as i64);
         self.out.scores.push(plan.score);
         Ok(())
@@ -1041,7 +1099,7 @@ fn read_file(path: &str, net: &Net, keep_routes: bool, threads: usize, chunk: us
 /// `FallBack` where the Python reader must read it. `threads`: 0 for up to
 /// 8 (the cores); `chunk_bytes`: the size of the parse jobs.
 #[pyfunction]
-#[pyo3(signature = (path, link_ids, node_ids, to_node, free_speed_travel_times, length, keep_routes, threads=0, chunk_bytes=CHUNK))]
+#[pyo3(signature = (path, link_ids, node_ids, to_node, free_speed_travel_times, length, keep_routes, facilities=None, threads=0, chunk_bytes=CHUNK))]
 #[allow(clippy::too_many_arguments)]
 fn read_population_columns<'py>(
     py: Python<'py>,
@@ -1052,6 +1110,7 @@ fn read_population_columns<'py>(
     free_speed_travel_times: Vec<f64>,
     length: Vec<f64>,
     keep_routes: bool,
+    facilities: Option<(Vec<String>, Vec<f64>, Vec<f64>, Vec<i32>)>,
     threads: usize,
     chunk_bytes: usize,
 ) -> PyResult<Bound<'py, PyDict>> {
@@ -1066,6 +1125,13 @@ fn read_population_columns<'py>(
         to_node,
         fstt: free_speed_travel_times,
         length,
+        facilities: facilities.map_or_else(HashMap::new, |(ids, x, y, link)| {
+            let mut map = HashMap::with_capacity(ids.len());
+            for (i, id) in ids.into_iter().enumerate() {
+                map.entry(id).or_insert((x[i], y[i], link[i]));
+            }
+            map
+        }),
     };
     let c = py
         .allow_threads(|| read_file(&path, &net, keep_routes, threads, chunk_bytes))
@@ -1117,7 +1183,8 @@ mod tests {
 
     #[test]
     fn truncated_chunks_are_errors() {
-        let net = Net { link: HashMap::new(), node: HashMap::new(), to_node: vec![], fstt: vec![], length: vec![] };
+        let net = Net { link: HashMap::new(), node: HashMap::new(), to_node: vec![], fstt: vec![], length: vec![],
+                        facilities: HashMap::new() };
         for chunk in ["<person id=\"a\"><plan>", "\n<!-- c ", "<person id=\"a", "<x><![CDATA[ y",
                       "<?pi x", "<person id='a'/></x>", "<x>"] {
             assert!(parse_chunk(chunk.as_bytes(), &net, false).is_err(), "{chunk}");

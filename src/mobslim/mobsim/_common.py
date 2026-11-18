@@ -84,6 +84,61 @@ def link_parameters(
     return free_time.tolist(), (1.0 / cap_per_s).tolist(), storage.tolist()
 
 
+def route_teleports(scenario: Scenario, plans: PlanBatch) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Legs of network modes the mobsim does not simulate (see
+    :class:`~mobslim.modes.Modes`), teleported along their routes:
+    ``(legs, travel_time, distance)`` per leg (time and distance ``0`` for
+    other legs). The time is the leg's own travel time if it has one, else
+    its route's, as in MATSim; the distance is the route's. Raises
+    :class:`SimulationError` for such a leg with neither."""
+    legs = plans.mode_legs({m for m in plans.modes if scenario.modes.is_teleported_network_mode(m)})
+    time, distance = np.zeros(plans.n_legs), np.zeros(plans.n_legs)
+    if legs.any():
+        fixed, route_time = plans.leg_travel_time, plans.leg_route_time
+        time[legs] = np.where(np.isnan(fixed[legs]), route_time[legs], fixed[legs])
+        distance[legs] = np.where(plans.leg_routed[legs], plans.leg_route_distance[legs], 0.0)
+        missing = np.flatnonzero(legs & np.isnan(time))
+        if len(missing):
+            leg = int(missing[0])
+            person = scenario.population.ids.id(int(plans.plan_of_leg()[leg]))
+            raise SimulationError(
+                f"Person {person!r}: '{plans.modes[plans.leg_mode[leg]]}' leg is teleported along "
+                "its route but has no route or travel time. Route plans before simulating "
+                "(Controller.prepare does this).")
+    return legs, time, distance
+
+
+def person_pce(scenario: Scenario, plans: PlanBatch) -> np.ndarray:
+    """Passenger car equivalents of each plan's vehicle: those of the mode of
+    its legs on the network (``scenario.modes.pce``, default 1). Raises
+    :class:`SimulationError` for a plan whose network legs are of modes of
+    different PCEs (one vehicle per person)."""
+    pce = np.ones(plans.n_plans)
+    of_mode = scenario.modes.pce
+    if not plans.n_legs or not any(of_mode.get(m, 1.0) != 1.0 for m in plans.modes):
+        return pce
+    is_net = plans.network_legs(scenario.modes.network_modes)
+    mode_pce = np.array([of_mode.get(m, 1.0) for m in plans.modes])
+    leg_pce = mode_pce[plans.leg_mode]
+    plan = plans.plan_of_leg()
+    hi, lo = np.ones(plans.n_plans), np.ones(plans.n_plans)
+    legs = np.flatnonzero(is_net)
+    if len(legs):
+        hi[:] = -np.inf
+        lo[:] = np.inf
+        np.maximum.at(hi, plan[legs], leg_pce[legs])
+        np.minimum.at(lo, plan[legs], leg_pce[legs])
+        none = np.isinf(hi)
+        hi[none] = lo[none] = 1.0
+    mixed = np.flatnonzero(hi != lo)
+    if len(mixed):
+        person = scenario.population.ids.id(int(mixed[0]))
+        raise SimulationError(
+            f"Person {person!r}: network legs of modes of different passenger car equivalents "
+            "(one vehicle per person is simulated).")
+    return hi
+
+
 def validate(scenario: Scenario, plans: PlanBatch, persons: Optional[np.ndarray] = None) -> None:
     """Raise :class:`SimulationError` for unknown modes or unexecutable routes.
     ``persons[i]``: the person of plan ``i`` (default: person ``i``)."""

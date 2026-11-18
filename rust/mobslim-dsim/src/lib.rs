@@ -222,6 +222,7 @@ struct Inputs {
     // derived
     n_plan_links: usize,
     trip_pce: Vec<f64>,
+    person_pce: Vec<f64>, // per plan: its vehicle's PCE (its mode's, default 1)
     tr_rstart: Vec<usize>, // per trip: its first route position (network mode)
     ride_leg: Vec<u32>,    // per ride: its leg
 }
@@ -274,7 +275,7 @@ impl Inputs {
     }
     #[inline]
     fn pce(&self, v: Veh) -> f64 {
-        if self.is_trip(v) { self.trip_pce[v.p as usize - self.n_plans()] } else { 1.0 }
+        if self.is_trip(v) { self.trip_pce[v.p as usize - self.n_plans()] } else { self.person_pce[v.p as usize] }
     }
     /// The link the trip `d` serves its stop `k` on (network mode), or where
     /// its stop is (schedule mode): the stop's link.
@@ -2015,7 +2016,8 @@ fn csr(n: usize, key: &[u32]) -> (Vec<usize>, Vec<u32>) {
                     trip_link_offsets, trip_links, trip_link_steps, trip_capacity, trip_pce,
                     trip_access_steps, trip_egress_steps, trip_parallel, door_open_steps,
                     door_close_steps, trip_network, rs_network, rs_link, buffer_in_storage=true, junction_delay=1,
-                    traversal_slot=0.0, traversal_slot_bin=None, link_times=true))]
+                    traversal_slot=0.0, traversal_slot_bin=None, link_times=true,
+                    person_pce=None))]
 #[allow(clippy::too_many_arguments)]
 fn run<'py>(
     py: Python<'py>,
@@ -2074,6 +2076,7 @@ fn run<'py>(
     traversal_slot: f64,
     traversal_slot_bin: Option<PyReadonlyArray1<'py, i64>>,
     link_times: bool,
+    person_pce: Option<PyReadonlyArray1<'py, f64>>,
 ) -> PyResult<Bound<'py, PyTuple>> {
     let n_links = cap.as_array().len();
     let act_offsets = act_offsets.as_array().to_vec();
@@ -2230,6 +2233,11 @@ fn run<'py>(
         door_close: door_close_steps,
         n_plan_links,
         trip_pce: trip_pce.as_array().to_vec(),
+        person_pce: match &person_pce {
+            Some(a) if a.as_array().len() == n_plans => a.as_array().to_vec(),
+            Some(_) => return Err(err("person_pce must have one entry per plan")),
+            None => vec![1.0; n_plans],
+        },
         tr_rstart,
         ride_leg,
     };

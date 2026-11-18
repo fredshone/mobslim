@@ -82,7 +82,9 @@ from mobslim.mobsim._common import (
     EPS,
     check_timing,
     link_parameters,
+    person_pce,
     round_steps,
+    route_teleports,
     validate,
 )
 from mobslim.mobsim._transit_tables import transit_times
@@ -318,6 +320,10 @@ def kernel_inputs(scenario: Scenario, plans: PlanBatch, cfg: HermesSimParams,
             tele_time[legs] = tele_distance[legs] / speed
     fixed = ~is_net & ~is_transit & ~np.isnan(plans.leg_travel_time)
     tele_time[fixed] = plans.leg_travel_time[fixed]
+    # network modes that are not simulated: teleported along their routes
+    on_route, route_time, route_distance = route_teleports(scenario, plans)
+    tele_time[on_route] = route_time[on_route]
+    tele_distance[on_route] = route_distance[on_route]
     n_trips = 0 if scenario.transit is None else scenario.transit.schedule.n_departures
     if max(plans.n_plans, plans.n_acts, plans.n_legs, net.n_links, n_trips) >= MAX_INDEX:
         raise ValueError(f"HermesSim supports fewer than {MAX_INDEX} persons, trips, "
@@ -337,6 +343,7 @@ def kernel_inputs(scenario: Scenario, plans: PlanBatch, cfg: HermesSimParams,
         end_time=math.inf if cfg.end_time is None else float(cfg.end_time),
         event_mask=int(event_mask),
         junction_delay=int(bool(getattr(cfg, "junction_delays", False))),
+        person_pce=person_pce(scenario, plans),  # each person's vehicle (mode's PCE)
     )
     inputs.update(_transit_inputs(scenario, plans, xy, is_transit, free_steps, rounding))
     return inputs, tele_distance
@@ -506,7 +513,7 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
                trip_link_steps, trip_capacity, trip_pce, trip_access_steps,
                trip_egress_steps, trip_parallel, door_open_steps, door_close_steps,
                trip_network, rs_network,
-               junction_delay=0):
+               junction_delay=0, person_pce=None):
     """The reference kernel. ``rust/mobslim-hermes/src/lib.rs`` is a line-for-line port.
 
     Returns ``(act_start, act_end, leg_departure, leg_arrival, link_enter,
@@ -582,7 +589,8 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
     a_link = [-1] * n_veh
     a_blocked: list = [None] * n_veh  # blocked from departing since
     a_waiting = [-1] * n_veh  # registered as a waiter on this link
-    v_pce = [1.0] * n_plans + trip_pce
+    # per vehicle: each person's (default 1), then the trips'
+    v_pce = ([1.0] * n_plans if person_pce is None else [float(x) for x in person_pce]) + trip_pce
     # links
     l_queue = [deque() for _ in range(n_links)]  # (vehicle, earliest exit)
     l_occ = [0.0] * n_links  # PCE on the link (incl. trips pulled into a stop)

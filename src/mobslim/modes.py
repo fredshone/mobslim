@@ -12,7 +12,13 @@ Every mode is of one *kind* (:meth:`Modes.kind`), in this order of precedence:
   ``("pt",)`` by default). Its legs ride scheduled vehicles and carry a
   :class:`~mobslim.population.TransitPassengerRoute`. It stays a transit mode even if some
   links list it (MATSim's pt-simple does).
-* ``"network"``: at least one link allows it. Its legs drive the network.
+* ``"network"``: at least one link allows it. Its legs are routed on the
+  network, and drive it in the mobsim if it is a *simulated* mode
+  (``simulated``: MATSim's ``qsim.mainMode``; ``None``, the default: every
+  network mode). Other network modes (MATSim's ride and bike, say) are
+  teleported along their routes: in the leg's own travel time if it has
+  one, else the route's (``Leg.travel_time``, ``Route.travel_time``), over
+  the route's distance, as MATSim's QSim does.
 * ``"teleported"``: listed in ``teleported``. Its legs travel at
   ``beeline * beeline_distance_factor / speed`` between the activities'
   coordinates.
@@ -43,9 +49,17 @@ class Modes:
     teleported: Mapping[str, TeleportedModeParams] = field(default_factory=dict)
     transit: Optional["Transit"] = None
     person_max_speeds: Mapping[str, np.ndarray] = field(default_factory=dict)
+    # network modes that drive the network in the mobsim (None: all of them)
+    simulated: Optional[frozenset[str]] = None
+    # passenger car equivalents of a simulated mode's vehicles (default 1): the
+    # storage and flow they take (MATSim's vehicle types per mode)
+    pce: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self):
         object.__setattr__(self, "teleported", dict(self.teleported))
+        if self.simulated is not None:
+            object.__setattr__(self, "simulated", frozenset(self.simulated))
+        object.__setattr__(self, "pce", {m: float(v) for m, v in dict(self.pce).items()})
         speeds = {}
         for mode, col in dict(self.person_max_speeds).items():
             col = np.asarray(col, dtype=float)
@@ -98,9 +112,21 @@ class Modes:
         return frozenset(self.transit.params.passenger_modes)
 
     @property
-    def network_modes(self) -> frozenset[str]:
-        """Modes that drive the network (link modes that are not transit modes)."""
+    def routed_network_modes(self) -> frozenset[str]:
+        """Modes routed on the network (link modes that are not transit modes)."""
         return self.network.modes - self.transit_modes
+
+    @property
+    def network_modes(self) -> frozenset[str]:
+        """Modes that drive the network in the mobsim: the routed network
+        modes that are simulated (see ``simulated``)."""
+        routed = self.routed_network_modes
+        return routed if self.simulated is None else routed & self.simulated
+
+    def is_teleported_network_mode(self, mode: str) -> bool:
+        """Whether ``mode`` is routed on the network but teleported along its
+        route in the mobsim (a network mode that is not simulated)."""
+        return mode in self.routed_network_modes and mode not in self.network_modes
 
     def kind(self, mode: str) -> str:
         """``"transit"``, ``"network"`` or ``"teleported"`` (``KeyError`` if unknown)."""

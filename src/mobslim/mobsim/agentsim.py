@@ -78,8 +78,10 @@ from mobslim.mobsim._common import (
     fire,
     link_parameters,
     none_if_nan,
+    person_pce,
     planned_end,
     round_steps,
+    route_teleports,
     validate,
 )
 from mobslim.planbatch import PlanBatch
@@ -170,11 +172,12 @@ _MAX_CHAIN = 256  # longest blocking chain walked before settling for a looser b
 class _Agent:
     __slots__ = ("index", "act", "last_act", "leg", "rpos", "rend", "link", "earliest",
                  "transition", "blocked_since", "retry_at", "distance", "done",
-                 "ride", "ride_end", "has_stale")
+                 "ride", "ride_end", "has_stale", "pce")
     is_trip = False  # transit vehicles are ``_agentsim_transit._Trip``
 
-    def __init__(self, index: int, first_act: int, last_act: int, transition):
+    def __init__(self, index: int, first_act: int, last_act: int, transition, pce: float = 1.0):
         self.index = index
+        self.pce = pce  # storage and flow of the person's vehicle (its mode's PCE)
         self.act = first_act  # global index of the current (or last) activity
         self.last_act = last_act
         self.leg: Optional[int] = None  # global index of the current leg
@@ -272,6 +275,10 @@ class _AgentSimRun(_TransitMixin):
         self.leg_mode = [plans.modes[c] for c in plans.leg_mode.tolist()]
         self.leg_network = plans.network_legs(scenario.modes.network_modes).tolist()
         self.leg_fixed_time = none_if_nan(plans.leg_travel_time)
+        # network modes not simulated: teleported along their routes
+        on_route, route_time, route_distance = route_teleports(scenario, plans)
+        self.leg_on_route = on_route.tolist()
+        self.leg_route_teleport = list(zip(route_time.tolist(), route_distance.tolist()))
         self.route_offsets = plans.route_offsets.tolist()
         # route positions resolved to link objects up front (no index lookup per step)
         self.route = [links[i] for i in plans.route_links.tolist()]
@@ -290,7 +297,8 @@ class _AgentSimRun(_TransitMixin):
 
         offsets = plans.act_offsets.tolist()
         end_activity = _AgentSimRun._end_activity
-        self.agents = [_Agent(i, offsets[i], offsets[i + 1] - 1, end_activity)
+        pce = person_pce(scenario, plans).tolist()
+        self.agents = [_Agent(i, offsets[i], offsets[i + 1] - 1, end_activity, pce[i])
                        for i in range(plans.n_plans)]
         self.n_persons = plans.n_plans
         self.transit = scenario.transit
@@ -482,10 +490,13 @@ class _AgentSimRun(_TransitMixin):
         elif self.leg_transit[leg]:
             self._pt_depart(agent)
         else:
-            tt, agent.distance = self.modes.teleport(
-                self.leg_mode[leg], self.act_xy[a], self.act_xy[a + 1], self.leg_fixed_time[leg],
-                agent.index,
-            )
+            if self.leg_on_route[leg]:
+                tt, agent.distance = self.leg_route_teleport[leg]
+            else:
+                tt, agent.distance = self.modes.teleport(
+                    self.leg_mode[leg], self.act_xy[a], self.act_xy[a + 1],
+                    self.leg_fixed_time[leg], agent.index,
+                )
             if self.whole:
                 tt = float(round_steps(tt, self.cfg.rounding))
             self.schedule(self.now + tt, agent, _AgentSimRun._end_teleport)
@@ -562,7 +573,7 @@ class _AgentSimRun(_TransitMixin):
         earliest = agent.earliest = now + link.free_time
         if agent.rpos + 1 < agent.rend:  # crosses a junction after it
             earliest = agent.earliest = earliest + self.junction
-        link.occupied += 1.0
+        link.occupied += agent.pce
         queue = link.queue
         queue.append(agent)
         if len(queue) == 1:  # head of the queue: schedule its exit
@@ -593,8 +604,8 @@ class _AgentSimRun(_TransitMixin):
         queue.popleft()
         if self.on_leave:
             fire(self.on_leave, LinkLeave(now, agent.index, link.index))
-        link.occupied -= 1.0
-        nft = link.next_flow_time = self._next_flow_time(link, agent)
+        link.occupied -= agent.pce
+        nft = link.next_flow_time = self._next_flow_time(link, agent, agent.pce)
         if queue:
             successor = queue[0]
             if successor.is_trip:
@@ -612,7 +623,7 @@ class _AgentSimRun(_TransitMixin):
         earliest = agent.earliest = now + nxt.free_time
         if next_pos + 1 < agent.rend:  # crosses a junction after it
             earliest = agent.earliest = earliest + self.junction
-        nxt.occupied += 1.0
+        nxt.occupied += agent.pce
         nqueue = nxt.queue
         nqueue.append(agent)
         if len(nqueue) == 1:
@@ -627,8 +638,8 @@ class _AgentSimRun(_TransitMixin):
         if self.on_leave:
             fire(self.on_leave, LinkLeave(now, agent.index, link.index))
         agent.link = None
-        link.occupied -= 1.0
-        nft = link.next_flow_time = self._next_flow_time(link, agent)
+        link.occupied -= agent.pce
+        nft = link.next_flow_time = self._next_flow_time(link, agent, agent.pce)
         if queue:  # the next vehicle becomes the head
             successor = queue[0]
             if successor.is_trip:

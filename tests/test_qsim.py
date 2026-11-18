@@ -62,6 +62,50 @@ def test_flow_capacity_headway():
     assert arrivals(events) == [10.0 * (k + 1) for k in range(10)]
 
 
+def _two_mode_chain(modes, capacity=3600.0):
+    """Nodes 0..3 in a line, three 100 m links at 10 m/s allowing ``modes``."""
+    b = NetworkBuilder()
+    for i in range(4):
+        b.add_node(i, 100.0 * i, 0.0)
+    for i in range(3):
+        b.add_link(f"{i}-{i + 1}", i, i + 1, 100.0, 10.0, capacity, modes=modes)
+    return b.build()
+
+
+def test_vehicles_take_their_modes_pce_of_flow():
+    """A mode's PCE (MATSim's vehicle types): a vehicle of PCE 2 takes twice
+    a car's flow headway at a link's exit."""
+    net = _two_mode_chain(("car", "truck"), capacity=360.0)  # 1 PCE / 10 s
+    gaps = {}
+    for mode in ("car", "truck"):
+        pop = Population.from_plans({i: Plan.builder().act("h", 0, end_time=0.0).leg(mode)
+                                     .act("w", 3).build() for i in range(4)})
+        events = simulate(routed(Scenario(net, pop, mode_pce={"truck": 2.0})))
+        gaps[mode] = [b - a for a, b in zip(arrivals(events), arrivals(events)[1:])]
+    assert gaps["car"] == [10.0] * 3 and gaps["truck"] == [20.0] * 3
+
+
+def test_network_modes_not_simulated_are_teleported_along_their_routes():
+    """MATSim's qsim.mainMode: a network mode the mobsim does not simulate is
+    routed on the network, then teleported in its route's time over its
+    distance, taking no road capacity."""
+    net = _two_mode_chain(("car", "bike"), capacity=360.0)
+    pop = Population.from_plans({
+        "car": Plan.builder().act("h", 0, end_time=100.0).leg("car").act("w", 3).build(),
+        "bike": Plan.builder().act("h", 0, end_time=100.0).leg("bike").act("w", 3).build(),
+    })
+    scenario = routed(Scenario(net, pop, simulated_modes={"car"}))
+    route = scenario.population.by_id("bike").selected_plan.legs[0].route
+    assert route.links and route.travel_time == pytest.approx(30.0)
+    events = simulate(scenario)
+    bike = scenario.population.ids.index("bike")
+    assert not [e for e in events if isinstance(e, LinkEnter) and e.person == bike]
+    (arrival,) = [e.time for e in events if isinstance(e, PersonArrival) and e.person == bike]
+    assert arrival == pytest.approx(130.0)
+    (tele,) = [e for e in events if isinstance(e, Teleportation) and e.person == bike]
+    assert tele.distance == pytest.approx(route.distance)
+
+
 def test_fractional_flow_capacity_is_not_rounded():
     net = chain_network([100], freespeed=10, capacity=2000)  # 1.8 s headway
     n = 51

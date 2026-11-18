@@ -34,10 +34,16 @@ class Scenario:
     transit: Optional["Transit"] = None
     # mode -> one maximum speed [m/s] per person index (NaN: the mode's); see Modes
     person_max_speeds: Mapping[str, Any] = field(default_factory=dict)
+    # network modes simulated on the network (MATSim's qsim.mainMode; None:
+    # all); the others are teleported along their routes (see Modes)
+    simulated_modes: Optional[frozenset] = None
+    # network mode -> passenger car equivalents of its vehicles (default 1)
+    mode_pce: Mapping[str, float] = field(default_factory=dict)
 
     @cached_property
     def modes(self) -> Modes:
-        return Modes(self.network, self.teleported_modes, self.transit, self.person_max_speeds)
+        return Modes(self.network, self.teleported_modes, self.transit, self.person_max_speeds,
+                     self.simulated_modes, self.mode_pce)
 
     def with_population(self, population: Population) -> "Scenario":
         return replace(self, population=population)

@@ -250,7 +250,7 @@ def psim_inputs(scenario: Scenario, plans: PlanBatch, cfg: PSimParams,
     inputs = {k: h[k] for k in (
         "free_steps", "headway", "storage", "act_offsets", "act_end_time", "act_duration",
         "leg_network", "leg_teleport_steps", "route_offsets", "route_links", "stuck_time",
-        "end_time", "event_mask", "junction_delay") + TRANSIT_KEYS}
+        "end_time", "event_mask", "junction_delay", "person_pce") + TRANSIT_KEYS}
     inputs["link_from"] = net.from_node.astype(np.int64)
     inputs["link_to"] = net.to_node.astype(np.int64)
     inputs["n_nodes"] = int(net.n_nodes)
@@ -305,7 +305,7 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
                trip_link_steps, trip_capacity, trip_pce, trip_access_steps,
                trip_egress_steps, trip_parallel, door_open_steps, door_close_steps,
                trip_network, rs_network,
-               rs_node, junction_delay=0):
+               rs_node, junction_delay=0, person_pce=None):
     """The reference kernel, on one thread. ``rust/mobslim-psim/src/lib.rs``
     implements the same rules on partitions in parallel, with identical results.
 
@@ -372,7 +372,8 @@ def run_kernel(*, free_steps, headway, storage, act_offsets, act_end_time, act_d
     a_rpos = [0] * n_veh
     a_rend = [0] * n_veh
     a_link = [-1] * n_veh
-    v_pce = [1.0] * n_plans + trip_pce
+    # per vehicle: each person's (default 1), then the trips'
+    v_pce = ([1.0] * n_plans if person_pce is None else [float(x) for x in person_pce]) + trip_pce
     # links, exit side (owned by the to-node)
     l_queue = [deque() for _ in range(n_links)]  # (vehicle, next link or -1, earliest exit)
     l_nft = [0.0] * n_links  # next free flow slot (unrounded)

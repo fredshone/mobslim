@@ -66,6 +66,8 @@ from mobslim.mobsim._common import (
 )
 from mobslim.mobsim._common import fire as _fire
 from mobslim.mobsim._common import none_if_nan as _none_if_nan
+from mobslim.mobsim._common import person_pce as _person_pce
+from mobslim.mobsim._common import route_teleports as _route_teleports
 from mobslim.mobsim._common import validate as _validate
 from mobslim.mobsim._transit import _TransitRun
 from mobslim.planbatch import PlanBatch
@@ -132,12 +134,12 @@ class QSim:
 class _Agent:
     __slots__ = ("index", "act", "last_act", "leg", "rpos", "rend",
                  "link", "blocked_since", "waiting_on", "distance", "done",
-                 "ride", "ride_end")
+                 "ride", "ride_end", "pce")
     is_trip = False
-    pce = 1.0
 
-    def __init__(self, index: int, first_act: int, last_act: int):
+    def __init__(self, index: int, first_act: int, last_act: int, pce: float = 1.0):
         self.index = index
+        self.pce = pce  # storage and flow of the person's vehicle (its mode's PCE)
         self.act = first_act  # global index of the current (or last) activity
         self.last_act = last_act
         self.leg: Optional[int] = None  # global index of the current leg
@@ -221,6 +223,10 @@ class _QSimRun:
         self.leg_mode = [plans.modes[c] for c in plans.leg_mode.tolist()]
         self.leg_network = plans.network_legs(self.modes.network_modes).tolist()
         self.leg_fixed_time = _none_if_nan(plans.leg_travel_time)
+        # network modes not simulated: teleported along their routes
+        on_route, route_time, route_distance = _route_teleports(self.scenario, plans)
+        self.leg_on_route = on_route.tolist()
+        self.leg_route_teleport = list(zip(route_time.tolist(), route_distance.tolist()))
         self.route_offsets = plans.route_offsets.tolist()
         self.route_links = plans.route_links.tolist()
         self.leg_transit = plans.mode_legs(self.modes.transit_modes).tolist()
@@ -236,7 +242,8 @@ class _QSimRun:
         self.t_stuck = [False] * plans.n_plans
 
         offsets = plans.act_offsets.tolist()
-        self.agents = [_Agent(i, offsets[i], offsets[i + 1] - 1) for i in range(plans.n_plans)]
+        pce = _person_pce(self.scenario, plans).tolist()
+        self.agents = [_Agent(i, offsets[i], offsets[i + 1] - 1, pce[i]) for i in range(plans.n_plans)]
         self.transit = None
         if scenario.transit is not None:
             self.transit = _TransitRun(self, scenario.transit, plans,
@@ -352,10 +359,13 @@ class _QSimRun:
             self.transit.depart(agent)
         else:
             a = agent.act
-            tt, agent.distance = self.modes.teleport(
-                self.leg_mode[leg], self.act_xy[a], self.act_xy[a + 1], self.leg_fixed_time[leg],
-                agent.index,
-            )
+            if self.leg_on_route[leg]:
+                tt, agent.distance = self.leg_route_teleport[leg]
+            else:
+                tt, agent.distance = self.modes.teleport(
+                    self.leg_mode[leg], self.act_xy[a], self.act_xy[a + 1],
+                    self.leg_fixed_time[leg], agent.index,
+                )
             if self.whole:
                 tt = float(round_steps(tt, self.cfg.rounding))
             self.schedule(self.now + tt, _TELEPORT_ARRIVE, agent)

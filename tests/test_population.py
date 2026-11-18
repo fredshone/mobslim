@@ -320,7 +320,8 @@ def _act(type, node, link=None, end=None, dur=None, x=None, y=None):
 _EXPECTED_V6 = [
     ("a", 1, (12.5, -3.25), {"age": 32.0, "car": True, "income": 1.5, "subpopulation": "x"},
      [[_act("h", "2", "1", end=21600.0, x=-25000.0, y=0.0),
-       ("leg", "car", 1200.0, (["6", "15", "20"], 899.928, 25000.0)),
+       # the route's own trav_time and distance (else the free-speed sums, as below)
+       ("leg", "car", 1200.0, (["6", "15", "20"], 1200.0, 25000.0)),
        _act("w", "13", "20", dur=28800.0),
        ("leg", "car", None, (["21", "22", "23", "1"], 2339.813, 65000.0)),
        _act("h", "2", "1")],
@@ -393,6 +394,70 @@ def test_read_population_streamed_matches_whole_document_reader(equil_scenario, 
         assert _read_compiled(paths["v6.xml"], net, keep_routes) is not None
         # plans_v4 node routes are only kept by the Python reader
         assert (_read_compiled(paths["v4.xml"], net, keep_routes) is None) == keep_routes
+
+
+_STAGED = """<population>
+ <person id="s"><plan selected="yes">
+  <activity type="h" link="1" x="-25000" y="0" end_time="06:00:00"/>
+  <leg mode="walk"><attributes><attribute name="routingMode" class="java.lang.String">car</attribute></attributes>
+   <route type="generic" start_link="1" end_link="1" trav_time="00:00:30" distance="40.0"></route></leg>
+  <activity type="car interaction" link="1" x="-25000" y="0" max_dur="00:00:00"/>
+  <leg mode="car"><route type="links" start_link="1" end_link="20" trav_time="00:20:00" distance="25000.0">1 6 15 20</route></leg>
+  <activity type="car interaction" link="20" x="0" y="0" max_dur="00:00:00"/>
+  <leg mode="walk"><route type="generic" start_link="20" end_link="20" trav_time="00:00:30" distance="40.0"></route></leg>
+  <activity type="w" link="20" max_dur="01:00:00"/>
+  <leg mode="walk"><route type="generic" start_link="20" end_link="21" distance="300.0"></route></leg>
+  <activity type="car interaction" link="21" max_dur="00:00:00"/>
+  <leg mode="car"><route type="links" start_link="21" end_link="1">21 22 23 1</route></leg>
+  <activity type="car interaction" link="1" max_dur="00:00:00"/>
+  <leg mode="walk"><route type="generic" start_link="1" end_link="1"></route></leg>
+  <activity type="h" link="1" max_dur="01:00:00"/>
+  <leg mode="car"><route type="links" start_link="1" end_link="20" trav_time="undefined">1 6 15 20</route></leg>
+  <activity type="shop" facility="f_xy" max_dur="00:30:00"/>
+  <leg mode="car"/>
+  <activity type="shop" facility="f_link"/>
+ </plan></person>
+</population>
+"""
+_FACILITIES = """<facilities>
+ <facility id="f_xy" x="1000.0" y="200.0"><activity type="shop"/></facility>
+ <facility id="f_link" x="-500.0" y="0.0" linkRefId="20"/>
+</facilities>
+"""
+
+
+def test_read_population_staged_trips_and_facilities(equil_scenario, tmp_path, plans_reader):
+    """A trip's network leg between access and egress walks keeps its route
+    when the route runs between the activities' links (with the route's own
+    time and distance; ``undefined``: the free-speed sum). Activities that
+    name only a facility are placed at it (its link, or its coordinates)."""
+    from mobslim.formats.matsim_facilities import read_facilities_xml
+    from mobslim.formats.matsim_plans import _read_compiled
+
+    net = equil_scenario.network
+    plans, fac_path = tmp_path / "plans.xml", tmp_path / "facilities.xml"
+    plans.write_text(_STAGED)
+    fac_path.write_text(_FACILITIES)
+    facilities = read_facilities_xml(fac_path, net)
+    plan = read_population_xml(plans, net, keep_routes=True, facilities=facilities).by_id("s") \
+        .selected_plan
+    legs, acts = plan.legs, plan.activities
+    assert [leg.mode for leg in legs] == ["car"] * 4
+    links = [net.link_index(i) for i in ("6", "15", "20")]
+    assert legs[0].route.links == tuple(links)
+    assert (legs[0].route.travel_time, legs[0].route.distance) == (1200.0, 25000.0)
+    assert legs[1].route is None  # starts on link 21, not the activity's: routed
+    assert legs[2].route.travel_time == pytest.approx(
+        float(net.free_speed_travel_times()[links].sum()))
+    assert legs[3].route is None
+    assert (acts[3].x, acts[3].y, acts[3].link) == (1000.0, 200.0, None)
+    assert acts[3].node == net.nearest_node(1000.0, 200.0)
+    assert (acts[4].x, acts[4].link) == (-500.0, net.link_index("20"))
+    assert acts[4].node == int(net.to_node[net.link_index("20")])
+    if plans_reader == "compiled":  # read by it, not handed to the Python reader
+        assert _read_compiled(plans, net, True, facilities) is not None
+    with pytest.raises(ValueError, match="no node, link or coordinates"):
+        read_population_xml(plans, net, keep_routes=True)  # facilities needed
 
 
 def _same_read(a: tuple, b: tuple) -> None:

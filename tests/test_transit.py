@@ -171,6 +171,20 @@ def rides_of(tr, person):
 # ---------------------------------------------------------------- data model
 
 
+def test_decreasing_stop_offsets_are_raised_with_a_warning(caplog):
+    """Converted GTFS feeds have stops reached before the last one was left
+    (MATSim takes them as given): they are raised to the earlier time."""
+    stops = [("S0", 0.0, 0.0, True), ("S1", 120.0, 180.0, True),
+             ("S2", 150.0, 200.0, True),  # arrives before S1 departs
+             ("S3", 400.0, 350.0, True),  # departs before it arrives
+             ("S4", 480.0, 480.0, True)]
+    with caplog.at_level("WARNING", logger="mobslim.transit.schedule"):
+        s = corridor_transit(corridor_network(), stops=stops).schedule
+    assert s.rs_arrival.tolist() == [0.0, 120.0, 180.0, 400.0, 480.0]
+    assert s.rs_departure.tolist() == [0.0, 180.0, 200.0, 400.0, 480.0]
+    assert "2 stop offsets" in caplog.text
+
+
 def test_default_vehicle_mode_is_schedule():
     assert TransitParams().vehicles == "schedule"
 

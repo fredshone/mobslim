@@ -131,6 +131,26 @@ def routing_groups(ctx: ReplanningContext):
     return codes.reshape(-1), weights, persons
 
 
+def _on_mode_network(modes, mode: str, origins, destinations):
+    """``(origins, destinations)`` (node indices) to route ``mode`` between.
+    For a network mode the mobsim teleports along its route (see
+    :class:`~mobslim.modes.Modes`), an origin no ``mode`` link leaves, or a
+    destination none enters, is replaced by the nearest node one does, as
+    MATSim reaches a mode's network by walking: only the route's time and
+    distance are used. Other modes route between the nodes as given."""
+    if not modes.is_teleported_network_mode(mode):
+        return origins, destinations
+    net = modes.network
+    out = []
+    for nodes, outgoing in ((origins, True), (destinations, False)):
+        nodes = np.array(nodes, dtype=np.int64)
+        for k in np.flatnonzero(~net.mode_nodes(mode, outgoing)[nodes]).tolist():
+            x, y = net.node_xy[nodes[k]].tolist()
+            nodes[k] = net.nearest_mode_node(mode, x, y, outgoing)
+        out.append(nodes)
+    return out[0], out[1]
+
+
 def route_plans(plans: Sequence[Plan], ctx: ReplanningContext,
                 weights: Optional[Sequence] = None,
                 persons: Optional[Sequence[Optional[int]]] = None) -> list[Plan]:
@@ -175,10 +195,12 @@ def route_plans(plans: Sequence[Plan], ctx: ReplanningContext,
             else:
                 origins = [s[1][s[2] - 1] for s in states]
                 dests = [s[1][s[2] + 1] for s in states]
+                o_nodes, d_nodes = _on_mode_network(modes, mode, [a.node for a in origins],
+                                                    [a.node for a in dests])
                 routes = route_many_to_links(
                     router, modes.network, mode,
-                    [a.node for a in origins], [a.link for a in origins],
-                    [a.node for a in dests], [a.link for a in dests],
+                    [int(v) for v in o_nodes], [a.link for a in origins],
+                    [int(v) for v in d_nodes], [a.link for a in dests],
                     [s[3] for s in states],
                 )
             for s, route in zip(states, routes):
@@ -516,9 +538,11 @@ def route_batch(batch: PlanBatch, ctx: ReplanningContext, persons=None) -> PlanB
             o, dst = a[ks], a[ks] + 1
             router = ctx.router(mode)
             if not modes.is_transit_mode(mode):
+                o_nodes, d_nodes = _on_mode_network(modes, mode, batch.act_node[o],
+                                                    batch.act_node[dst])
                 arrays = route_many_to_links_arrays(
-                    router, net, mode, batch.act_node[o], batch.act_link[o],
-                    batch.act_node[dst], batch.act_link[dst], t[ks])
+                    router, net, mode, o_nodes, batch.act_link[o],
+                    d_nodes, batch.act_link[dst], t[ks])
                 if arrays is not None:
                     net_routes.append((legs[ks], *arrays))
                     t[ks] = t[ks] + arrays[2]
@@ -534,10 +558,12 @@ def route_batch(batch: PlanBatch, ctx: ReplanningContext, persons=None) -> PlanB
                     routes = router.route_many_xy(*args)
             else:
                 links = batch.act_link
+                o_nodes, d_nodes = _on_mode_network(modes, mode, batch.act_node[o],
+                                                    batch.act_node[dst])
                 routes = route_many_to_links(
                     router, net, mode,
-                    batch.act_node[o].tolist(), [None if v < 0 else v for v in links[o].tolist()],
-                    batch.act_node[dst].tolist(), [None if v < 0 else v for v in links[dst].tolist()],
+                    np.asarray(o_nodes).tolist(), [None if v < 0 else v for v in links[o].tolist()],
+                    np.asarray(d_nodes).tolist(), [None if v < 0 else v for v in links[dst].tolist()],
                     t[ks].tolist())
             for k, route in zip(ks.tolist(), routes):
                 new[int(legs[k])] = route

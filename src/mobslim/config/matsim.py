@@ -78,6 +78,22 @@ class MatsimConfig:
         ET.SubElement(m, "param", name=param, value=str(value))
         return self
 
+    def drop(self, module: str, param: str) -> "MatsimConfig":
+        """Remove ``param`` from ``module`` (MATSim then uses its default)."""
+        m = self._module(module)
+        if m is not None:
+            for p in m.findall("param"):
+                if p.get("name") == param:
+                    m.remove(p)
+        return self
+
+    def drop_module(self, module: str) -> "MatsimConfig":
+        """Remove ``module`` altogether."""
+        m = self._module(module)
+        if m is not None:
+            self.root.remove(m)
+        return self
+
     def input_path(self, module: str, param: str) -> Optional[Path]:
         value = self.get(module, param)
         return self._resolve(value) if value else None
@@ -114,6 +130,8 @@ _QSIM_DEFAULTS = {
     "endTime": None,  # translated
     "startTime": None,  # translated (mobslim starts at the first activity end)
     "snapshotperiod": None,  # output only
+    "mainMode": None,  # translated (read_scenario: Scenario.simulated_modes)
+    "vehiclesSource": None,  # translated (mode_pce)
 }
 
 
@@ -484,13 +502,68 @@ def teleported_modes(cfg: MatsimConfig):
     return modes, unsupported
 
 
+def mode_pce(cfg: MatsimConfig) -> tuple[dict, list[str]]:
+    """``(mode -> PCE, unsupported)`` of the simulated modes' vehicles. With
+    ``qsim.vehiclesSource=modeVehicleTypesFromVehiclesData`` a mode drives
+    the vehicle type of its name in ``vehicles.vehiclesFile``, of that type's
+    passenger car equivalents (MATSim's default source, ``defaultVehicle``:
+    1 for every mode). Person-specific vehicles (``fromVehiclesData``) are
+    unsupported."""
+    source = cfg.get("qsim", "vehiclesSource", "defaultVehicle")
+    path = cfg.get("vehicles", "vehiclesFile")
+    if source == "defaultVehicle":
+        return {}, []
+    if source != "modeVehicleTypesFromVehiclesData" or path in (None, "", "null"):
+        return {}, [f"qsim.vehiclesSource={source}" + ("" if path else " without vehicles.vehiclesFile")]
+    from mobslim.formats.matsim_transit import read_vehicle_types_xml
+
+    types = read_vehicle_types_xml(cfg.input_path("vehicles", "vehiclesFile"))
+    return {m: types[m].get("pce", 1.0) for m in simulated_modes(cfg) if m in types}, []
+
+
+def transit_walk(cfg: MatsimConfig):
+    """How pt passengers walk (to the first stop, between stops, from the
+    last): the routing module's ``walk`` teleport parameters, as MATSim's
+    router and QSim use them (mobslim's default walk if the config has none)."""
+    from mobslim.transit import TransitParams
+
+    modes, _ = teleported_modes(cfg)
+    return modes.get("walk", TransitParams().walk)
+
+
+def simulated_modes(cfg: MatsimConfig) -> frozenset:
+    """``qsim.mainMode``: the network modes MATSim's QSim simulates on the
+    network (default ``car``); other network modes are teleported along their
+    routes (see :class:`~mobslim.modes.Modes`)."""
+    return frozenset(m.strip() for m in (cfg.get("qsim", "mainMode") or "car").split(",")
+                     if m.strip())
+
+
+def read_facilities(cfg: MatsimConfig, network):
+    """The config's facilities (``facilitiesSource=fromFile``), or ``None``:
+    where plans' activities that name only a facility are. A file that is
+    not there is no facilities (MATSim's output configs name one; only
+    activities without a location need it)."""
+    if (cfg.get("facilities", "facilitiesSource") != "fromFile"
+            or cfg.get("facilities", "inputFacilitiesFile") in (None, "", "null")
+            or not cfg.input_path("facilities", "inputFacilitiesFile").exists()):
+        return None
+    from mobslim.formats.matsim_facilities import read_facilities_xml
+
+    return read_facilities_xml(cfg.input_path("facilities", "inputFacilitiesFile"), network)
+
+
 def read_scenario(cfg: MatsimConfig):
     """``network``, ``plans``, ``transit`` and ``routing`` -> (``Scenario``,
     unsupported).
 
-    Routes in the plans file are kept for single-leg network trips, as MATSim
-    keeps them; other legs are routed by the controller before the first
-    iteration. Transit vehicles run on the network, as in MATSim's QSim.
+    Routes in the plans file are kept for single-leg network trips and for
+    the network leg between a trip's access and egress walks, as MATSim keeps
+    them; other legs are routed by the controller before the first
+    iteration. Activities that name only a facility are placed at it
+    (``facilities.facilitiesSource=fromFile``). Only ``qsim.mainMode``'s
+    network modes are simulated on the network, the others teleported along
+    their routes. Transit vehicles run on the network, as in MATSim's QSim.
     """
     from mobslim.formats.matsim_network import read_network_xml
     from mobslim.formats.matsim_plans import read_population_xml
@@ -502,7 +575,7 @@ def read_scenario(cfg: MatsimConfig):
     if network_path is None or plans_path is None:
         raise ValueError("MATSim config needs network.inputNetworkFile and plans.inputPlansFile.")
     for module, param in (("network", "timeVariantNetwork"), ("network", "changeEventsInputFile"),
-                          ("households", "inputFile"), ("vehicles", "vehiclesFile")):
+                          ("households", "inputFile")):
         v = cfg.get(module, param)
         if v not in (None, "", "null", "false"):
             unsupported.append(f"{module}.{param}={v}")
@@ -511,7 +584,8 @@ def read_scenario(cfg: MatsimConfig):
                        if cfg.get("plans", "inputPersonAttributesFile") not in (None, "", "null")
                        else None)
     population = read_population_xml(plans_path, network, keep_routes=True,
-                                     attributes_file=attributes_path)
+                                     attributes_file=attributes_path,
+                                     facilities=read_facilities(cfg, network))
     modes, unsupported_tp = teleported_modes(cfg)
     unsupported += unsupported_tp
     transit = None
@@ -522,8 +596,12 @@ def read_scenario(cfg: MatsimConfig):
         transit = read_transit(cfg.input_path("transit", "transitScheduleFile"),
                                cfg.input_path("transit", "vehiclesFile"), network,
                                TransitParams(passenger_modes=passenger_modes, vehicles="network",
-                                             schedule_modes=deterministic_modes(cfg)))
-    return Scenario(network, population, teleported_modes=modes, transit=transit), unsupported
+                                             schedule_modes=deterministic_modes(cfg),
+                                             walk=transit_walk(cfg)))
+    pce, unsupported_pce = mode_pce(cfg)
+    unsupported += unsupported_pce
+    return Scenario(network, population, teleported_modes=modes, transit=transit,
+                    simulated_modes=simulated_modes(cfg), mode_pce=pce), unsupported
 
 
 def deterministic_modes(cfg: "MatsimConfig") -> tuple:

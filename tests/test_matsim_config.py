@@ -62,6 +62,27 @@ def test_teleported_modes():
     assert "bike" in modes  # defaults kept
 
 
+def test_main_modes_and_vehicle_types(tmp_path):
+    """qsim.mainMode: the network modes simulated; modeVehicleTypesFromVehiclesData:
+    each mode's vehicle type's PCE."""
+    vehicles = tmp_path / "vehicleTypes.xml"
+    vehicles.write_text(
+        '<vehicleDefinitions xmlns="http://www.matsim.org/files/dtd">'
+        '<vehicleType id="car"><passengerCarEquivalents pce="1.0"/></vehicleType>'
+        '<vehicleType id="truck"><passengerCarEquivalents pce="3.5"/></vehicleType>'
+        '<vehicleType id="bike"><passengerCarEquivalents pce="0.2"/></vehicleType>'
+        '</vehicleDefinitions>')
+    cfg = MatsimConfig.load(EQUIL)
+    cfg.set("qsim", "mainMode", "car,truck").set("qsim", "vehiclesSource",
+                                                 "modeVehicleTypesFromVehiclesData")
+    cfg.set("vehicles", "vehiclesFile", str(vehicles))
+    sc = Controller.from_matsim_config(cfg, strict=True).scenario
+    assert sc.simulated_modes == {"car", "truck"}
+    assert sc.mode_pce == {"car": 1.0, "truck": 3.5}  # bike: not simulated
+    plain = Controller.from_matsim_config(EQUIL, strict=True).scenario
+    assert plain.simulated_modes == {"car"} and plain.mode_pce == {}  # MATSim's defaults
+
+
 def test_unsupported_warns_or_raises(caplog):
     cfg = MatsimConfig.load(EQUIL).set("qsim", "trafficDynamics", "kinematicWaves")
     with pytest.raises(UnsupportedConfigError) as err:

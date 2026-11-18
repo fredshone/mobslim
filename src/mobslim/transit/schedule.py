@@ -36,6 +36,7 @@ together in a :class:`~mobslim.transit.Transit`.
 Arrays are read-only. Derived views are cached and dropped when pickling.
 """
 
+import logging
 from dataclasses import dataclass, field, fields
 from typing import Hashable, Iterable, Sequence
 
@@ -49,6 +50,8 @@ _ARRAYS = (
     "rs_stop", "rs_arrival", "rs_departure", "rs_await", "rs_link_pos", "rs_distance",
     "route_links", "dep_time", "dep_vehicle", "mtt_from", "mtt_to", "mtt_time",
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, eq=False)
@@ -215,8 +218,11 @@ def build_schedule(network, stops: Sequence[tuple], routes: Sequence[dict],
     ``transfers``: ``(from_stop, to_stop, time)``.
 
     Raises ``ValueError`` if a route's links are not connected, a stop is
-    not on its route's links in route order, offsets decrease, or a stop is
-    unknown.
+    not on its route's links in route order, or a stop is unknown. Offsets
+    that decrease along a route (an arrival before the previous stop's
+    departure, or a departure before its arrival, which converted GTFS feeds
+    have) are raised to the earlier time, with a warning; MATSim accepts
+    them as given.
     """
     stop_ids = IdMap()
     stop_xy, stop_link, stop_blocking = [], [], []
@@ -236,6 +242,7 @@ def build_schedule(network, stops: Sequence[tuple], routes: Sequence[dict],
     rs_stop, rs_arr, rs_dep, rs_await, rs_pos, rs_dist = [], [], [], [], [], []
     route_links, dep_time, dep_vehicle = [], [], []
     to_node, from_node, length = network.to_node, network.from_node, network.length
+    clamped = 0  # stop offsets raised to the previous stop's departure
     for spec in routes:
         line, rid = spec["line"], spec["route"]
         name = f"{line}/{rid}"
@@ -262,8 +269,10 @@ def build_schedule(network, stops: Sequence[tuple], routes: Sequence[dict],
                 raise ValueError(f"Route {name}: stop {sid!r} has neither an arrival nor a departure offset.")
             arr = dep if arr is None else arr
             dep = arr if dep is None else dep
-            if arr > dep or arr < last_dep:
-                raise ValueError(f"Route {name}: offsets decrease at stop {sid!r}.")
+            if arr < last_dep or dep < arr:  # a stop reached before the last was left
+                arr = max(arr, last_dep)
+                dep = max(dep, arr)
+                clamped += 1
             last_dep = dep
             link = int(stop_link_arr[s])
             if link < 0:
@@ -293,6 +302,10 @@ def build_schedule(network, stops: Sequence[tuple], routes: Sequence[dict],
         rl_offsets.append(len(route_links))
         dep_offsets.append(len(dep_time))
 
+    if clamped:
+        logger.warning("Transit schedule: %d stop offsets were before the previous stop's "
+                       "departure (or a stop's departure before its arrival); raised to it, "
+                       "as a vehicle cannot leave a stop it has not reached.", clamped)
     mtt_from, mtt_to, mtt_time = [], [], []
     for a, b, time in transfers:
         for sid in (a, b):

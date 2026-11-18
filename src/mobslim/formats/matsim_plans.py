@@ -25,7 +25,7 @@ import math
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from xml.sax.saxutils import escape, quoteattr
 
 import numpy as np
@@ -40,6 +40,9 @@ from mobslim.planbatch import PlanBatch, PlanBatchBuilder
 from mobslim.planstore import PlanStore
 from mobslim.population import Population, validate_batch
 from mobslim.timeutils import parse_time
+
+if TYPE_CHECKING:
+    from mobslim.formats.matsim_facilities import Facilities
 
 _HEADER = ('<?xml version="1.0" encoding="utf-8"?>\n'
            '<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">\n\n')
@@ -199,7 +202,8 @@ def _person_attributes(xml_person) -> dict:
 
 
 def read_population_xml(path: str, network: Network, *, keep_routes: bool = False,
-                        attributes_file: Optional[str] = None) -> Population:
+                        attributes_file: Optional[str] = None,
+                        facilities: Optional["Facilities"] = None) -> Population:
     """Read a MATSim ``plans_v4``/``population_v6`` XML file (``.gz`` allowed).
 
     Person attributes are kept in ``population.attributes``: a
@@ -212,18 +216,23 @@ def read_population_xml(path: str, network: Network, *, keep_routes: bool = Fals
 
     Activity location is taken from (in order) a ``node`` attribute, the
     to-node of a ``link`` attribute (the link is kept as ``Activity.link``),
-    or the node nearest to ``x``/``y``.
+    the node nearest to ``x``/``y``, or the ``facility`` in ``facilities``
+    (a :class:`~mobslim.formats.matsim_facilities.Facilities`: its link, or
+    its coordinates).
     Coordinates in the file are kept (``Activity.x, y``). All plans of a
     person are loaded; ``selected="yes"`` is honoured.
 
     Routes in the file are ignored (legs are routed before the first
     iteration) unless ``keep_routes``: then single-leg network trips keep
     their ``type="links"`` route (as in MATSim's output plans), or their
-    ``plans_v4`` node route (the links between the nodes). MATSim's
-    route starts on the departure link, which the vehicle does not
-    traverse, so it is dropped: MobSlim's route runs from the departure
-    link's to-node and includes the arrival link, the same links MATSim
-    traverses. Its travel time and distance are the free-speed sums over
+    ``plans_v4`` node route (the links between the nodes), and so does a
+    trip's one leg of its mode between access and egress walks (MATSim's
+    ``accessEgressModeToLink``) if its route runs from the first activity's
+    link to the second's. MATSim's route starts on the departure link,
+    which the vehicle does not traverse, so it is dropped: MobSlim's route
+    runs from the departure link's to-node and includes the arrival link,
+    the same links MATSim traverses. Its travel time and distance are the
+    route's ``trav_time`` and ``distance``, else the free-speed sums over
     those links. Transit trips are always re-routed.
 
     Plans that already contain MATSim stage activities (``pt interaction``,
@@ -238,7 +247,8 @@ def read_population_xml(path: str, network: Network, *, keep_routes: bool = Fals
     XML, so a malformed file is only reported when the parser reaches the
     fault.
     """
-    read = _read_compiled(path, network, keep_routes) or _read_python(path, network, keep_routes)
+    read = (_read_compiled(path, network, keep_routes, facilities)
+            or _read_python(path, network, keep_routes, facilities))
     batch, ids, n_plans, scores, selected, records = read
     if attributes_file is not None:
         for pid, attrs in read_person_attributes_xml(attributes_file).items():
@@ -256,7 +266,7 @@ def read_population_xml(path: str, network: Network, *, keep_routes: bool = Fals
                                   selected, records)
 
 
-def _read_python(path, network: Network, keep_routes: bool) -> tuple:
+def _read_python(path, network: Network, keep_routes: bool, facilities=None) -> tuple:
     """``(batch, ids, plans per person, scores of the plans in order,
     selected, attribute records)`` of a population file, streamed in Python."""
     records = {}
@@ -265,13 +275,14 @@ def _read_python(path, network: Network, keep_routes: bool) -> tuple:
     with _open_xml(path) as f:
         for xml_person in iter_root_children(f, "person"):
             _read_person(xml_person, network, keep_routes, b, ids, rows, scores, selected,
-                         records)
+                         records, facilities)
     # each person's plans are the next rows of the batch
     return (b.build(), ids, [len(r) for r in rows], [s for sc in scores for s in sc],
             selected, records)
 
 
-def _read_compiled(path, network: Network, keep_routes: bool, **options) -> Optional[tuple]:
+def _read_compiled(path, network: Network, keep_routes: bool, facilities=None,
+                   **options) -> Optional[tuple]:
     """What :func:`_read_python` returns, read by the ``mobslim_io``
     extension; ``None`` if it is not installed or leaves the file to
     :func:`_read_python` (anything it does not read exactly as that does,
@@ -289,6 +300,9 @@ def _read_compiled(path, network: Network, keep_routes: bool, **options) -> Opti
             np.asarray(network.free_speed_travel_times(), dtype=float).tolist(),
             np.asarray(network.length, dtype=float).tolist(),
             keep_routes,
+            facilities=None if facilities is None else (
+                list(facilities.ids), facilities.x.tolist(), facilities.y.tolist(),
+                facilities.link.tolist()),
             **options,
         )
     except mobslim_io.FallBack:
@@ -333,7 +347,7 @@ def _from_columns(c: dict, network: Network) -> tuple:
 
 
 def _read_person(xml_person, network, keep_routes, b, ids, rows, scores, selected,
-                 records) -> None:
+                 records, facilities=None) -> None:
     """Add one ``<person>``'s plans to ``b`` and its id, plan rows, scores,
     selected plan and attributes to the lists. Everything read from the
     element (including each kept route, see :class:`_FileLeg`) is used
@@ -357,14 +371,14 @@ def _read_person(xml_person, network, keep_routes, b, ids, rows, scores, selecte
                     continue
                 if trip:
                     leg = _trip_leg(trip)
-                    if isinstance(leg, _FileLeg):  # the activity links, for v4 node routes
+                    if isinstance(leg, _FileLeg):  # the activity links (v4 node routes, stages)
                         leg = _FileLeg(leg.mode, leg.travel_time, leg.xml,
-                                       last_act.get("link"), el.get("link"))
+                                       last_act.get("link"), el.get("link"), leg.staged)
                     legs.append(leg)
                     trip = []
                 elif acts:
                     raise ValueError(f"Person {pid!r}: two activities without a leg between.")
-                acts.append(_read_activity(el, network))
+                acts.append(_read_activity(el, network, facilities))
                 last_act = el
             elif el.tag == "leg":
                 if not acts:
@@ -403,6 +417,9 @@ class _FileLeg:
     xml: ET.Element
     start_link: Optional[str] = None  # link ids of the activities around it
     end_link: Optional[str] = None
+    # the main leg of a trip with access and egress walks: its route is kept
+    # only if it runs from the first activity's link to the second's
+    staged: bool = False
 
 
 def _file_route(fl: _FileLeg, network: Network) -> tuple:
@@ -418,6 +435,8 @@ def _file_route(fl: _FileLeg, network: Network) -> tuple:
     elif el.get("type", "links") != "links" or el.get("start_link") is None:
         return plain  # a generic/pt route: route it
     else:
+        if fl.staged and (el.get("start_link") != fl.start_link or el.get("end_link") != fl.end_link):
+            return plain  # access/egress to other links than the activities': route it
         ids = (el.text or "").split()
         if not ids or ids[0] != el.get("start_link") or ids[-1] != el.get("end_link"):
             raise ValueError(f"Route {ids} does not run from start_link {el.get('start_link')!r} "
@@ -426,8 +445,11 @@ def _file_route(fl: _FileLeg, network: Network) -> tuple:
     data = links.astype(np.int32).tobytes()
     if links.size == 0:
         return fl.mode, fl.travel_time, data, False, 0.0, 0.0
-    travel_time = float(network.free_speed_travel_times()[links].sum())
-    distance = float(network.length[links].sum())
+    # the route's own time and distance (MATSim's), else the free-speed sums
+    tt, dist = el.get("trav_time"), el.get("distance")
+    travel_time = (parse_time(tt) if tt and tt != "undefined" else  # MATSim's "no time"
+                   float(network.free_speed_travel_times()[links].sum()))
+    distance = float(dist) if dist else float(network.length[links].sum())
     return fl.mode, fl.travel_time, data, False, travel_time, distance
 
 
@@ -496,11 +518,18 @@ def _trip_leg(trip: list):
             mode = "pt"  # legacy files: a pt trip the router made walk-only
         else:
             mode = legs[0].get("mode")
+    # walks to and from one leg of the trip's mode (MATSim's access and
+    # egress): that leg, whose route may be kept
+    main = [el for el in legs if el.get("mode") == mode]
+    if (len(main) == 1 and mode not in _TRIP_WALKS
+            and all(el is main[0] or el.get("mode") in _TRIP_WALKS for el in legs)):
+        return _FileLeg(mode, math.nan, main[0], staged=True)
     return mode
 
 
-def _read_activity(el, network: Network) -> tuple:
-    """``PlanBatchBuilder.act`` arguments for an ``<act>``/``<activity>``."""
+def _read_activity(el, network: Network, facilities=None) -> tuple:
+    """``PlanBatchBuilder.act`` arguments for an ``<act>``/``<activity>``
+    (one with only a ``facility``: the facility's link, or its coordinates)."""
     nan = math.nan
     x, y = el.get("x"), el.get("y")
     x, y = (float(x), float(y)) if x is not None and y is not None else (nan, nan)
@@ -512,8 +541,15 @@ def _read_activity(el, network: Network) -> tuple:
         node = int(network.to_node[link])
     else:
         if x != x:
-            raise ValueError(f"Activity {el.get('type')!r} has no node, link or coordinates.")
-        node = network.nearest_node(x, y)
+            fac = facilities.get(el.get("facility")) if facilities is not None and \
+                el.get("facility") is not None else None
+            if fac is None:
+                raise ValueError(f"Activity {el.get('type')!r} has no node, link or coordinates.")
+            x, y, link = fac
+        if link >= 0:
+            node = int(network.to_node[link])
+        else:
+            node = network.nearest_node(x, y)
     end_time = el.get("end_time")
     duration = el.get("dur") or el.get("max_dur")
     return (el.get("type"), node, parse_time(end_time) if end_time else nan,
