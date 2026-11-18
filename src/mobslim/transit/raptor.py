@@ -441,7 +441,14 @@ def rust_raptor_available() -> bool:
 
 
 def _kernel_tables(transit: Transit, params: RaptorParams):
-    """The compiled router, built from the schedule (see ``rust/mobslim-router/src/raptor.rs``)."""
+    """The compiled router, built from the schedule (see ``rust/mobslim-router/src/raptor.rs``)
+    once per schedule, params and walk params, and cached on the schedule:
+    the schedule does not change between iterations."""
+    key = ("rust_raptor", params, transit.params.walk)
+    return transit.schedule._cached(key, lambda: _build_kernel_tables(transit, params))
+
+
+def _build_kernel_tables(transit: Transit, params: RaptorParams):
     s = transit.schedule
     walk = transit.params.walk
     i8, f8 = np.int64, np.float64

@@ -393,3 +393,14 @@ def test_rust_raptor_matches_python(name, config):
     nodes = np.arange(min(20, scenario.network.n_nodes))
     assert rs.route_many(nodes, nodes[::-1], [7 * H] * len(nodes)) == \
         py.route_many(nodes, nodes[::-1], [7 * H] * len(nodes))
+
+
+@pytest.mark.skipif(not rust_raptor_available(), reason="mobslim_router (Rust) not built")
+def test_rust_raptor_tables_are_built_once_per_schedule_and_params():
+    from mobslim.transit import RaptorParams, RustRaptorRouter
+
+    scenario = load("pt_simple")
+    a = RustRaptorRouter(scenario.network, scenario.transit, RaptorParams())
+    b = RustRaptorRouter(scenario.network, scenario.transit, RaptorParams())  # equal params
+    c = RustRaptorRouter(scenario.network, scenario.transit, RaptorParams(max_transfers=1))
+    assert a._kernel is b._kernel and c._kernel is not a._kernel

@@ -191,6 +191,25 @@ def test_alt_landmarks_are_built_once_per_network_and_mode():
 
 
 @needs_rust
+def test_a_tables_router_columns_are_computed_once(monkeypatch):
+    """Routers of several modes on one table share its columns; a pickled
+    table (as sent to workers) computes them anew."""
+    from mobslim.routing import compiled
+
+    net = irregular_grid(5)
+    table = congested(net)
+    calls = []
+    real = compiled.travel_time_columns
+    monkeypatch.setattr(compiled, "travel_time_columns", lambda *a: calls.append(1) or real(*a))
+    first = RustRouter(net, "car", table)
+    second = RustRouter(net, "car", table, algorithm="dijkstra")
+    assert len(calls) == 1 and first.algorithm == "alt"
+    assert second.route_many([0], [24], [8 * 3600.0]) == first.route_many([0], [24], [8 * 3600.0])
+    RustRouter(net, "car", pickle.loads(pickle.dumps(table)))
+    assert len(calls) == 2
+
+
+@needs_rust
 def test_alt_landmarks_when_node_0_has_no_links_of_the_mode():
     """A car + pt network whose first nodes are pt stops: the landmarks are
     still chosen (and bound) on the car links, not seeded from node 0."""

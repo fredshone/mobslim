@@ -106,6 +106,23 @@ def travel_time_columns(network: Network, travel_time: TravelTime):
     )
 
 
+def compiled_times(network: Network, travel_time: TravelTime):
+    """``(columns, bin_col, bin_size, at_least_free_speed)``: the travel
+    times as :func:`travel_time_columns` gives them, and whether no link time
+    is below free speed (the ALT bound). Computed once per table and network
+    and kept on the table, so the routers of every network mode, built from
+    the same table, share them."""
+    cached = getattr(travel_time, "_compiled", None)
+    if cached is not None and cached[0] is network:
+        return cached[1]
+    columns, bin_col, bin_size = travel_time_columns(network, travel_time)
+    valid = bool((columns >= network.free_speed_travel_times()[None, :]).all())
+    out = (columns, bin_col, bin_size, valid)
+    if isinstance(travel_time, TravelTimeTable):  # immutable; pickling drops the cache
+        object.__setattr__(travel_time, "_compiled", (network, out))
+    return out
+
+
 def _base_router(network: Network, mode: str, landmarks: int):
     """The compiled graph for ``(network, mode)`` with free-speed times and
     ``landmarks`` ALT landmarks, built once and cached on the network."""
@@ -150,14 +167,13 @@ class RustRouter:
             raise ValueError(f"algorithm must be one of {ALGORITHMS}, not {algorithm!r}.")
         self.mode = mode
         self.threads = threads or default_threads()
-        columns, bin_col, bin_size = travel_time_columns(network, travel_time)
+        columns, bin_col, bin_size, valid = compiled_times(network, travel_time)
         if algorithm == "auto":  # ALT when its lower bound holds, else Dijkstra
-            valid = (columns >= network.free_speed_travel_times()[None, :]).all()
             algorithm = "alt" if valid else "dijkstra"
             landmarks = AUTO_LANDMARKS if landmarks == DEFAULT_LANDMARKS else landmarks
         self.algorithm = algorithm
         if algorithm == "alt":
-            if not (columns >= network.free_speed_travel_times()[None, :]).all():
+            if not valid:
                 raise ValueError(
                     "algorithm='alt' needs every link time >= its free-speed time "
                     "(the landmark lower bound)."
