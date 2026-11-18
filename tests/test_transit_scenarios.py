@@ -404,3 +404,38 @@ def test_rust_raptor_tables_are_built_once_per_schedule_and_params():
     b = RustRaptorRouter(scenario.network, scenario.transit, RaptorParams())  # equal params
     c = RustRaptorRouter(scenario.network, scenario.transit, RaptorParams(max_transfers=1))
     assert a._kernel is b._kernel and c._kernel is not a._kernel
+
+
+@pytest.mark.skipif(not rust_raptor_available(), reason="mobslim_router (Rust) not built")
+def test_rust_raptor_answers_repeated_queries_from_its_cache(monkeypatch):
+    from mobslim.transit import (
+        RaptorParams,
+        RaptorRouter,
+        RaptorWeights,
+        RustRaptorRouter,
+        raptor,
+    )
+
+    scenario = load("pt_tutorial")
+    cfg = RaptorParams(waiting=-2.0)  # params of this test only: a fresh cache
+    rs = RustRaptorRouter(scenario.network, scenario.transit, cfg)
+    o, d, t = random_queries(scenario, 200, seed=5)
+    first = rs.route_many_xy(o, d, t)
+    kernel_calls = []
+    real = rs._kernel.route_many
+    rs._kernel = type("Spy", (), {"route_many": lambda self, *a, **k: kernel_calls.append(1) or real(*a, **k)})()
+    again = RustRaptorRouter(scenario.network, scenario.transit, cfg)  # the next iteration's router
+    again._kernel = rs._kernel
+    assert again.route_many_xy(o, d, t) == first and not kernel_calls  # all from the cache
+    py = RaptorRouter(scenario.network, scenario.transit, cfg)
+    assert first == py.route_many_xy([tuple(p) for p in o.tolist()], [tuple(p) for p in d.tolist()],
+                                     t.tolist())
+    # other costs per query are other queries
+    w = [RaptorWeights(line_switch=-50.0)] * len(t)
+    assert again.route_many_xy(o, d, t, weights=w) == py.route_many_xy(
+        [tuple(p) for p in o.tolist()], [tuple(p) for p in d.tolist()], t.tolist(), weights=w)
+    assert kernel_calls
+    # a full cache is cleared, not grown
+    monkeypatch.setattr(raptor, "ROUTE_CACHE_SIZE", 10)
+    again.route_many_xy(o[:5] + 1.0, d[:5], t[:5])
+    assert len(again._routes) <= 10

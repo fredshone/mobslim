@@ -41,6 +41,8 @@ from mobslim.population import TransitPassengerRoute
 from mobslim.transit.core import Transit
 
 _I32 = np.dtype("=i4")
+# routes a compiled router keeps for repeated queries (cleared when full)
+ROUTE_CACHE_SIZE = 1_000_000
 
 try:  # rust/mobslim-router; optional
     import mobslim_router as _rust
@@ -515,6 +517,13 @@ class RustRaptorRouter:
         self.params = params
         self.threads = threads or default_threads()
         self._kernel = _kernel_tables(transit, params)
+        # the schedule does not change, so a query (origin, destination,
+        # departure time, costs) always has the same route: kept per kernel,
+        # across iterations (replanning reroutes many legs whose times did
+        # not change). A route depends on its own query only, not on the
+        # others searched with it.
+        key = ("rust_raptor_routes", params, transit.params.walk)
+        self._routes = transit.schedule._cached(key, dict)
 
     def route(self, origin: int, destination: int, departure_time: float) -> TransitPassengerRoute:
         return self.route_many([origin], [destination], [departure_time])[0]
@@ -533,17 +542,31 @@ class RustRaptorRouter:
         o = np.asarray(origins_xy, dtype=np.float64).reshape(-1, 2)
         d = np.asarray(destinations_xy, dtype=np.float64).reshape(-1, 2)
         t = np.ascontiguousarray(departure_times, dtype=np.float64)
+        own = self.params.weights.costs()
+        per_query = weights is not None and any(w is not None for w in weights)
+        cost_keys = ([None if w is None else tuple(w.costs()) for w in weights] if per_query
+                     else [None] * len(t))
+        keys = list(zip(o[:, 0].tolist(), o[:, 1].tolist(), t.tolist(), d[:, 0].tolist(),
+                        d[:, 1].tolist(), cost_keys))
+        cache = self._routes
+        out = [cache.get(k) for k in keys]
+        miss = [q for q, r in enumerate(out) if r is None]
+        if not miss:
+            return out
+        m = np.asarray(miss, dtype=np.int64)
         costs = None
-        if weights is not None and any(w is not None for w in weights):
-            own = self.params.weights.costs()
-            costs = np.array([own if w is None else w.costs() for w in weights],
+        if per_query:
+            costs = np.array([own if cost_keys[q] is None else cost_keys[q] for q in miss],
                              dtype=np.float64).reshape(-1, 4)
         offsets, rides, tt, dist = self._kernel.route_many(
-            np.ascontiguousarray(o[:, 0]), np.ascontiguousarray(o[:, 1]), t,
-            np.ascontiguousarray(d[:, 0]), np.ascontiguousarray(d[:, 1]), threads=self.threads,
+            np.ascontiguousarray(o[m, 0]), np.ascontiguousarray(o[m, 1]), t[m],
+            np.ascontiguousarray(d[m, 0]), np.ascontiguousarray(d[m, 1]), threads=self.threads,
             costs=costs)
         data = np.asarray(rides, dtype=_I32).tobytes()
         off = (np.asarray(offsets) * 8).tolist()  # 2 int32 per ride
-        return [TransitPassengerRoute.packed(data[off[q]:off[q + 1]], tt_q, d_q)
-                for q, (tt_q, d_q) in enumerate(zip(np.asarray(tt).tolist(),
-                                                     np.asarray(dist).tolist()))]
+        if len(cache) + len(miss) > ROUTE_CACHE_SIZE:
+            cache.clear()
+        for j, (q, tt_q, d_q) in enumerate(zip(miss, np.asarray(tt).tolist(),
+                                               np.asarray(dist).tolist())):
+            out[q] = cache[keys[q]] = TransitPassengerRoute.packed(data[off[j]:off[j + 1]], tt_q, d_q)
+        return out
