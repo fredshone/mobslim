@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from mobslim import Scenario, grid_network, route_scenario
-from mobslim.population import Leg
+from mobslim.population import Leg, Person, Plan, Population
 from mobslim.replanning import (
     ChangeTripMode,
     PlanStrategy,
@@ -188,6 +188,62 @@ def test_alt_landmarks_are_built_once_per_network_and_mode():
     b = RustRouter(net, "car", congested(net, 2), algorithm="alt", landmarks=4)
     assert a.landmark_nodes == b.landmark_nodes
     assert sum(1 for k in net._cache if k[0] == "rust_router") == 1
+
+
+def _route_plan_by_plan(scenario, transit_weights=None):
+    """``route_scenario`` as it was: every held plan as Plan objects, given
+    coordinates by ``locate_activities`` and routed by ``route_plans``."""
+    from mobslim.activity_links import ActivityLinkParams, assign_activity_links
+    from mobslim.population import locate_activities
+    from mobslim.replanning.modules import routing_groups
+
+    scenario = assign_activity_links(scenario, ActivityLinkParams())
+    ctx = ReplanningContext.from_scenario(scenario, TravelTimeTable.free_speed(scenario.network), 0,
+                                          transit_weights=transit_weights)
+    pop, net = scenario.population, scenario.network
+    weights = persons = None
+    if (groups := routing_groups(ctx)) is not None:
+        codes, group_weights, group_persons = groups
+        code_of = {int(j): int(codes[i]) for i in range(len(pop))
+                   for j in pop.plan_ids[i, :pop.n_plans[i]]}
+        live = pop.live_plan_rows().tolist()
+        weights = [group_weights[code_of[j]] for j in live]
+        persons = [group_persons[code_of[j]] for j in live]
+    return pop.map_plan_store(
+        lambda plans: route_plans([locate_activities(p, net) for p in plans], ctx, weights, persons))
+
+
+def _held_plans(population):
+    return [list(person.plans) for person in population]
+
+
+@pytest.mark.parametrize("case", ["car", "car_without_coordinates", "car_routed", "pt", "pt_weights"])
+def test_route_scenario_equals_routing_plan_by_plan(case, equil_scenario):
+    from tests.test_transit_router_scoring import _pt_tutorial_split
+    from tests.test_transit_scenarios import load
+
+    weights = None
+    if case.startswith("car"):
+        scenario = equil_scenario
+        if case == "car_without_coordinates":  # node-only activities, several plans each
+            net = irregular_grid(6)
+            rng = random.Random(4)
+            plans = []
+            for _ in range(40):
+                a, b = rng.sample(range(net.n_nodes), 2)
+                plans.append([Plan.builder().act("home", a, end_time=rng.uniform(6, 9) * 3600)
+                              .leg("car").act("work", b, duration=8 * 3600.0).leg("car")
+                              .act("home", a).build() for _ in range(2)])
+            scenario = Scenario(net, Population([Person(i, p) for i, p in enumerate(plans)]))
+        if case == "car_routed":
+            scenario = route_scenario(scenario)
+    elif case == "pt":
+        scenario = load("pt_tutorial")
+    else:
+        scenario, weights = _pt_tutorial_split()
+    got = route_scenario(scenario, transit_weights=weights).population
+    assert _held_plans(got) == _held_plans(_route_plan_by_plan(scenario, weights))
+    assert got.n_plans.tolist() == scenario.population.n_plans.tolist()
 
 
 @needs_rust
