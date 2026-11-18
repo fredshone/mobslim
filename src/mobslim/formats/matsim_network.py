@@ -1,11 +1,18 @@
 """MATSim network XML (``network_v1``/``network_v2``) -> :class:`~mobslim.network.Network`."""
 
+import gzip
 import os
 import xml.etree.ElementTree as ET
 from typing import Any, Iterable
 
 from mobslim.network import DEFAULT_MODE, Network, NetworkBuilder
 from mobslim.timeutils import parse_time
+
+
+def _open(path):
+    """The file at ``path``, decompressed if it ends in ``.gz``."""
+    path = str(path)
+    return gzip.open(path, "rb") if path.endswith(".gz") else open(path, "rb")
 
 
 class MatsimLinkAttributes:
@@ -27,23 +34,24 @@ class MatsimLinkAttributes:
         cols: dict[str, dict[int, Any]] = {}
         k = 0
         in_links = False
-        for event, el in ET.iterparse(self.path, events=("start", "end")):
-            if event == "start":
-                if el.tag == "links":
-                    in_links = True
-                continue
-            if el.tag == "link" and in_links:
-                for name in ("type", "origid"):
-                    if (v := el.get(name)) is not None:
-                        cols.setdefault(name, {})[k] = v
-                attrs = el.find("attributes")
-                if attrs is not None:
-                    for name, v in read_attributes_element(attrs).items():
-                        cols.setdefault(name, {})[k] = v
-                k += 1
-                el.clear()
-            elif el.tag == "node":
-                el.clear()
+        with _open(self.path) as f:
+            for event, el in ET.iterparse(f, events=("start", "end")):
+                if event == "start":
+                    if el.tag == "links":
+                        in_links = True
+                    continue
+                if el.tag == "link" and in_links:
+                    for name in ("type", "origid"):
+                        if (v := el.get(name)) is not None:
+                            cols.setdefault(name, {})[k] = v
+                    attrs = el.find("attributes")
+                    if attrs is not None:
+                        for name, v in read_attributes_element(attrs).items():
+                            cols.setdefault(name, {})[k] = v
+                    k += 1
+                    el.clear()
+                elif el.tag == "node":
+                    el.clear()
         return {name: [vals.get(i) for i in range(k)] for name, vals in cols.items()}
 
     def __repr__(self) -> str:
@@ -51,14 +59,15 @@ class MatsimLinkAttributes:
 
 
 def read_network_xml(path: str, default_modes: Iterable[str] = (DEFAULT_MODE,)) -> Network:
-    """Read a MATSim ``network_v1``/``v2`` XML file.
+    """Read a MATSim ``network_v1``/``v2`` XML file (``.gz`` allowed).
 
     ``capacity`` is normalised from ``capperiod`` to vehicles per hour. Links
     without a ``modes`` attribute get ``default_modes`` (MATSim uses ``car``).
     Extra link attributes (``type``, ``<attributes>``) are not parsed here
     but on first use (:class:`MatsimLinkAttributes`).
     """
-    root = ET.parse(path).getroot()
+    with _open(path) as f:
+        root = ET.parse(f).getroot()
     b = NetworkBuilder()
     for node in root.find("nodes"):
         b.add_node(node.get("id"), float(node.get("x")), float(node.get("y")))

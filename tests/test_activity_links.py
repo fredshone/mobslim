@@ -58,6 +58,18 @@ def test_matsim_link_attributes_are_lazy(xml_network):
     assert net.link_attribute("osm:way:highway").tolist() == [None, "motorway", None]
     assert net.link_attribute("lit").tolist() == [None, True, None]
     assert net.link_attribute("freespeed").tolist() == [30, 30, 10]  # built-in columns
+
+
+def test_gzipped_network_reads_the_same(tmp_path, xml_network):
+    import gzip
+
+    path = tmp_path / "network.xml.gz"
+    with gzip.open(path, "wt") as f:
+        f.write(NETWORK_XML)
+    net = read_network_xml(str(path))
+    assert net.link_ids.id(2) == "bc" and np.array_equal(net.capacity, xml_network.capacity)
+    for name in ("type", "osm:way:highway", "lit"):  # read lazily, from the .gz too
+        assert net.link_attribute(name).tolist() == xml_network.link_attribute(name).tolist()
     assert set(net.link_attribute_names()) == {"type", "osm:way:highway", "lit"}
     with pytest.raises(KeyError, match="no link attribute 'nope'"):
         net.link_attribute("nope")
