@@ -54,6 +54,7 @@ class PerfCase:
     config: str = "config.xml"
     params: dict = field(default_factory=dict)
     grid: int = 0  # ... or a synthetic grid of this size
+    open_berlin: str = ""  # ... or Open Berlin's sample of this name ("1pct"; showcase.open_berlin)
     persons: int = 0
     capacity: float = 1.0
     transit: bool = False
@@ -98,12 +99,12 @@ CASES = [
     _grid(160, congested=True, xmx="40g"),
     _grid(320, optional=True, variants=FAST, xmx="100g"),
     _grid(320, congested=True, optional=True, variants=FAST, xmx="100g"),
-    # learned plans: the shipped iteration-0 plans gridlock the network on every mobsim
-    PerfCase("siouxfalls", "MATSim Sioux Falls 2014: 84,110 agents, car and bus (2,040 departures)",
-             "siouxfalls-2014", "config_default.xml", transit=True, learn_iterations=10,
-             # 30% of agents innovate per iteration (the shipped 3% is tuned for 3,000 iterations)
-             learn_weights={"ChangeExpBeta": 0.7, "ReRoute": 0.1, "SubtourModeChoice": 0.1,
-                            "TimeAllocationMutator": 0.1}),
+    # MATSim's calibrated Open Berlin plans (selected plans), Berlin and Brandenburg
+    PerfCase("open-berlin-1pct", "MATSim Open Berlin v6.4, 1% sample: about 52,000 agents "
+             "(residents, commercial traffic, freight); car, truck and freight on the roads, pt",
+             open_berlin="1pct", transit=True, xmx="20g"),
+    PerfCase("open-berlin-10pct", "MATSim Open Berlin v6.4, 10% sample: about 520,000 agents",
+             open_berlin="10pct", transit=True, variants=FAST, xmx="100g"),
 ]
 
 
@@ -277,6 +278,10 @@ def prepare(case: PerfCase, force: bool = False) -> Path:
         _grid_files(case, d)
         stamp.write_text(key)
         return cfg_path
+    if case.open_berlin:
+        from showcase import open_berlin
+
+        return open_berlin.prepare(OUT, case.open_berlin, d)
     from verification.cases import SCENARIOS
     from verification.matsim import run_matsim
 
@@ -354,9 +359,13 @@ def run_matsim(case: PerfCase, cfg_path: Path, label: str) -> dict:
     wall = time.perf_counter() - t0
     if code != 0 or not timings.exists():
         return {"error": f"exit {code}, see {d / 'run.log'}"}
-    runs = [int(line.split(",")[1]) / 1e9 for line in timings.read_text().splitlines()[1:]]
-    return {"time_s": min(runs), "runs_s": runs, "peak_rss_mb": rss / 1024, "process_wall_s": wall,
-            "xmx": case.xmx}
+    rows = [line.split(",") for line in timings.read_text().splitlines()[1:]]
+    runs = [int(r[1]) / 1e9 for r in rows]
+    out = {"time_s": min(runs), "runs_s": runs, "peak_rss_mb": rss / 1024, "process_wall_s": wall,
+           "xmx": case.xmx}
+    if rows and len(rows[0]) > 2:  # PerfRun counts stuck persons (DSim's runner does not)
+        out["stuck"] = int(rows[0][2])
+    return out
 
 
 def run_mobslim(case: PerfCase, cfg_path: Path, label: str) -> dict:

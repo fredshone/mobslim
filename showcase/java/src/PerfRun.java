@@ -2,7 +2,13 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
+import org.matsim.api.core.v01.Scenario;
+import org.matsim.api.core.v01.events.PersonStuckEvent;
+import org.matsim.api.core.v01.events.handler.PersonStuckEventHandler;
+import org.matsim.api.core.v01.population.Person;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigGroup;
 import org.matsim.core.config.ConfigUtils;
@@ -15,6 +21,7 @@ import org.matsim.core.controler.events.AfterMobsimEvent;
 import org.matsim.core.controler.events.BeforeMobsimEvent;
 import org.matsim.core.controler.listener.AfterMobsimListener;
 import org.matsim.core.controler.listener.BeforeMobsimListener;
+import org.matsim.core.population.PopulationUtils;
 import org.matsim.core.scenario.ScenarioUtils;
 
 /**
@@ -26,9 +33,11 @@ import org.matsim.core.scenario.ScenarioUtils;
  * </pre>
  *
  * Runs the plans as given (routed) for {@code lastIteration + 1} iterations
- * with no replanning (KeepLastSelected) and no output files, and writes the
+ * with no replanning (KeepLastSelected, for every subpopulation) and no
+ * output files, and writes the
  * wall time of each iteration's mobsim (between the last BeforeMobsim and the
- * first AfterMobsim listener, nanosecond clock) to {@code --timings}.
+ * first AfterMobsim listener, nanosecond clock) and its stuck persons
+ * (PersonStuckEvents) to {@code --timings}.
  */
 public final class PerfRun {
 
@@ -61,24 +70,43 @@ public final class PerfRun {
 		config.controller().setDumpDataAtEnd(false);
 		config.controller().setCleanItersAtEnd(ControllerConfigGroup.CleanIterations.delete);
 		config.replanning().clearStrategySettings();
-		StrategySettings keep = new StrategySettings();
-		keep.setStrategyName("KeepLastSelected");
-		keep.setWeight(1.0);
-		config.replanning().addStrategySettings(keep);
+		Scenario scenario = ScenarioUtils.loadScenario(config);
+		// KeepLastSelected for persons without a subpopulation and for every
+		// subpopulation (MATSim needs a strategy per subpopulation)
+		Set<String> subpopulations = new TreeSet<>();
+		for (Person p : scenario.getPopulation().getPersons().values()) {
+			String s = PopulationUtils.getSubpopulation(p);
+			if (s != null) subpopulations.add(s);
+		}
+		List<String> groups = new ArrayList<>();
+		groups.add(null);
+		groups.addAll(subpopulations);
+		for (String s : groups) {
+			StrategySettings keep = new StrategySettings();
+			keep.setStrategyName("KeepLastSelected");
+			keep.setWeight(1.0);
+			keep.setSubpopulation(s);
+			config.replanning().addStrategySettings(keep);
+		}
 
 		final List<long[]> rows = new ArrayList<>();
 		final long[] start = new long[1];
-		Controler controler = new Controler(ScenarioUtils.loadScenario(config));
+		final long[] stuck = new long[1]; // persons stuck in the iteration's mobsim
+		Controler controler = new Controler(scenario);
 		controler.addOverridingModule(new AbstractModule() {
 			@Override
 			public void install() {
+				addEventHandlerBinding().toInstance(new PersonStuckEventHandler() {
+					@Override public void handleEvent(PersonStuckEvent e) { stuck[0]++; }
+					@Override public void reset(int iteration) { stuck[0] = 0; }
+				});
 				addControlerListenerBinding().toInstance(new BeforeMobsimListener() {
 					@Override public void notifyBeforeMobsim(BeforeMobsimEvent e) { start[0] = System.nanoTime(); }
 					@Override public double priority() { return -1e9; } // last
 				});
 				addControlerListenerBinding().toInstance(new AfterMobsimListener() {
 					@Override public void notifyAfterMobsim(AfterMobsimEvent e) {
-						rows.add(new long[] {e.getIteration(), System.nanoTime() - start[0]});
+						rows.add(new long[] {e.getIteration(), System.nanoTime() - start[0], stuck[0]});
 					}
 					@Override public double priority() { return 1e9; } // first
 				});
@@ -86,8 +114,8 @@ public final class PerfRun {
 		});
 		controler.run();
 		try (FileWriter w = new FileWriter(timings)) {
-			w.write("iteration,mobsim_ns\n");
-			for (long[] r : rows) w.write(r[0] + "," + r[1] + "\n");
+			w.write("iteration,mobsim_ns,stuck\n");
+			for (long[] r : rows) w.write(r[0] + "," + r[1] + "," + r[2] + "\n");
 		}
 	}
 }

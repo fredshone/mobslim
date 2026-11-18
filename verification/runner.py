@@ -17,9 +17,14 @@ from mobslim import (
 from mobslim.config.matsim import (
     MatsimConfig,
     mobsim_params,
+    mode_pce,
+    read_facilities,
     scoring_params,
     set_scoring_param,
+    simulated_modes,
+    teleported_modes,
 )
+from mobslim.config.matsim import transit_walk as config_transit_walk
 from mobslim.events import EventsManager, EventsXMLWriter
 from verification import compare, events_io
 from verification.cases import MOBSIMS, Case
@@ -45,7 +50,8 @@ def mobslim_scenario(cfg: MatsimConfig, plans_path: Path, vehicles: str = "netwo
     MATSim's pt routes unless ``keep_pt_routes=False`` (then mobslim's RAPTOR
     routes them). Legs without a route are routed by mobslim."""
     network = read_network_xml(cfg.input_path("network", "inputNetworkFile"))
-    population = read_population_xml(plans_path, network, keep_routes=True)
+    population = read_population_xml(plans_path, network, keep_routes=True,
+                                     facilities=read_facilities(cfg, network))
     transit = None
     if cfg.get("transit", "useTransit") == "true":
         from mobslim.transit import TransitParams, read_transit
@@ -54,14 +60,18 @@ def mobslim_scenario(cfg: MatsimConfig, plans_path: Path, vehicles: str = "netwo
         modes = tuple((cfg.get("transit", "transitModes") or "pt").split(","))
         from mobslim.routing.teleport import TeleportedModeParams
 
-        tc = dict(passenger_modes=modes, vehicles=vehicles)
+        tc = dict(passenger_modes=modes, vehicles=vehicles, walk=config_transit_walk(cfg))
         if transit_walk is not None:
             tc["walk"] = TeleportedModeParams(*transit_walk)
         transit = read_transit(cfg.input_path("transit", "transitScheduleFile"),
                                cfg.input_path("transit", "vehiclesFile"), network, TransitParams(**tc))
         if keep_pt_routes:
             population = apply_matsim_pt_routes(population, plans_path, transit.schedule, modes)
-    return route_scenario(Scenario(network, population, transit=transit))
+    teleported, _ = teleported_modes(cfg)
+    pce, _ = mode_pce(cfg)
+    return route_scenario(Scenario(network, population, teleported_modes=teleported,
+                                   transit=transit, simulated_modes=simulated_modes(cfg),
+                                   mode_pce=pce))
 
 
 def run_mobslim(cfg: MatsimConfig, scenario: Scenario, mobsim: str, events_path: Path):
