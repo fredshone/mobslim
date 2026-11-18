@@ -156,9 +156,15 @@ impl Landmarks {
         let mut to_l: Vec<Vec<f64>> = Vec::with_capacity(k);
         // separation of each node from the chosen landmarks (both directions)
         let mut sep = vec![f64::INFINITY; n];
-        // seed: the node farthest (by finite round-trip) from node 0
-        let seed_f = static_tree(fwd, n, cost, 0);
-        let seed_b = static_tree(bwd, n, cost, 0);
+        // seed: the node farthest (by finite round-trip) from the first node
+        // on the mode's links (in a network of several modes, node 0 may
+        // touch only other modes' links, e.g. a pt stop: nothing is reachable
+        // from it)
+        let start = (0..n)
+            .find(|&v| fwd.offsets[v + 1] > fwd.offsets[v] || bwd.offsets[v + 1] > bwd.offsets[v])
+            .unwrap_or(0);
+        let seed_f = static_tree(fwd, n, cost, start);
+        let seed_b = static_tree(bwd, n, cost, start);
         let mut next = argmax_finite(&seed_f, &seed_b, &vec![f64::INFINITY; n]).unwrap_or(0);
         for _ in 0..k {
             nodes.push(next as u32);

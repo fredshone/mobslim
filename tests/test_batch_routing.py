@@ -191,6 +191,38 @@ def test_alt_landmarks_are_built_once_per_network_and_mode():
 
 
 @needs_rust
+def test_alt_landmarks_when_node_0_has_no_links_of_the_mode():
+    """A car + pt network whose first nodes are pt stops: the landmarks are
+    still chosen (and bound) on the car links, not seeded from node 0."""
+    from mobslim.network import NetworkBuilder
+
+    grid = irregular_grid(8)
+    b = NetworkBuilder()
+    for s in ("stop0", "stop1"):
+        b.add_node(s, -500.0, 0.0 if s == "stop0" else 100.0)
+    b.add_link("pt0", "stop0", "stop1", 100.0, 10.0, 1000.0, modes=("pt",))
+    b.add_link("pt1", "stop1", "stop0", 100.0, 10.0, 1000.0, modes=("pt",))
+    for i in range(grid.n_nodes):
+        b.add_node(grid.node_ids.id(i), *grid.node_xy[i])
+    for k in range(grid.n_links):
+        b.add_link(grid.link_ids.id(k), grid.node_ids.id(int(grid.from_node[k])),
+                   grid.node_ids.id(int(grid.to_node[k])), grid.length[k], grid.freespeed[k],
+                   grid.capacity[k], grid.lanes[k], grid.link_modes[k])
+    net = b.build()
+    table = congested(net, factor=1.5)
+    alt = RustRouter(net, "car", table, algorithm="alt", landmarks=4)
+    assert len(alt.landmark_nodes) == 4 and min(alt.landmark_nodes) >= 2  # not the stops
+    rng = random.Random(2)
+    qs = [(rng.randrange(2, net.n_nodes), rng.randrange(2, net.n_nodes), rng.uniform(0, 86400))
+          for _ in range(200)]
+    dijkstra = [DijkstraRouter(net, "car", table).route(*q) for q in qs]
+    for a, d in zip(alt.route_many(*zip(*qs)), dijkstra):
+        assert a.travel_time == pytest.approx(d.travel_time, rel=1e-9, abs=1e-9)
+    with pytest.raises(NoRouteError):  # a stop has no car links
+        alt.route(0, 5, 0.0)
+
+
+@needs_rust
 def test_alt_rejects_times_below_the_lower_bound():
     net = irregular_grid(4)
     free = TravelTimeTable.free_speed(net)

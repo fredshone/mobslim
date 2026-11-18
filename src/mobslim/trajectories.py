@@ -325,16 +325,16 @@ class Trajectories:
         tt = self.transit
         if tt is None or not self.plans.n_rides:
             return out
-        rs_of_entry = tt.trip_stop_route_stop()
+        departed = ~np.isnan(tt.stop_departure)
+        dep_rs = tt.trip_stop_route_stop()[departed].astype(np.int64)
         waited = np.flatnonzero(~np.isnan(self.ride_wait_start))
-        board_rs = self.plans.ride_board_stop[waited]
-        for k in np.unique(board_rs).tolist():
-            times = np.sort(tt.stop_departure[rs_of_entry == k])
-            times = times[~np.isnan(times)]
-            rides = waited[board_rs == k]
-            board = np.where(np.isnan(self.ride_board[rides]), np.inf, self.ride_board[rides])
-            out[rides] = (np.searchsorted(times, board, side="left")
-                          - np.searchsorted(times, self.ride_wait_start[rides], side="left"))
+        board_rs = self.plans.ride_board_stop[waited].astype(np.int64)
+        board = self.ride_board[waited]
+        board = np.where(np.isnan(board), np.inf, board)
+        before = _departures_before(dep_rs, tt.stop_departure[departed],
+                                    np.r_[board_rs, board_rs],
+                                    np.r_[board, self.ride_wait_start[waited]])
+        out[waited] = before[:len(waited)] - before[len(waited):]
         return out
 
     # -- derived views -----------------------------------------------------
@@ -598,6 +598,21 @@ def _ride_distance(transit, plans: PlanBatch, ride_alight: np.ndarray) -> np.nda
     d = transit.schedule.rs_distance
     full = d[plans.ride_alight_stop] - d[plans.ride_board_stop] if plans.n_rides else np.zeros(0)
     return np.where(np.isnan(ride_alight), 0.0, full)
+
+
+def _departures_before(dep_rs, dep_time, rs, time) -> np.ndarray:
+    """Per query ``i``: departures at route stop ``rs[i]`` strictly before
+    ``time[i]``. One sort of departures and queries together by (route
+    stop, time, queries first), then a running count of departures."""
+    n_dep = len(dep_rs)
+    is_dep = np.r_[np.ones(n_dep, dtype=np.int64), np.zeros(len(rs), dtype=np.int64)]
+    order = np.lexsort((is_dep, np.r_[dep_time, time], np.r_[dep_rs, rs]))
+    seen = np.cumsum(is_dep[order])  # departures up to and including each position
+    at = np.empty(len(order), dtype=np.int64)
+    at[order] = seen
+    # departures at earlier route stops (dep_rs sorted once)
+    earlier = np.searchsorted(np.sort(dep_rs), rs, side="left")
+    return at[n_dep:] - earlier
 
 
 def entered_per_leg(plans: PlanBatch, link_enter: np.ndarray) -> np.ndarray:

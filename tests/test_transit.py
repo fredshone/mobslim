@@ -389,6 +389,18 @@ def test_capacity_leaves_passengers_behind(vehicles, ride_time):
     assert tr.pt_load().max() == 2
 
 
+def test_departures_before_counts_like_a_search_per_stop():
+    from mobslim.trajectories import _departures_before
+
+    rng = np.random.default_rng(3)
+    dep_rs = rng.integers(0, 6, 400)  # route stop 6 has no departures
+    dep_time = rng.integers(0, 50, 400).astype(float) + rng.choice([0.0, 0.25], 400)
+    rs = rng.integers(0, 7, 300)
+    time = np.r_[dep_time[:100], rng.uniform(-5, 60, 199), np.inf]  # ties, misses, unboarded
+    expected = [int(np.count_nonzero(dep_time[dep_rs == k] < t)) for k, t in zip(rs, time)]
+    assert _departures_before(dep_rs, dep_time, rs, time).tolist() == expected
+
+
 def test_dwell_time_serial_doors():
     tr = run(routed(pt_scenario(passengers(3, 0, 3), vehicles="network", access=2.0, egress=3.0,
                                 door_open=1.0, door_close=1.0)), [log := EventLog()])
