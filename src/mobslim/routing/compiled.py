@@ -125,6 +125,8 @@ def _base_router(network: Network, mode: str, landmarks: int):
             1.0,
             lower_bound=fs,
             landmarks=landmarks,
+            # searches in Hilbert order of the nodes (nodes in and out stay the network's)
+            node_xy=np.ascontiguousarray(network.node_xy, dtype=np.float64),
         )
     return cache[key]
 

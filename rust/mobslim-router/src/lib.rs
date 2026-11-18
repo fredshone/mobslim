@@ -307,14 +307,27 @@ impl Search {
     }
 }
 
+/// The mode's graph in the router's own node numbering (nodes in Hilbert
+/// curve order when coordinates are given, so that a search touches nearby
+/// memory), shared by every router made `with_times`. Edge `e` (the CSR
+/// position, `fwd.link[e] == e`) is the network link `edge_link[e]`; each
+/// node's edges keep the network's order.
+struct Graph {
+    fwd: Csr,
+    edge_link: Vec<u32>,
+    edge_from: Vec<u32>,
+    edge_length: Vec<f64>,
+    /// router node of each network node, and network node of each router node
+    new_of: Vec<u32>,
+    old_of: Vec<u32>,
+}
+
 #[pyclass(frozen)]
 struct Router {
     n: usize,
-    fwd: Csr,
-    from_node: Vec<u32>,
-    length: Vec<f64>,
+    graph: Arc<Graph>,
     n_links: usize,
-    /// `columns[c * n_links + link]`
+    /// `columns[c * n_edges + edge]`: link times in edge order
     columns: Vec<f64>,
     bin_col: Vec<u32>,
     bin_size: f64,
@@ -342,16 +355,19 @@ impl Router {
             let b = bin_of(time, self.bin_size) as i64;
             self.bin_col[b.clamp(0, last) as usize] as usize
         };
-        &self.columns[c * self.n_links..(c + 1) * self.n_links]
+        let ne = self.graph.edge_link.len();
+        &self.columns[c * ne..(c + 1) * ne]
     }
 
     /// Time-dependent Dijkstra from `(origin, t0)` until every node marked
-    /// in `s.target` (there are `n_targets`) is settled.
+    /// in `s.target` (there are `n_targets`) is settled. The heap breaks
+    /// ties by network node (as `DijkstraRouter`), whatever the numbering.
     fn dijkstra(&self, s: &mut Search, origin: usize, t0: f64, mut n_targets: usize) {
+        let g = &*self.graph;
         s.set(origin, t0, NO_LINK);
-        s.heap.push(Reverse((F(t0), origin as u32)));
+        s.heap.push(Reverse((F(t0), g.old_of[origin])));
         while let Some(Reverse((F(t), u))) = s.heap.pop() {
-            let u = u as usize;
+            let u = g.new_of[u as usize] as usize;
             if t > s.dist[u] {
                 continue;
             }
@@ -363,12 +379,12 @@ impl Router {
                 }
             }
             let tt = self.column(t);
-            for (l, v) in self.fwd.edges(u) {
+            for (l, v) in g.fwd.edges(u) {
                 let nt = t + tt[l as usize];
                 let v = v as usize;
                 if nt < s.get(v) {
                     s.set(v, nt, l);
-                    s.heap.push(Reverse((F(nt), v as u32)));
+                    s.heap.push(Reverse((F(nt), g.old_of[v])));
                 }
             }
         }
@@ -384,7 +400,9 @@ impl Router {
     }
 
     /// Time-dependent A* (ALT) from `(origin, t0)` to `target`.
+    /// Ties break by network node, as in [`Router::dijkstra`].
     fn astar(&self, s: &mut Search, origin: usize, t0: f64, target: usize) {
+        let g = &*self.graph;
         let lm = self.landmarks.as_deref().unwrap();
         let goal = lm.target(target);
         s.set(origin, t0, NO_LINK);
@@ -392,9 +410,9 @@ impl Router {
         if p.is_infinite() {
             return;
         }
-        s.heap.push(Reverse((F(t0 + p), origin as u32)));
+        s.heap.push(Reverse((F(t0 + p), g.old_of[origin])));
         while let Some(Reverse((F(key), u))) = s.heap.pop() {
-            let u = u as usize;
+            let u = g.new_of[u as usize] as usize;
             let t = s.dist[u];
             if key > t + s.pi[u] {
                 continue; // stale
@@ -403,7 +421,7 @@ impl Router {
                 break;
             }
             let tt = self.column(t);
-            for (l, v) in self.fwd.edges(u) {
+            for (l, v) in g.fwd.edges(u) {
                 let nt = t + tt[l as usize];
                 let v = v as usize;
                 if nt < s.get(v) {
@@ -412,7 +430,7 @@ impl Router {
                         continue;
                     }
                     s.set(v, nt, l);
-                    s.heap.push(Reverse((F(nt + p), v as u32)));
+                    s.heap.push(Reverse((F(nt + p), g.old_of[v])));
                 }
             }
         }
@@ -422,18 +440,20 @@ impl Router {
         if s.get(dest).is_infinite() {
             return Answer { query, path: Vec::new(), travel_time: 0.0, distance: 0.0, found: false };
         }
-        let mut path = Vec::new();
+        let g = &*self.graph;
+        let mut edges = Vec::new();
         let mut node = dest;
         while node != origin {
-            let l = s.via[node];
-            path.push(l);
-            node = self.from_node[l as usize] as usize;
+            let e = s.via[node];
+            edges.push(e);
+            node = g.edge_from[e as usize] as usize;
         }
-        path.reverse();
+        edges.reverse();
         let mut distance = 0.0;
-        for &l in &path {
-            distance += self.length[l as usize];
+        for &e in &edges {
+            distance += g.edge_length[e as usize];
         }
+        let path = edges.iter().map(|&e| g.edge_link[e as usize]).collect();
         Answer { query, path, travel_time: s.get(dest) - t0, distance, found: true }
     }
 
@@ -559,16 +579,117 @@ fn parse_columns(n_links: usize, columns: PyReadonlyArray2<f64>, bin_col: PyRead
     Ok((columns, n_cols, bin_col))
 }
 
+/// Position of `(x, y)` along a Hilbert curve over a `2^BITS` grid.
+fn hilbert_key(mut x: u32, mut y: u32) -> u64 {
+    const BITS: u32 = 16;
+    let full = (1u32 << BITS) - 1;
+    let mut d = 0u64;
+    let mut s = 1u32 << (BITS - 1);
+    while s > 0 {
+        let rx = (x & s) > 0;
+        let ry = (y & s) > 0;
+        d += (s as u64) * (s as u64) * ((3 * rx as u64) ^ ry as u64);
+        if !ry {
+            if rx {
+                x = full - x;
+                y = full - y;
+            }
+            std::mem::swap(&mut x, &mut y);
+        }
+        s >>= 1;
+    }
+    d
+}
+
+/// Network nodes in Hilbert curve order of their coordinates (ties, and
+/// nodes without finite coordinates, by node index).
+fn hilbert_order(x: &[f64], y: &[f64]) -> Vec<u32> {
+    let finite = |v: &&f64| v.is_finite();
+    let lo = |a: &[f64]| a.iter().filter(finite).copied().fold(f64::INFINITY, f64::min);
+    let hi = |a: &[f64]| a.iter().filter(finite).copied().fold(f64::NEG_INFINITY, f64::max);
+    let (x0, y0) = (lo(x), lo(y));
+    let span = (hi(x) - x0).max(hi(y) - y0).max(1e-9);
+    let cell = |v: f64, v0: f64| -> u32 {
+        if v.is_finite() { (((v - v0) / span) * 65535.0).clamp(0.0, 65535.0) as u32 } else { 0 }
+    };
+    let mut order: Vec<u32> = (0..x.len() as u32).collect();
+    let keys: Vec<u64> = (0..x.len()).map(|i| hilbert_key(cell(x[i], x0), cell(y[i], y0))).collect();
+    order.sort_by_key(|&i| (keys[i as usize], i));
+    order
+}
+
+impl Graph {
+    /// The mode's links (`offsets`/`link`, a CSR over network nodes) with
+    /// the network nodes renumbered in `order` (`order[new] = network node`).
+    fn build(offsets: &[usize], link: &[u32], to_node: &[u32], length: &[f64], order: Vec<u32>)
+             -> Graph {
+        let n = order.len();
+        let mut new_of = vec![0u32; n];
+        for (w, &u) in order.iter().enumerate() {
+            new_of[u as usize] = w as u32;
+        }
+        let mut fwd_offsets = Vec::with_capacity(n + 1);
+        let (mut edge_link, mut edge_from, mut to) = (Vec::new(), Vec::new(), Vec::new());
+        fwd_offsets.push(0);
+        for (w, &u) in order.iter().enumerate() {
+            for &l in &link[offsets[u as usize]..offsets[u as usize + 1]] {
+                edge_link.push(l);
+                edge_from.push(w as u32);
+                to.push(new_of[to_node[l as usize] as usize]);
+            }
+            fwd_offsets.push(edge_link.len());
+        }
+        let edge_length = edge_link.iter().map(|&l| length[l as usize]).collect();
+        let fwd = Csr { offsets: fwd_offsets, link: (0..edge_link.len() as u32).collect(), to };
+        Graph { fwd, edge_link, edge_from, edge_length, new_of, old_of: order }
+    }
+
+    /// The reverse adjacency (edges by their to-node).
+    fn reverse(&self) -> Csr {
+        let n = self.new_of.len();
+        let mut counts = vec![0usize; n + 1];
+        for &v in &self.fwd.to {
+            counts[v as usize + 1] += 1;
+        }
+        for i in 0..n {
+            counts[i + 1] += counts[i];
+        }
+        let mut fill = counts.clone();
+        let ne = self.edge_link.len();
+        let (mut rlink, mut rto) = (vec![0u32; ne], vec![0u32; ne]);
+        for e in 0..ne {
+            let v = self.fwd.to[e] as usize;
+            rlink[fill[v]] = e as u32;
+            rto[fill[v]] = self.edge_from[e];
+            fill[v] += 1;
+        }
+        Csr { offsets: counts, link: rlink, to: rto }
+    }
+
+    /// Link-major `(n_cols, n_links)` values as edge-major `(n_cols, n_edges)`.
+    fn edge_columns(&self, columns: &[f64], n_links: usize, n_cols: usize) -> Vec<f64> {
+        let mut out = Vec::with_capacity(n_cols * self.edge_link.len());
+        for c in 0..n_cols {
+            let col = &columns[c * n_links..(c + 1) * n_links];
+            out.extend(self.edge_link.iter().map(|&l| col[l as usize]));
+        }
+        out
+    }
+}
+
 #[pymethods]
 impl Router {
     /// `offsets`/`links`: the mode's CSR adjacency (`Network.out_links`).
     /// `columns`: `(n_columns, n_links)` link travel times; `bin_col[b]` is the
     /// column of time bin `b`. `lower_bound`: per-link lower bound on any
     /// column (free-speed times); with `landmarks > 0` ALT landmarks are
-    /// computed on it.
+    /// computed on it. `node_xy`: `(n_nodes, 2)` coordinates; given, the
+    /// router numbers nodes along a Hilbert curve internally (faster
+    /// searches on networks numbered without regard to location; nodes,
+    /// links and routes in and out stay the network's).
     #[new]
     #[pyo3(signature = (offsets, links, from_node, to_node, length, columns, bin_col, bin_size,
-                        lower_bound=None, landmarks=0))]
+                        lower_bound=None, landmarks=0, node_xy=None))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python<'_>,
@@ -582,11 +703,12 @@ impl Router {
         bin_size: f64,
         lower_bound: Option<PyReadonlyArray1<f64>>,
         landmarks: usize,
+        node_xy: Option<PyReadonlyArray2<f64>>,
     ) -> PyResult<Router> {
         let offsets = offsets.as_slice()?;
         let n = offsets.len().checked_sub(1).ok_or_else(|| PyValueError::new_err("empty offsets"))?;
         let n_links = from_node.len()?;
-        let from_node = to_u32("from_node", from_node.as_slice()?, n)?;
+        to_u32("from_node", from_node.as_slice()?, n)?; // validated; edges come from offsets/links
         let to_node = to_u32("to_node", to_node.as_slice()?, n)?;
         let link = to_u32("links", links.as_slice()?, n_links)?;
         let length = length.as_slice()?.to_vec();
@@ -598,8 +720,18 @@ impl Router {
         if offsets[n] != link.len() {
             return Err(PyValueError::new_err("offsets do not match links"));
         }
-        let to: Vec<u32> = link.iter().map(|&l| to_node[l as usize]).collect();
-        let fwd = Csr { offsets, link, to };
+        let order = match node_xy {
+            Some(xy) => {
+                let xy = xy.as_array();
+                if xy.nrows() != n || xy.ncols() != 2 {
+                    return Err(PyValueError::new_err("node_xy must have shape (n_nodes, 2)"));
+                }
+                let (x, y): (Vec<f64>, Vec<f64>) = xy.rows().into_iter().map(|r| (r[0], r[1])).unzip();
+                hilbert_order(&x, &y)
+            }
+            None => (0..n as u32).collect(),
+        };
+        let graph = Graph::build(&offsets, &link, &to_node, &length, order);
         let lower = match lower_bound {
             Some(a) => Some(a.as_slice()?.to_vec()),
             None => None,
@@ -609,34 +741,17 @@ impl Router {
             if lower.len() != n_links {
                 return Err(PyValueError::new_err("lower_bound must have n_links entries"));
             }
-            // reverse adjacency of the mode's links
-            let mut counts = vec![0usize; n + 1];
-            for &l in &fwd.link {
-                counts[to_node[l as usize] as usize + 1] += 1;
-            }
-            for i in 0..n {
-                counts[i + 1] += counts[i];
-            }
-            let mut fill = counts.clone();
-            let mut rlink = vec![0u32; fwd.link.len()];
-            let mut rto = vec![0u32; fwd.link.len()];
-            for &l in &fwd.link {
-                let v = to_node[l as usize] as usize;
-                rlink[fill[v]] = l;
-                rto[fill[v]] = from_node[l as usize];
-                fill[v] += 1;
-            }
-            let bwd = Csr { offsets: counts, link: rlink, to: rto };
-            let fwd_ref = &fwd;
-            Some(Arc::new(py.allow_threads(|| Landmarks::build(fwd_ref, &bwd, n, &lower, landmarks))))
+            let lower: Vec<f64> = graph.edge_link.iter().map(|&l| lower[l as usize]).collect();
+            let bwd = graph.reverse();
+            let g = &graph;
+            Some(Arc::new(py.allow_threads(|| Landmarks::build(&g.fwd, &bwd, n, &lower, landmarks))))
         } else {
             None
         };
+        let columns = graph.edge_columns(&columns, n_links, n_cols);
         Ok(Router {
             n,
-            fwd,
-            from_node,
-            length,
+            graph: Arc::new(graph),
             n_links,
             columns,
             is_static: n_cols == 1,
@@ -653,11 +768,10 @@ impl Router {
     fn with_times(&self, columns: PyReadonlyArray2<f64>, bin_col: PyReadonlyArray1<i64>,
                   bin_size: f64) -> PyResult<Router> {
         let (columns, n_cols, bin_col) = parse_columns(self.n_links, columns, bin_col, bin_size)?;
+        let columns = self.graph.edge_columns(&columns, self.n_links, n_cols);
         Ok(Router {
             n: self.n,
-            fwd: self.fwd.clone(),
-            from_node: self.from_node.clone(),
-            length: self.length.clone(),
+            graph: self.graph.clone(),
             n_links: self.n_links,
             columns,
             is_static: n_cols == 1,
@@ -670,7 +784,8 @@ impl Router {
 
     #[getter]
     fn landmark_nodes(&self) -> Vec<u32> {
-        self.landmarks.as_ref().map_or_else(Vec::new, |l| l.nodes.clone())
+        let old_of = &self.graph.old_of;
+        self.landmarks.as_ref().map_or_else(Vec::new, |l| l.nodes.iter().map(|&v| old_of[v as usize]).collect())
     }
 
     #[getter]
@@ -704,8 +819,9 @@ impl Router {
             "alt" => return Err(PyValueError::new_err("algorithm 'alt' needs landmarks > 0")),
             other => return Err(PyValueError::new_err(format!("unknown algorithm {other:?}"))),
         };
-        let o = to_u32("origins", origins.as_slice()?, self.n)?;
-        let d = to_u32("destinations", destinations.as_slice()?, self.n)?;
+        let new_of = &self.graph.new_of;
+        let o: Vec<u32> = to_u32("origins", origins.as_slice()?, self.n)?.iter().map(|&v| new_of[v as usize]).collect();
+        let d: Vec<u32> = to_u32("destinations", destinations.as_slice()?, self.n)?.iter().map(|&v| new_of[v as usize]).collect();
         let t = departure_times.as_slice()?.to_vec();
         if d.len() != o.len() || t.len() != o.len() {
             return Err(PyValueError::new_err("query arrays must have the same length"));
@@ -750,7 +866,8 @@ impl Router {
         };
         let mut s = self.take();
         let mut out = Vec::with_capacity(1);
-        self.solve_group(&mut s, &[0], &[origin as u32], &[destination as u32],
+        let new_of = &self.graph.new_of;
+        self.solve_group(&mut s, &[0], &[new_of[origin]], &[new_of[destination]],
                          &[departure_time], alt, &mut out);
         self.give(s);
         let a = out.pop().unwrap();
