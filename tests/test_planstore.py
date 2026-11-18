@@ -170,3 +170,17 @@ def test_validate_batch():
                        "act_duration": np.full(b.n_acts, np.nan)})
     with pytest.raises(ValueError, match="needs an end_time or duration"):
         validate_batch(bad)
+
+
+def test_subset_holds_the_rows_with_the_same_codes():
+    store = PlanStore.from_plans(sample_plans())
+    rows = [3, 0, 3, 1]
+    sub = store.subset(rows)
+    assert [sub[i] for i in range(len(rows))] == [store[r] for r in rows]
+    assert sub.act_types == store.act_types and sub.modes == store.modes
+    a, b = sub.take(np.arange(len(rows))), store.take(rows)
+    for name in ("act_offsets", "act_node", "leg_mode", "route_offsets", "route_links"):
+        assert np.array_equal(getattr(a, name), getattr(b, name))
+    grown = sub.append(store.take([2]))  # a lineage of its own, appendable
+    assert grown[len(rows)] == store[2] and len(sub) == len(rows)
+    assert len(store.subset([])) == 0

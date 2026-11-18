@@ -124,3 +124,31 @@ def route_many_to_links(
                                     route.travel_time + float(fstt[a]),
                                     route.distance + float(length[a])))
     return out
+
+
+def route_many_to_links_arrays(router, network: Network, mode: str, origins: np.ndarray,
+                               origin_links: np.ndarray, destinations: np.ndarray,
+                               destination_links: np.ndarray, departure_times: np.ndarray):
+    """:func:`route_many_to_links` as arrays, for routers with
+    ``route_many_arrays`` (else ``None``). Activity links are ``-1`` where
+    there is none. Returns ``(lengths, links, travel_time, distance)``:
+    query ``i``'s route is the next ``lengths[i]`` links of ``links``."""
+    many = getattr(router, "route_many_arrays", None)
+    if many is None:
+        return None
+    o, d = np.asarray(origins, dtype=np.int64), np.asarray(destinations, dtype=np.int64)
+    ol, dl = np.asarray(origin_links, dtype=np.int64), np.asarray(destination_links, dtype=np.int64)
+    # arrival_link, vectorised
+    has = (dl >= 0) & (dl != ol) & ~((ol < 0) & (o == d))
+    has[has] = network.mode_mask(mode)[dl[has]]
+    arrival = dl[has]
+    targets = d.copy()
+    targets[has] = network.from_node[arrival]
+    offsets, links, tt, dist = many(o, targets, departure_times)
+    lengths = np.diff(offsets)
+    if len(arrival):
+        links = np.insert(links, offsets[1:][has], arrival.astype(_I32))
+        lengths[has] += 1
+        tt[has] += network.free_speed_travel_times()[arrival]
+        dist[has] += network.length[arrival]
+    return lengths, links, tt, dist

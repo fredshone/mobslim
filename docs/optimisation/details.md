@@ -48,7 +48,13 @@ the innovators' source plans, about one plan per person, not the whole plan
 store. These are written once per iteration to shared memory (`/dev/shm`)
 and read by each worker.
 
-**Workers.** Strands run in `spawn`ed processes by default. The mobsim and
+**Timeline.** Set `weave.timeline = []` before `run()` to record what ran
+when: `(phase, start, end, pid)` in epoch seconds, for each strand's
+`innovate` (mutating and routing), `mobsim` and `score`, and the main
+process's `plan` and `merge`. The performance charts are drawn from it.
+
+**Workers.** Strands run in `spawn`ed processes by default. The pool's
+processes start when the run starts, while iteration 0 runs. The mobsim and
 scorer must be picklable, and scripts need an `if __name__ == "__main__":`
 guard. `ProcessLoom(start_method="fork")` avoids the guard on Linux.
 

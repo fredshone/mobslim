@@ -3,10 +3,11 @@
 
 Writes ``docs/_generated/weaving_{machine,summary}.md`` and
 ``docs/_static/showcase/weaving_{experiment}_time_{light,dark}.svg``.
-Every comparison is in wall-clock time. Each chart has two panels: when
-each run's mobsims ran in the first :data:`CADENCE` seconds (one bar per
-mobsim run, one lane per process running them at once), and utility in the
-first :data:`SHOWN` seconds, as in the table.
+Every comparison is in wall-clock time. Each chart has two panels: what
+each run's processes did in the first :data:`CADENCE` seconds (one lane per
+process, the main process first: mobsim runs, innovation (mostly routing)
+and the main process's own work), and utility in the first :data:`SHOWN`
+seconds, as in the table.
 """
 
 from __future__ import annotations
@@ -63,6 +64,35 @@ def _runs(results: dict, experiment: str) -> list[tuple[str, str, dict]]:
     shared = SHARED.get(experiment, [])
     return [(r.slug, r.name, results["runs"][r.slug]) for r in RUNS
             if (r.experiment == experiment or r.slug in shared) and r.slug in results["runs"]]
+
+
+ROUTE_ALPHA = 0.35  # innovation spans: the run's colour, this opaque
+MAIN_PHASES = ("plan", "merge", "score")  # drawn in the muted ink (plan, merge: main process only)
+
+
+def _process_lanes(run: dict) -> list[list[tuple[str, float, float]]]:
+    """Per process, the main process first and then in order of first
+    activity: its ``(phase, start, end)`` spans. Runs without a timeline
+    (MATSim, older results) get their mobsim runs, one lane per mobsim
+    running at once."""
+    timeline = run.get("timeline")
+    if not timeline:
+        lanes: list[list] = []
+        for a, b, lane in _lanes(run.get("sims", [])):
+            while len(lanes) <= lane:
+                lanes.append([])
+            lanes[lane].append(("mobsim", a, b))
+        return lanes
+    if not any(phase == "mobsim" for phase, *_ in timeline):  # the Controller: from its sims
+        timeline = timeline + [["mobsim", a, b, pid] for a, b, pid in run.get("sims", [])]
+    main = run.get("main_pid")
+    order: dict[int, int] = {} if main is None else {main: 0}
+    for _, a, _, pid in sorted(timeline, key=lambda s: s[1]):
+        order.setdefault(pid, len(order))
+    lanes = [[] for _ in order]
+    for phase, a, b, pid in timeline:
+        lanes[order[pid]].append((phase, a, b))
+    return lanes
 
 
 def _lanes(sims: list) -> list[tuple[float, float, int]]:
@@ -131,31 +161,51 @@ def chart(results: dict, experiment: str, mode: str, path: Path) -> None:
     styles = _styles(mode)
     plt.rcParams.update({"font.family": "sans-serif", "font.size": 9, "svg.fonttype": "none"})
     runs = _runs(results, experiment)
-    fig, (top, ax) = plt.subplots(2, 1, figsize=(7.2, 3.9 + 0.32 * len(runs)),
-                                  gridspec_kw={"height_ratios": [0.32 * len(runs), 3.6]})
+    lanes = {slug: [ln for ln in _process_lanes(run) if any(a < CADENCE for _, a, _ in ln)]
+             for slug, _, run in runs}
+    gap = 0.8  # between runs, in lanes
+    total = sum(len(v) for v in lanes.values()) + gap * len(runs)
+    fig, (top, ax) = plt.subplots(2, 1, figsize=(7.2, 4.5 + 0.075 * total),
+                                  gridspec_kw={"height_ratios": [0.075 * total + 0.6, 3.6]})
     fig.patch.set_alpha(0)
     end = min(SHOWN, TIME_LIMIT)
 
-    # cadence: one row per run, top to bottom in legend order
-    band = 0.8  # of each row's height
-    for row, (slug, name, run) in enumerate(runs):
+    # cadence: one band per run, top to bottom in legend order; one lane per
+    # process, the main process on top
+    y, ticks = 0.0, []
+    for slug, name, run in runs:
         color, _ = styles[slug]
-        bars = [b for b in _lanes(run.get("sims", [])) if b[0] < CADENCE]
-        lanes = 1 + max((b[2] for b in bars), default=0)
-        h = band / lanes
-        y0 = row - band / 2
-        for lane in range(lanes):
-            spans = [(a, min(b, CADENCE) - a) for a, b, ln in bars if ln == lane]
-            top.broken_barh(spans, (y0 + lane * h + h * 0.1, h * 0.8), facecolors=color,
-                            edgecolor="none")
-    top.set_yticks(range(len(runs)))
+        n = max(len(lanes[slug]), 1)
+        ticks.append(y + n / 2)
+        for i, spans in enumerate(lanes[slug]):
+            for phase, face, alpha in (("innovate", color, ROUTE_ALPHA), ("mobsim", color, 1.0),
+                                       (MAIN_PHASES, th["muted"], 0.8)):
+                phases = phase if isinstance(phase, tuple) else (phase,)
+                bars = [(a, min(b, CADENCE) - a) for p, a, b in spans if p in phases and a < CADENCE]
+                if not bars:
+                    continue
+                if slug == REFERENCE:  # outlined, as its dashed line (grey fill is "other work")
+                    top.broken_barh(bars, (y + i + 0.12, 0.76), facecolors="none",
+                                    edgecolor=color, linewidth=0.8, hatch="////")
+                else:
+                    top.broken_barh(bars, (y + i + 0.12, 0.76), facecolors=face, alpha=alpha,
+                                    edgecolor="none")
+        y += n + gap
+    top.set_yticks(ticks)
     top.set_yticklabels([name for _, name, _ in runs], color=th["text"], fontsize=8)
-    top.set_ylim(len(runs) - 0.5, -0.5)
+    top.set_ylim(y - gap, 0)
     top.set_xlim(0, CADENCE)
     top.xaxis.set_major_formatter(lambda v, _: f"{v:g} s")
-    top.set_title(f"mobsim runs in the first {CADENCE:g} s (one bar each; one lane per process)",
-                  loc="left",
-                  color=th["muted"], fontsize=8.5)
+    top.set_title(f"what each process did in the first {CADENCE:g} s (one lane per process, "
+                  "the main process on top)", loc="left", color=th["muted"], fontsize=8.5, pad=18)
+    from matplotlib.patches import Patch
+
+    ink = styles["controller"][0] if "controller" in styles else th["text"]
+    top.legend(handles=[Patch(color=ink, label="mobsim"),
+                        Patch(color=ink, alpha=ROUTE_ALPHA, label="innovation (routing)"),
+                        Patch(color=th["muted"], alpha=0.8, label="plan, merge, scoring")],
+               loc="lower left", bbox_to_anchor=(0.0, 1.0), borderaxespad=0.1, borderpad=0,
+               ncol=3, frameon=False, labelcolor=th["text"], fontsize=7.5, handlelength=1.2)
 
     # utility
     shown = []

@@ -26,7 +26,7 @@ from mobslim.planbatch import _I32, PlanBatch
 from mobslim.planstore import csr_gather
 from mobslim.population import Activity, Leg, Plan, Route, TransitPassengerRoute
 from mobslim.replanning.context import ReplanningContext
-from mobslim.routing.base import route_many_to_links
+from mobslim.routing.base import route_many_to_links, route_many_to_links_arrays
 
 
 @runtime_checkable
@@ -355,27 +355,55 @@ class ChangeTripMode:
 
 # ------------------------------------------------------------------ batches
 
-def _set_routes(batch: PlanBatch, clear: np.ndarray, new: Optional[dict] = None) -> PlanBatch:
+def _set_routes(batch: PlanBatch, clear: np.ndarray, new: Optional[dict] = None,
+                net: Optional[list] = None) -> PlanBatch:
     """``batch`` with the routes of legs ``clear`` (bool per leg) removed and
-    ``new`` (``{leg: Route or TransitPassengerRoute}``) set; other legs keep theirs."""
+    ``new`` (``{leg: Route or TransitPassengerRoute}``) set; other legs keep theirs.
+    ``net``: more new network routes, as blocks of arrays ``(legs, lengths,
+    links, travel_time, distance)`` (see :func:`route_many_to_links_arrays`)."""
     new = new or {}
     n_legs = batch.n_legs
-    is_new = np.zeros(n_legs, dtype=bool)
-    if new:
-        is_new[list(new)] = True
+    new_legs = sorted(new)
+    pt_legs = [leg for leg in new_legs if new[leg].__class__ is TransitPassengerRoute]
+    net_legs = [leg for leg in new_legs if new[leg].__class__ is not TransitPassengerRoute]
+    # every new network route as one block of arrays, in leg order
+    blocks = list(net or ())
+    if net_legs:
+        blocks.append((np.array(net_legs, dtype=np.int64),
+                       np.array([len(new[leg].data) >> 2 for leg in net_legs], dtype=np.int64),
+                       np.frombuffer(b"".join(new[leg].data for leg in net_legs), dtype=_I32),
+                       np.array([new[leg].travel_time for leg in net_legs], dtype=float),
+                       np.array([new[leg].distance for leg in net_legs], dtype=float)))
+    if blocks:
+        legs = np.concatenate([b[0] for b in blocks]).astype(np.int64)
+        lengths = np.concatenate([b[1] for b in blocks]).astype(np.int64)
+        net_links = np.concatenate([b[2] for b in blocks]).astype(_I32, copy=False)
+        net_tt = np.concatenate([b[3] for b in blocks])
+        net_dist = np.concatenate([b[4] for b in blocks])
+        order = np.argsort(legs, kind="stable")
+        offsets = np.zeros(len(legs) + 1, dtype=np.int64)
+        np.cumsum(lengths, out=offsets[1:])
+        idx, _ = csr_gather(offsets, order)
+        legs, lengths, net_links = legs[order], lengths[order], net_links[idx]
+        net_tt, net_dist = net_tt[order], net_dist[order]
+    else:
+        legs = np.zeros(0, dtype=np.int64)
+        lengths = np.zeros(0, dtype=np.int64)
+        net_links = np.zeros(0, dtype=_I32)
+        net_tt = net_dist = np.zeros(0)
+    new_net = np.zeros(n_legs, dtype=bool)
+    new_net[legs] = True
+    new_pt = np.zeros(n_legs, dtype=bool)
+    new_pt[pt_legs] = True
+    is_new = new_net | new_pt
     keep = batch.leg_routed & ~clear & ~is_new
     keep_net = keep & ~batch.leg_pt_route
     keep_pt = keep & batch.leg_pt_route
-    new_legs = sorted(new)
-    new_pt = np.zeros(n_legs, dtype=bool)
-    new_pt[[leg for leg in new_legs if new[leg].__class__ is TransitPassengerRoute]] = True
-    new_net = is_new & ~new_pt
 
-    def rebuild(old_offsets, keep_mask, new_mask, old_values, new_data, width):
+    def rebuild(old_offsets, keep_mask, new_mask, old_values, new_values, new_lengths, width):
         lengths = np.where(keep_mask, np.diff(old_offsets), 0)
-        new_values = np.frombuffer(b"".join(new_data), dtype=_I32).reshape(-1, width)
         if new_mask.any():
-            lengths[new_mask] = [len(d) // (4 * width) for d in new_data]
+            lengths[new_mask] = new_lengths
         offsets = np.zeros(n_legs + 1, dtype=np.int64)
         np.cumsum(lengths, out=offsets[1:])
         values = np.empty((offsets[-1], width), dtype=np.int32)
@@ -388,17 +416,20 @@ def _set_routes(batch: PlanBatch, clear: np.ndarray, new: Optional[dict] = None)
 
     route_offsets, links = rebuild(
         batch.route_offsets, keep_net, new_net, batch.route_links.reshape(-1, 1),
-        [new[leg].data for leg in new_legs if new_net[leg]], 1)
+        net_links.reshape(-1, 1), lengths, 1)
+    pt_data = [new[leg].data for leg in pt_legs]
     old_rides = np.column_stack([batch.ride_board_stop, batch.ride_alight_stop])
     ride_offsets, rides = rebuild(
         batch.ride_offsets, keep_pt, new_pt, old_rides,
-        [new[leg].data for leg in new_legs if new_pt[leg]], 2)
+        np.frombuffer(b"".join(pt_data), dtype=_I32).reshape(-1, 2),
+        [len(d) // 8 for d in pt_data], 2)
     routed = keep | is_new
     rtime = np.where(keep, batch.leg_route_time, np.nan)
     rdist = np.where(keep, batch.leg_route_distance, np.nan)
-    if new_legs:
-        rtime[new_legs] = [new[leg].travel_time for leg in new_legs]
-        rdist[new_legs] = [new[leg].distance for leg in new_legs]
+    rtime[legs], rdist[legs] = net_tt, net_dist
+    if pt_legs:
+        rtime[pt_legs] = [new[leg].travel_time for leg in pt_legs]
+        rdist[pt_legs] = [new[leg].distance for leg in pt_legs]
     return replace(
         batch, leg_routed=routed, leg_pt_route=(keep_pt | new_pt), route_offsets=route_offsets,
         route_links=links[:, 0].copy(), ride_offsets=ride_offsets,
@@ -458,6 +489,7 @@ def route_batch(batch: PlanBatch, ctx: ReplanningContext, persons=None) -> PlanB
     end, dur = batch.act_end_time, batch.act_duration
     clock = np.zeros(batch.n_plans)
     new: dict[int, object] = {}
+    net_routes: list = []  # blocks of network routes as arrays
     teleport_params = {m: modes.teleported[m] for m in batch.modes if m in modes.teleported}
     for j in range(int(n_legs[active].max(initial=0))):
         p = np.flatnonzero(active & (n_legs > j))
@@ -477,14 +509,20 @@ def route_batch(batch: PlanBatch, ctx: ReplanningContext, persons=None) -> PlanB
                                                 None if persons is None else persons[p[tele]])
         # legs to route now, one route_many call per mode
         todo = np.flatnonzero(need[legs])
-        by_mode: dict[int, list] = {}
-        for k in todo.tolist():
-            by_mode.setdefault(int(batch.leg_mode[legs[k]]), []).append(k)
-        for code, ks in by_mode.items():
+        todo_modes = batch.leg_mode[legs[todo]]
+        for code in np.unique(todo_modes).tolist():
             mode = batch.modes[code]
-            ks = np.array(ks, dtype=np.int64)
+            ks = todo[todo_modes == code]
             o, dst = a[ks], a[ks] + 1
             router = ctx.router(mode)
+            if not modes.is_transit_mode(mode):
+                arrays = route_many_to_links_arrays(
+                    router, net, mode, batch.act_node[o], batch.act_link[o],
+                    batch.act_node[dst], batch.act_link[dst], t[ks])
+                if arrays is not None:
+                    net_routes.append((legs[ks], *arrays))
+                    t[ks] = t[ks] + arrays[2]
+                    continue
             if modes.is_transit_mode(mode):
                 args = ([tuple(v) for v in xy[o].tolist()], [tuple(v) for v in xy[dst].tolist()],
                         t[ks].tolist())
@@ -505,7 +543,7 @@ def route_batch(batch: PlanBatch, ctx: ReplanningContext, persons=None) -> PlanB
                 new[int(legs[k])] = route
                 t[k] = t[k] + route.travel_time
         clock[p] = t
-    return _set_routes(batch, clear=drop | need, new=new)
+    return _set_routes(batch, clear=drop | need, new=new, net=net_routes)
 
 
 def _teleport_times(batch, legs, origin_acts, xy, modes, params, persons) -> np.ndarray:

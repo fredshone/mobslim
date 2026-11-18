@@ -15,7 +15,8 @@ job, never on the loom or on completion order.
   file in shared memory (``/dev/shm``, where available); a job carries only
   its strand's rows and innovations, and each worker reads the snapshot once.
   :class:`~mobslim.weave.Weave` first slims the store to the rows its
-  strands use (:func:`~mobslim.weave.strand.slim_jobs`). Each worker routes
+  strands use (:func:`~mobslim.weave.strand.slim_jobs`). The workers start,
+  and read the context, when the loom starts (during iteration 0). Each worker routes
   on ``router_threads`` threads. Results come back with a sparse travel-time
   aggregate (only the cells used), and with the time spent reading the
   snapshot and job and the result's size and unpickling time in their
@@ -82,14 +83,26 @@ _shared: Optional[tuple[str, StrandContext]] = None
 _store: Optional[tuple[str, tuple]] = None
 
 
-def _run_job(token: str, path: str, store_path: str, job: bytes) -> bytes:
-    """Runs a pickled job; returns the pickled result (so that the main
-    process can measure and time its transfer)."""
-    global _shared, _store
-    t0 = time.perf_counter()
+def _load_context(token: str, path: str) -> StrandContext:
+    """The run's context, read once per worker and run."""
+    global _shared
     if _shared is None or _shared[0] != token:
         with open(path, "rb") as f:
             _shared = (token, pickle.load(f))
+    return _shared[1]
+
+
+def _warm(token: str, path: str) -> None:
+    """Starts a worker and reads the run's context, before any job."""
+    _load_context(token, path)
+
+
+def _run_job(token: str, path: str, store_path: str, job: bytes) -> bytes:
+    """Runs a pickled job; returns the pickled result (so that the main
+    process can measure and time its transfer)."""
+    global _store
+    t0 = time.perf_counter()
+    ctx = _load_context(token, path)
     t1 = time.perf_counter()
     if _store is None or _store[0] != store_path:
         _store = None  # free the previous store first
@@ -99,7 +112,7 @@ def _run_job(token: str, path: str, store_path: str, job: bytes) -> bytes:
     job = pickle.loads(job)
     t3 = time.perf_counter()
     store, travel_time = _store[1]
-    result = run_strand(_shared[1], replace(job, store=store, travel_time=travel_time),
+    result = run_strand(ctx, replace(job, store=store, travel_time=travel_time),
                         cross_process=True)
     result.metrics.update(context_read_s=t1 - t0, snapshot_read_s=t2 - t1, job_unpickle_s=t3 - t2)
     return pickle.dumps(result, protocol=pickle.HIGHEST_PROTOCOL)
@@ -211,7 +224,11 @@ class ProcessLoom:
         fd, self._path = tempfile.mkstemp(prefix="mobslim-weave-", suffix=".pkl")
         with os.fdopen(fd, "wb") as f:
             pickle.dump(ctx.without_plans(), f, protocol=pickle.HIGHEST_PROTOCOL)
-        self._executor()
+        # start every worker now (a pool starts them on demand), so that they
+        # import and read the context while the run's first strand runs here
+        pool = self._executor()
+        for _ in range(self.workers):
+            pool.submit(_warm, self._token, self._path)
 
     def submit(self, job: StrandJob) -> "Future[StrandResult]":
         if self._path is None:

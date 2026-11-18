@@ -642,6 +642,10 @@ RouterFactory = Callable[[Network, str, TravelTime], Router]
   It is opt-in: `partial(RustRouter, algorithm="alt")`.
 * Travel times cross into Rust as the table's *distinct* columns plus a
   bin → column map, so free-flow bins are stored once.
+* `RustRouter.route_many_arrays` returns the routes as arrays (offsets,
+  links, times, distances). `route_batch` uses it for network modes, with
+  `route_many_to_links_arrays` appending arrival links vectorised, so
+  rerouting builds no `Route` object per leg.
 * `default_router` is the default factory everywhere: `RustRouter` when it is
   installed and the travel times are a `TravelTimeTable` or
   `FreeSpeedTravelTime`, else `DijkstraRouter`. Both give the same routes, so

@@ -48,11 +48,7 @@ from mobslim.metrics import iteration_metrics, score_metrics
 from mobslim.replanning.context import ReplanningContext
 from mobslim.replanning.vectorised import VectorRunner
 from mobslim.routing.compiled import router_threads
-from mobslim.routing.traveltime import (
-    TravelTimeEstimator,
-    TraversalAggregate,
-    sum_aggregates,
-)
+from mobslim.routing.traveltime import TravelTimeEstimator, TraversalAggregate
 from mobslim.weave.controller import Weave, WeaveResult, weave_rng
 from mobslim.weave.ledger import Ledger
 from mobslim.weave.loom import ProcessLoom, logical_cpus, physical_cores
@@ -115,6 +111,7 @@ class AsyncWeave(Weave):
             with router_threads(getattr(self.loom, "router_threads", None)):
                 result = self._run_local(ctx, jobs[0], state)
             state.strands = [result]
+            self._record("plan", t_start, t_start, [result])
             obs = self._add_new_plans(ledger, [result])
             merged = merge(ledger, obs, self.reducer, max_plans, removal,
                            weave_rng(cfg.seed, 0, "prune"), selected_strand=0)
@@ -137,8 +134,10 @@ class AsyncWeave(Weave):
             # iterations 1..: K slots, merged and refilled in order
             rate = self.schedule.rate(1, stats) if cfg.iterations > 1 else 0.0
             for j in range(k if cfg.iterations > 1 else 0):
+                t0 = time.perf_counter()
                 slots[j] = self._submit(ledger, scenario, travel_time, transit_weights, runner,
                                         1, j, rate)
+                self._record("plan", t0, time.perf_counter())
             for it in range(1, cfg.iterations):
                 t_start = time.perf_counter()
                 state = IterationState(it, it == cfg.iterations - 1,
@@ -173,6 +172,8 @@ class AsyncWeave(Weave):
                         slots[j] = self._submit(ledger, scenario, travel_time, transit_weights,
                                                 runner, it + 1, j, next_rate)
                     t3 = time.perf_counter()
+                    self._record("merge", t1, t2, [result])
+                    self._record("plan", t2, t3)
                     wait_s, merge_s, build_s = wait_s + t1 - t0, merge_s + t2 - t1, build_s + t3 - t2
                     new_plans, pruned = new_plans + merged.new_plans, pruned + merged.pruned
                     best_changed.append(merged.best_changed)
@@ -253,37 +254,64 @@ class AsyncWeave(Weave):
                             obs.strand[keep], obs.basis[keep])
 
 
-def _sparse(aggregate):
-    return aggregate.to_sparse() if isinstance(aggregate, TraversalAggregate) else aggregate
-
-
 class _Pool:
     """The sum of the last ``k`` strands' traversal aggregates, kept up to
     date in place: each :meth:`add` adds the newest and subtracts the one it
-    evicts (only the cells they use), and every ``k`` adds the sum is rebuilt
-    from the window, so rounding cannot accumulate."""
+    evicts, and every ``k`` adds the sum is rebuilt from the window, so
+    rounding cannot accumulate. Only ``total`` and ``count`` are kept (the
+    travel times are means); ``sum_sq`` stays zero. Aggregates using more
+    than :data:`DENSE_SHARE` of the cells are kept dense: whole-array
+    arithmetic is then faster than adding cell by cell."""
+
+    DENSE_SHARE = 0.25
 
     def __init__(self, k: int):
-        self.window: deque = deque(maxlen=k)
+        self.window: deque = deque(maxlen=k)  # (cells or None: dense, total, count)
         self.total: Optional[TraversalAggregate] = None
         self.adds = 0
 
+    def _entry(self, aggregate):
+        if isinstance(aggregate, TraversalAggregate):
+            return None, aggregate.total.reshape(-1), aggregate.count.reshape(-1)
+        size = aggregate.shape[0] * aggregate.shape[1]
+        if len(aggregate.cells) <= self.DENSE_SHARE * size:
+            return aggregate.cells, aggregate.total, aggregate.count
+        total, count = np.zeros(size), np.zeros(size, dtype=np.int64)
+        total[aggregate.cells] = aggregate.total
+        count[aggregate.cells] = aggregate.count
+        return None, total, count
+
+    @staticmethod
+    def _apply(d: TraversalAggregate, entry, sign: int) -> None:
+        cells, total, count = entry
+        dt, dc = d.total.reshape(-1), d.count.reshape(-1)
+        if cells is None:
+            (np.add if sign > 0 else np.subtract)(dt, total, out=dt)
+            (np.add if sign > 0 else np.subtract)(dc, count, out=dc)
+        elif sign > 0:
+            dt[cells] += total
+            dc[cells] += count
+        else:
+            dt[cells] -= total
+            dc[cells] -= count
+
     def add(self, aggregate) -> TraversalAggregate:
-        new = _sparse(aggregate)
+        new = self._entry(aggregate)
         self.adds += 1
         if self.total is None or self.adds % self.window.maxlen == 0:
             self.window.append(new)
-            self.total = sum_aggregates(self.window)
-            return self.total
+            shape = (aggregate.total.shape if isinstance(aggregate, TraversalAggregate)
+                     else aggregate.shape)
+            d = self.total = TraversalAggregate.empty(*shape, aggregate.bin_size)
+            for entry in self.window:
+                self._apply(d, entry, 1)
+            return d
+        d = self.total
         if len(self.window) == self.window.maxlen:
-            old = self.window[0]
-            d = self.total
-            d.total.reshape(-1)[old.cells] -= old.total
-            d.count.reshape(-1)[old.cells] -= old.count
-            d.sum_sq.reshape(-1)[old.cells] -= old.sum_sq
+            self._apply(d, self.window[0], -1)
         self.window.append(new)
-        new.add_into(self.total)
-        return self.total
+        self._apply(d, new, 1)
+        return d
 
 
 def _renumber(rows: np.ndarray, live: np.ndarray) -> np.ndarray:

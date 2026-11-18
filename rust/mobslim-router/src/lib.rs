@@ -77,6 +77,21 @@ fn py_floordiv(vx: f64, wx: f64) -> f64 {
     }
 }
 
+/// `py_floordiv(t, w)`, without its `fmod` unless `t / w` is close to an
+/// integer: elsewhere the rounded quotient has the same floor as the exact
+/// one (its error is far below 1e-9 for any quotient below 2^20).
+#[inline]
+fn bin_of(t: f64, w: f64) -> f64 {
+    let q = t / w;
+    let f = q.floor();
+    let frac = q - f;
+    if q.abs() < 1048576.0 && frac > 1e-9 && frac < 1.0 - 1e-9 {
+        f
+    } else {
+        py_floordiv(t, w)
+    }
+}
+
 #[derive(Clone)]
 struct Csr {
     offsets: Vec<usize>,
@@ -93,11 +108,21 @@ impl Csr {
 
 struct Landmarks {
     k: usize,
-    /// `from_l[i * n + v]`: lower-bound cost from landmark `i` to `v`.
+    /// `from_l[v * k + i]`: lower-bound cost from landmark `i` to `v`
+    /// (node-major, so one node's bounds share a cache line).
     from_l: Vec<f64>,
-    /// `to_l[i * n + v]`: lower-bound cost from `v` to landmark `i`.
+    /// `to_l[v * k + i]`: lower-bound cost from `v` to landmark `i`.
     to_l: Vec<f64>,
     nodes: Vec<u32>,
+    /// every node reaches and is reached by every landmark (no infinities)
+    finite: bool,
+}
+
+/// A query's target, as [`Landmarks::bound`] needs it.
+struct Target {
+    /// `to_l` and `from_l` of the target
+    to_l: Vec<f64>,
+    from_l: Vec<f64>,
 }
 
 /// Static Dijkstra (all nodes) on `cost`, returning distances.
@@ -127,8 +152,8 @@ impl Landmarks {
     fn build(fwd: &Csr, bwd: &Csr, n: usize, cost: &[f64], k: usize) -> Landmarks {
         let k = k.min(n);
         let mut nodes = Vec::with_capacity(k);
-        let mut from_l = Vec::with_capacity(k * n);
-        let mut to_l = Vec::with_capacity(k * n);
+        let mut from_l: Vec<Vec<f64>> = Vec::with_capacity(k);
+        let mut to_l: Vec<Vec<f64>> = Vec::with_capacity(k);
         // separation of each node from the chosen landmarks (both directions)
         let mut sep = vec![f64::INFINITY; n];
         // seed: the node farthest (by finite round-trip) from node 0
@@ -146,33 +171,51 @@ impl Landmarks {
                 }
             }
             sep[next] = 0.0;
-            from_l.extend_from_slice(&f);
-            to_l.extend_from_slice(&b);
-            match argmax_finite(&f, &b, &sep) {
+            from_l.push(f);
+            to_l.push(b);
+            match argmax_finite(&from_l[from_l.len() - 1], &to_l[to_l.len() - 1], &sep) {
                 Some(v) if sep[v] > 0.0 => next = v,
                 _ => break,
             }
         }
-        Landmarks { k: nodes.len(), from_l, to_l, nodes }
+        let k = nodes.len();
+        let node_major = |trees: &[Vec<f64>]| -> Vec<f64> {
+            (0..n).flat_map(|v| trees.iter().map(move |tree| tree[v])).collect()
+        };
+        let (from_l, to_l) = (node_major(&from_l), node_major(&to_l));
+        let finite = from_l.iter().chain(&to_l).all(|x| x.is_finite());
+        Landmarks { k, from_l, to_l, nodes, finite }
+    }
+
+    fn target(&self, t: usize) -> Target {
+        let r = t * self.k..(t + 1) * self.k;
+        Target { to_l: self.to_l[r.clone()].to_vec(), from_l: self.from_l[r].to_vec() }
     }
 
     /// Lower bound on the cost from `v` to `t` (`inf` if `t` is unreachable).
     #[inline]
-    fn bound(&self, n: usize, v: usize, t: usize) -> f64 {
+    fn bound(&self, v: usize, t: &Target) -> f64 {
+        let k = self.k;
+        let (vto, vfrom) = (&self.to_l[v * k..(v + 1) * k], &self.from_l[v * k..(v + 1) * k]);
         let mut best: f64 = 0.0;
-        for i in 0..self.k {
-            let o = i * n;
-            // d(v, t) >= d(v, L) - d(t, L)  and  d(v, t) >= d(L, t) - d(L, v)
-            let (vl, tl) = (self.to_l[o + v], self.to_l[o + t]);
-            if vl.is_infinite() && tl.is_finite() {
-                return f64::INFINITY; // t reaches L but v does not: v cannot reach t
+        if self.finite {
+            for i in 0..k {
+                // d(v, t) >= d(v, L) - d(t, L)  and  d(v, t) >= d(L, t) - d(L, v)
+                best = best.max(vto[i] - t.to_l[i]).max(t.from_l[i] - vfrom[i]);
             }
-            if vl.is_finite() && tl.is_finite() && vl - tl > best {
-                best = vl - tl;
-            }
-            let (lt, lv) = (self.from_l[o + t], self.from_l[o + v]);
-            if lt.is_finite() && lv.is_finite() && lt - lv > best {
-                best = lt - lv;
+        } else {
+            for i in 0..k {
+                let (vl, tl) = (vto[i], t.to_l[i]);
+                if vl.is_infinite() && tl.is_finite() {
+                    return f64::INFINITY; // t reaches L but v does not: v cannot reach t
+                }
+                if vl.is_finite() && tl.is_finite() && vl - tl > best {
+                    best = vl - tl;
+                }
+                let (lt, lv) = (t.from_l[i], vfrom[i]);
+                if lt.is_finite() && lv.is_finite() && lt - lv > best {
+                    best = lt - lv;
+                }
             }
         }
         // shave off rounding so the bound never exceeds the true cost
@@ -290,7 +333,7 @@ impl Router {
             0
         } else {
             let last = self.bin_col.len() as i64 - 1;
-            let b = py_floordiv(time, self.bin_size) as i64;
+            let b = bin_of(time, self.bin_size) as i64;
             self.bin_col[b.clamp(0, last) as usize] as usize
         };
         &self.columns[c * self.n_links..(c + 1) * self.n_links]
@@ -326,18 +369,20 @@ impl Router {
     }
 
     #[inline]
-    fn potential(&self, s: &mut Search, v: usize, target: usize) -> f64 {
+    fn potential(&self, lm: &Landmarks, s: &mut Search, v: usize, target: &Target) -> f64 {
         if s.pi_stamp[v] != s.cur {
             s.pi_stamp[v] = s.cur;
-            s.pi[v] = self.landmarks.as_ref().unwrap().bound(self.n, v, target);
+            s.pi[v] = lm.bound(v, target);
         }
         s.pi[v]
     }
 
     /// Time-dependent A* (ALT) from `(origin, t0)` to `target`.
     fn astar(&self, s: &mut Search, origin: usize, t0: f64, target: usize) {
+        let lm = self.landmarks.as_deref().unwrap();
+        let goal = lm.target(target);
         s.set(origin, t0, NO_LINK);
-        let p = self.potential(s, origin, target);
+        let p = self.potential(lm, s, origin, &goal);
         if p.is_infinite() {
             return;
         }
@@ -356,7 +401,7 @@ impl Router {
                 let nt = t + tt[l as usize];
                 let v = v as usize;
                 if nt < s.get(v) {
-                    let p = self.potential(s, v, target);
+                    let p = self.potential(lm, s, v, &goal);
                     if p.is_infinite() {
                         continue;
                     }

@@ -20,8 +20,9 @@ the costly part of innovation, so runs in parallel across strands.
 
 from __future__ import annotations
 
+import os
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Optional, Union
 
 import numpy as np
@@ -118,6 +119,9 @@ class StrandResult:
     # ``base_rows`` (the ledger store's length) on are these (row - base_rows)
     new_plans: Optional[PlanBatch] = None
     base_rows: int = 0
+    # ``(phase, start, end, pid)`` in epoch seconds: "innovate" (mutating
+    # and routing), "mobsim", "score" (scoring, aggregate, metrics)
+    spans: list = field(default_factory=list)
 
 
 def strand_population(population: Population, store: PlanStore, rows) -> Population:
@@ -181,13 +185,18 @@ def run_strand(ctx: StrandContext, job: StrandJob, events: Optional[EventsManage
     metrics.update(strand=job.strand, innovators=int(np.count_nonzero(job.candidate)))
     for key in ("score_best", "score_worst", "score_average", "plans_per_person"):
         metrics.pop(key, None)  # one plan per person: these equal score_executed / 1
-    seconds = time.perf_counter() - t0
+    t_end = time.perf_counter()
+    seconds = t_end - t0
+    epoch, pid = time.time() - time.perf_counter(), os.getpid()
+    spans = [(phase, a + epoch, b + epoch, pid) for phase, a, b in (
+        ("innovate", t0, t_innovated), ("mobsim", t_mobsim, t_simulated), ("score", t_simulated, t_end))
+        if b > a and (phase != "innovate" or new_plans is not None)]
     metrics.update(strand_s=seconds, strand_replanning_s=t_innovated - t0,
                    router_setup_s=router_setup, mobsim_s=t_simulated - t_mobsim,
                    scoring_s=t_scored - t_simulated, aggregate_s=t_aggregated - t_scored,
                    strand_metrics_s=time.perf_counter() - t_aggregated)
     return StrandResult(job.strand, obs, aggregate, metrics, seconds,
-                        trajectories if keep_trajectories else None, new_plans, base_rows)
+                        trajectories if keep_trajectories else None, new_plans, base_rows, spans)
 
 
 def innovate_strand(ctx: StrandContext, job: StrandJob):
@@ -243,7 +252,7 @@ def slim_jobs(jobs: list[StrandJob]) -> list[StrandJob]:
     used += [np.asarray(src, dtype=np.int64) for j in jobs for s, _, src in j.innovations or ()
              if s is not None]
     row_map = np.unique(np.concatenate(used))
-    sub = PlanStore.from_batch(store.take(row_map))
+    sub = store.subset(row_map)
 
     def local(rows):
         return np.searchsorted(row_map, rows).astype(np.int64)

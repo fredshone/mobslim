@@ -35,6 +35,7 @@ results do not depend on the loom or on completion order.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass, field, replace
 from typing import Optional, Union
@@ -168,6 +169,11 @@ class Weave(Controller):
         self.travel_time_smoothing = travel_time_smoothing
         self.strand_metrics: list[list[dict]] = []
         self.ledger: Optional[Ledger] = None
+        # set to a list to record what ran when: ``(phase, start, end, pid)``
+        # in epoch seconds, the strands' phases (StrandResult.spans) and this
+        # process's "plan" (cohorts, backgrounds, jobs) and "merge" (merge,
+        # travel times)
+        self.timeline: Optional[list] = None
 
     @classmethod
     def from_mobslim_config(cls, path, **overrides) -> "Weave":
@@ -262,6 +268,8 @@ class Weave(Controller):
                 t_summed = time.perf_counter()
                 travel_time = state.travel_time = estimator.observe(aggregate)
                 t_observed = time.perf_counter()
+                self._record("plan", t_start, t_submitted)
+                self._record("merge", t_simulated, t_observed, results)
 
                 m = iteration_metrics(it, ledger.population, results[0].trajectories)
                 m.update(
@@ -295,6 +303,16 @@ class Weave(Controller):
             self.runner.close()
             self._notify("on_shutdown", self)
         return WeaveResult(scenario, travel_time, self.metrics, self.strand_metrics)
+
+    def _record(self, phase: str, t0: float, t1: float, results=()) -> None:
+        """Adds this process's ``phase`` from ``t0`` to ``t1`` (perf_counter
+        seconds) and ``results``' spans to :attr:`timeline`, if recording."""
+        if self.timeline is None:
+            return
+        if t1 > t0:
+            epoch = time.time() - time.perf_counter()
+            self.timeline.append((phase, t0 + epoch, t1 + epoch, os.getpid()))
+        self.timeline.extend(span for r in results for span in r.spans)
 
     def _build_jobs(self, ledger: Ledger, scenario, travel_time, transit_weights,
                     runner: VectorRunner, it: int, k: int, rate: float):

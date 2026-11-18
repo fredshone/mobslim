@@ -491,7 +491,28 @@ def test_async_pool_is_the_sum_of_the_last_k(equil_scenario):
         got = pool.add(part)
         want = sum_aggregates([p.to_sparse() for p in parts[max(0, i - 2):i + 1]])
         assert np.array_equal(got.count, want.count) and np.array_equal(got.total, want.total)
-        assert np.array_equal(got.sum_sq, want.sum_sq)
+        assert not got.sum_sq.any()  # not kept: the travel times are means
+
+
+def test_async_pool_dense_entries_match_sparse(equil_scenario):
+    """Aggregates using most cells are kept dense; the sums are the same."""
+    from mobslim.weave.asynchronous import _Pool
+
+    net = equil_scenario.network
+    rng = np.random.default_rng(5)
+    parts = []
+    for _ in range(7):
+        links = rng.integers(0, net.n_links, 400).astype(np.int32)
+        enter = np.floor(rng.uniform(0, 3600 * 3, 400))
+        parts.append(TraversalAggregate.from_traversals(
+            net.n_links, links, enter, enter + np.floor(rng.uniform(1, 600, 400)),
+            horizon=3600 * 3).to_sparse())
+    dense, sparse = _Pool(3), _Pool(3)
+    sparse.DENSE_SHARE = 1.0
+    for part in parts:
+        a, b = dense.add(part), sparse.add(part)
+        assert np.array_equal(a.count, b.count) and np.array_equal(a.total, b.total)
+    assert dense.window[-1][0] is None and sparse.window[-1][0] is not None
 
 
 # ------------------------------------------------------------------ validation

@@ -188,6 +188,19 @@ class RustRouter:
         departure_times: Sequence[float],
     ) -> list[Route]:
         """Route every query, in parallel over ``threads`` threads."""
+        offsets, links, tt, dist = self.route_many_arrays(origins, destinations, departure_times)
+        # one buffer for all routes; each route keeps its slice as packed int32
+        data, packed = links.tobytes(), Route.packed
+        bounds = (offsets * 4).tolist()
+        return [
+            packed(data[a:b], x, y)
+            for a, b, x, y in zip(bounds, bounds[1:], tt.tolist(), dist.tolist())
+        ]
+
+    def route_many_arrays(self, origins, destinations, departure_times):
+        """:meth:`route_many` as arrays, without a :class:`Route` per query:
+        ``(offsets, links, travel_time, distance)``, query ``i``'s links
+        being ``links[offsets[i]:offsets[i + 1]]`` (int32)."""
         o = np.asarray(origins, dtype=np.int64)
         d = np.asarray(destinations, dtype=np.int64)
         t = np.asarray(departure_times, dtype=np.float64)
@@ -197,13 +210,7 @@ class RustRouter:
         if not found.all():
             q = int(np.flatnonzero(~found)[0])
             raise self._no_route(int(o[q]), int(d[q]))
-        # one buffer for all routes; each route keeps its slice as packed int32
-        data, packed = links.tobytes(), Route.packed
-        bounds = (offsets * 4).tolist()
-        return [
-            packed(data[a:b], x, y)
-            for a, b, x, y in zip(bounds, bounds[1:], tt.tolist(), dist.tolist())
-        ]
+        return offsets, links, tt, dist
 
 
 def default_router(network: Network, mode: str, travel_time: TravelTime) -> Router:

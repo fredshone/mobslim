@@ -69,8 +69,11 @@ class _Groups:
 def _group(obs: Observations, ledger: Ledger) -> _Groups:
     # one int64 key per (person, plan): sorted by person, then plan
     key = (obs.person.astype(np.int64) << 32) | obs.plan.astype(np.int64)
-    uniq, inverse = np.unique(key, return_inverse=True)
-    inverse = inverse.reshape(-1)
+    if len(key) and (key[1:] > key[:-1]).all():  # one strand: already sorted and unique
+        uniq, inverse = key, np.arange(len(key))
+    else:
+        uniq, inverse = np.unique(key, return_inverse=True)
+        inverse = inverse.reshape(-1)
     m = len(uniq)
     count = np.bincount(inverse, minlength=m)
     total = np.bincount(inverse, weights=obs.score, minlength=m)
@@ -217,7 +220,8 @@ def merge(ledger: Ledger, obs: Observations, reducer: ScoreReducer, max_plans: n
     ledger.population = population
     ledger.score_n = score_n
     ledger.version += 1
-    ledger.best_rows = best_plan_rows(population)
+    # the same rows, unless compacting renumbered them
+    ledger.best_rows = best_plan_rows(population) if live is not None else best_after_rows.astype(np.int64)
     return MergeStats(int(new.sum()), pruned, changed, live)
 
 

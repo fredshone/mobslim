@@ -22,9 +22,12 @@ machine's physical cores). Two experiments:
 Each run is a fresh process. It records, per iteration, the wall-clock time
 since the loop started (after the one-off routing of the input plans, the
 same for every run) and the average utility of the plans performed in that
-iteration (over every strand); and the start and end of every mobsim run, in
-whichever process ran it (``sims``: ``[start_s, end_s, pid]``). Results go to
-``showcase/results/weaving.json``.
+iteration (over every strand); the start and end of every mobsim run, in
+whichever process ran it (``sims``: ``[start_s, end_s, pid]``); and what each
+process did when (``timeline``: ``[phase, start_s, end_s, pid]``, phases
+``innovate`` (mutating and routing), ``mobsim``, ``score``, and in the main
+process ``plan`` and ``merge``; ``main_pid`` is the main process). Results go
+to ``showcase/results/weaving.json``.
 """
 
 from __future__ import annotations
@@ -141,14 +144,37 @@ def child(slug: str, out: str) -> None:
         pass
 
     class Record(ControllerListener):
+        """Per-iteration metrics; and, for the plain Controller (a weave
+        records its own timeline), its replanning and scoring as spans."""
+
         def __init__(self):
             self.rows = []
+            self.spans = []
+            self.timeline = None
 
         def on_startup(self, controller):
             self.t0 = time.perf_counter()
             self.epoch = time.time()
+            if hasattr(controller, "timeline"):
+                self.timeline = controller.timeline = []
+
+        def _span(self, phase, start):
+            if self.timeline is None:
+                self.spans.append((phase, start, time.time(), os.getpid()))
+
+        def on_iteration_start(self, state):
+            self.started = time.time()
+
+        def on_after_replanning(self, state):
+            self._span("innovate", self.started)
+
+        def on_after_mobsim(self, state):
+            self.simulated = time.time()
+
 
         def on_iteration_end(self, state):
+            if hasattr(self, "simulated"):  # scoring and travel times
+                self._span("score", self.simulated)
             m = state.metrics
             row = {
                 "iteration": state.iteration,
@@ -186,8 +212,12 @@ def child(slug: str, out: str) -> None:
         pass
     total_s = time.perf_counter() - t
     rows = [line.split(",") for line in sims.read_text().splitlines()] if sims.exists() else []
+    spans = record.spans if record.timeline is None else record.timeline
+    timeline = sorted([phase, a - record.epoch, b - record.epoch, int(pid)]
+                      for phase, a, b, pid in spans if a - record.epoch <= TIME_LIMIT)
     Path(out).write_text(json.dumps({**asdict(run), "load_s": load_s, "total_s": total_s,
                                      "persons": len(controller.scenario.population),
+                                     "main_pid": os.getpid(), "timeline": timeline,
                                      "iterations": record.rows,
                                      "sims": sorted([float(a) - record.epoch, float(b) - record.epoch,
                                                      int(pid)] for a, b, pid in rows)}))

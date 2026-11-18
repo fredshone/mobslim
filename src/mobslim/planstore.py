@@ -106,7 +106,17 @@ def csr_gather(offsets: np.ndarray, rows: np.ndarray) -> tuple[np.ndarray, np.nd
     counts = offsets[rows + 1] - starts
     new = np.zeros(len(rows) + 1, dtype=np.int64)
     np.cumsum(counts, out=new[1:])
-    idx = np.arange(new[-1], dtype=np.int64) + np.repeat(starts - new[:-1], counts)
+    # a cumulative sum of steps: 1 within a row, a jump to its start at each
+    # row's first element (faster than arange + repeat)
+    idx = np.ones(new[-1], dtype=np.int64)
+    nz = counts > 0
+    s, c = starts[nz], counts[nz]
+    if len(s):
+        step = np.empty_like(s)
+        step[0] = s[0]
+        np.subtract(s[1:], s[:-1] + c[:-1] - 1, out=step[1:])
+        idx[new[:-1][nz]] = step
+        np.cumsum(idx, out=idx)
     return idx, new
 
 
@@ -323,6 +333,24 @@ class PlanStore:
         leg_mode, modes = first_seen_codes(self.leg_mode, self.modes)
         cols = {name: self._view(name) for name in _ALL if name not in ("act_type", "leg_mode")}
         return PlanBatch(act_type=act_type, leg_mode=leg_mode, act_types=act_types, modes=modes, **cols)
+
+    def subset(self, rows) -> "PlanStore":
+        """A new lineage holding rows ``rows`` (row ``rows[i]`` becomes row
+        ``i``), with this store's activity types and modes as they are:
+        :meth:`compact` without recoding them, gathered straight into the
+        new store's columns."""
+        rows = np.asarray(rows, dtype=np.int64)
+        if len(rows) and (rows.min() < 0 or rows.max() >= self.n_plans):
+            raise IndexError("PlanStore.subset: row out of range.")
+        idx, arrays = {}, {}
+        idx["act"], arrays["act_offsets"] = csr_gather(self.act_offsets, rows)
+        idx["leg"], _ = csr_gather(self.leg_offsets, rows)
+        idx["link"], arrays["route_offsets"] = csr_gather(self.route_offsets, idx["leg"])
+        idx["ride"], arrays["ride_offsets"] = csr_gather(self.ride_offsets, idx["leg"])
+        for name, (unit, _, _) in _COLUMNS.items():
+            arrays[name] = self._view(name)[idx[unit]]
+        n = (len(rows), len(idx["act"]), len(idx["leg"]), len(idx["link"]), len(idx["ride"]))
+        return PlanStore._make(_Lineage(arrays, n), arrays, n, self.act_types, self.modes)
 
     def compact(self, rows) -> "PlanStore":
         """A new lineage holding only ``rows``, in that order (row ``rows[i]``
