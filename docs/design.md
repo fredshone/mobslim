@@ -640,6 +640,30 @@ RouterFactory = Callable[[Network, str, TravelTime], Router]
   Dijkstra on irregular networks, but gains little on regular grids, where
   every staircase path ties and A* must still search the whole o–d rectangle.
   It is opt-in: `partial(RustRouter, algorithm="alt")`.
+* **Least cost, as MATSim.** By default the routers minimise travel time.
+  Given a `TravelDisutility` (`routing/disutility.py`; MATSim and mobslim
+  configs give one, from the scoring parameters), they minimise MATSim's
+  `RandomizingTimeDistanceTravelDisutility` instead: per link,
+  `(performing - traveling) * time + distance cost * factor * length`, the
+  factor a lognormal draw per person and iteration (`routingRandomness`,
+  sigma 3 by default, mean 1). The search then keeps two labels per node:
+  the cost, which orders the heap, and the arrival time, whose bin times the
+  next links. ALT bounds the cost by `time cost * time bound + distance cost
+  * factor * distance bound`, from landmarks on free-speed times and on
+  lengths (built once, about 0.1 s on Open Berlin): with non-negative
+  weights the sum of two consistent bounds is consistent, for any factor.
+* **MATSim's A\* bound, as an option.** MATSim's own A\* bounds the
+  distance cost with a factor of 1 (`getLinkMinimumTravelDisutility`), not
+  the person's. Most factors are far below 1 (median 0.011 at sigma 3), so
+  that bound overestimates and MATSim's routes are not least-cost.
+  `TravelDisutility(bound_factor=1)` (YAML `routing.bound_factor: 1`) makes
+  ALT do the same, to compare against MATSim on its kind of routes; Dijkstra
+  ignores it. It is off by default, MATSim configs included: without it
+  routes are least-cost.
+  `DijkstraRouter` and the Rust Dijkstra stay identical with the cost too.
+  On Open Berlin (1%, 21,000 car trips, 16 threads), routing by time and
+  distance with randomness takes 0.74 s at free speed and 1.45 s on a
+  congested table, against 0.61 s and 1.19 s by time alone.
 * Travel times cross into Rust as the table's *distinct* columns plus a
   bin → column map, so free-flow bins are stored once.
 * `RustRouter.route_many_arrays` returns the routes as arrays (offsets,

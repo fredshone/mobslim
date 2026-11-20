@@ -67,33 +67,32 @@ def _cap(f):
     return {("qsim", "flowCapacityFactor"): f, ("qsim", "storageCapacityFactor"): f}
 
 
-CONGESTED = 0.3  # flow and storage capacity factor of the congested grids
+CONGESTED = 0.3  # flow and storage capacity factor of the grids: queues and spillback
+SPACING = 200.0  # [m] between the grids' nodes, before jitter
 
 
-def _grid(n: int, congested: bool = False, **kw) -> PerfCase:
-    """An n x n grid with 4 n (n + 1) links and 16.4 car commuters per cell
-    (26,240 on the 40x40 grid); ``congested``: at capacity x :data:`CONGESTED`."""
+def _grid_km(n: int) -> str:
+    return f"{n * SPACING / 1000:.0f}km"
+
+
+def _grid(n: int, **kw) -> PerfCase:
+    """An n x n grid (n x 200 m a side) with 4 n (n + 1) links and 16.4 car
+    commuters per cell (26,240 on the 40x40 grid), at capacity x :data:`CONGESTED`."""
     persons = 26_240 * n * n // 1600
-    if congested:
-        return PerfCase(f"grid-{n}-congested", f"the same at capacity x{CONGESTED}: queues and "
-                        "spillback", grid=n, persons=persons, capacity=CONGESTED, **kw)
-    return PerfCase(f"grid-{n}", f"{n}x{n} grid: {4 * n * (n + 1):,} links, {persons:,} car "
-                    "commuters", grid=n, persons=persons, **kw)
+    return PerfCase(f"grid{_grid_km(n)}", f"{n}x{n} grid: {4 * n * (n + 1):,} links, "
+                    f"{persons:,} car commuters, capacity x{CONGESTED}", grid=n,
+                    persons=persons, capacity=CONGESTED, **kw)
 
 
-# grid-320 only runs when asked for by size (``-k 320``), on the fast mobsims:
+# grid64km only runs when asked for by size (``-k 64km``), on the fast mobsims:
 # a 1.7 million person day takes MATSim's QSim and MobSlim's QSim and AgentSim hours
 FAST = ("MATSim Hermes", "HermesSim", "PSim", "MobSlim DSim")
 
 CASES = [
     _grid(40),
-    _grid(40, congested=True),
     _grid(80),
-    _grid(80, congested=True),
     _grid(160, xmx="40g"),
-    _grid(160, congested=True, xmx="40g"),
     _grid(320, optional=True, variants=FAST, xmx="100g"),
-    _grid(320, congested=True, optional=True, variants=FAST, xmx="100g"),
     # MATSim's calibrated Open Berlin plans (selected plans), Berlin and Brandenburg
     PerfCase("open-berlin-1pct", "MATSim Open Berlin v6.4, 1% sample: about 52,000 agents "
              "(residents, commercial traffic, freight); car, truck and freight on the roads, pt",
@@ -108,7 +107,7 @@ def selected(case: PerfCase, patterns=()) -> bool:
     (every case without one), except that optional cases need a pattern
     naming their grid size."""
     if case.optional:
-        return any(str(case.grid) in p and p in case.name for p in patterns)
+        return any(_grid_km(case.grid) in p and p in case.name for p in patterns)
     return not patterns or any(p in case.name for p in patterns)
 
 
@@ -152,7 +151,7 @@ def _grid_files(case: PerfCase, d: Path) -> None:
     )
     from mobslim.formats.matsim_plans import write_population_xml
 
-    n, spacing = case.grid, 200.0
+    n, spacing = case.grid, SPACING
     # each node moved up to JITTER x spacing in x and y, so link lengths vary
     # (about 160-240 m) and routes are not ties between equal-length paths
     geo = random.Random(2)

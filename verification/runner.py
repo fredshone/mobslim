@@ -95,7 +95,11 @@ def _hermes_config(cfg: MatsimConfig) -> MatsimConfig:
         v = cfg.get("qsim", param)
         if v is not None and not (param == "endTime" and v in ("00:00:00", "")):
             h.set("hermes", param, int(float(v)) if param == "stuckTime" else v)
-    if cfg.get("transit", "useTransit") == "true":
+    # the network modes simulated on links: Hermes teleports every other mode
+    main = cfg.get("qsim", "mainMode")
+    if main:
+        h.set("hermes", "mainMode", main)
+    elif cfg.get("transit", "useTransit") == "true":
         h.set("hermes", "mainMode", "car")
     return h
 

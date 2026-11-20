@@ -123,7 +123,7 @@ modules:
 | `modes` | teleported modes: `max_speed`, `beeline_distance_factor` | `routing` |
 | `mobsim` | `qsim`, `hermes`, `agentsim`, `psim` or `dsim`, capacity factors, stuck time, end time, clock (`continuous_time`, `junction_delays`, `rounding`) | `qsim`, `hermes` |
 | `travel_time` | travel-time bins learned between iterations | `travelTimeCalculator` |
-| `routing` | transit router search radii and transfers | `swissRailRaptor` |
+| `routing` | what network routes minimise (time and distance, costed from scoring, as MATSim; or time), its randomness; transit router search radii and transfers | `routing`, `swissRailRaptor` |
 | `scoring` | utilities, per mode and per activity type | `scoring` |
 | `replanning` | strategy sets, plan memory, when innovation stops | `replanning` |
 | `persons` | person-level values that are not scoring (`car_availability`) | person attributes |

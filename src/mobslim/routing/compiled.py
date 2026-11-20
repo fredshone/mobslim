@@ -123,10 +123,11 @@ def compiled_times(network: Network, travel_time: TravelTime):
     return out
 
 
-def _base_router(network: Network, mode: str, landmarks: int):
+def _base_router(network: Network, mode: str, landmarks: int, distance: bool = False):
     """The compiled graph for ``(network, mode)`` with free-speed times and
-    ``landmarks`` ALT landmarks, built once and cached on the network."""
-    key = ("rust_router", mode, landmarks)
+    ``landmarks`` ALT landmarks (with ``distance``, also on link lengths, for
+    a distance cost), built once and cached on the network."""
+    key = ("rust_router", mode, landmarks, distance and landmarks > 0)
     cache = network._cache
     if key not in cache:
         offsets, links = network.out_links(mode)
@@ -144,6 +145,7 @@ def _base_router(network: Network, mode: str, landmarks: int):
             landmarks=landmarks,
             # searches in Hilbert order of the nodes (nodes in and out stay the network's)
             node_xy=np.ascontiguousarray(network.node_xy, dtype=np.float64),
+            distance_landmarks=distance,
         )
     return cache[key]
 
@@ -157,6 +159,7 @@ class RustRouter:
         algorithm: str = "auto",
         landmarks: int = DEFAULT_LANDMARKS,
         threads: Optional[int] = None,
+        disutility=None,
     ):
         if _rust is None:
             raise ImportError(
@@ -167,6 +170,9 @@ class RustRouter:
             raise ValueError(f"algorithm must be one of {ALGORITHMS}, not {algorithm!r}.")
         self.mode = mode
         self.threads = threads or default_threads()
+        # least cost: travel time, or a TravelDisutility's time and distance cost
+        self.disutility = disutility
+        self.costs = disutility.costs(mode) if disutility is not None else (1.0, 0.0)
         columns, bin_col, bin_size, valid = compiled_times(network, travel_time)
         if algorithm == "auto":  # ALT when its lower bound holds, else Dijkstra
             algorithm = "alt" if valid else "dijkstra"
@@ -180,7 +186,10 @@ class RustRouter:
                 )
         else:
             landmarks = 0
-        self._router = _base_router(network, mode, landmarks).with_times(columns, bin_col, bin_size)
+        distance = self.costs[1] > 0
+        bound = disutility.bound_factor if disutility is not None else None
+        self._router = _base_router(network, mode, landmarks, distance).with_times(
+            columns, bin_col, bin_size, *self.costs, bound_factor=bound)
         self.is_static = self._router.is_static
 
     @property
@@ -192,8 +201,10 @@ class RustRouter:
             f"No '{self.mode}' route from node {origin} to node {destination}."
         )
 
-    def route(self, origin: int, destination: int, departure_time: float) -> Route:
-        found = self._router.route(origin, destination, departure_time, self.algorithm)
+    def route(self, origin: int, destination: int, departure_time: float,
+              factor: float = 1.0) -> Route:
+        found = self._router.route(origin, destination, departure_time, self.algorithm,
+                                   float(factor))
         if found is None:
             raise self._no_route(origin, destination)
         data, travel_time, distance = found
@@ -204,9 +215,11 @@ class RustRouter:
         origins: Sequence[int],
         destinations: Sequence[int],
         departure_times: Sequence[float],
+        factors: Optional[Sequence[float]] = None,
     ) -> list[Route]:
         """Route every query, in parallel over ``threads`` threads."""
-        offsets, links, tt, dist = self.route_many_arrays(origins, destinations, departure_times)
+        offsets, links, tt, dist = self.route_many_arrays(origins, destinations, departure_times,
+                                                          factors)
         # one buffer for all routes; each route keeps its slice as packed int32
         data, packed = links.tobytes(), Route.packed
         bounds = (offsets * 4).tolist()
@@ -215,15 +228,17 @@ class RustRouter:
             for a, b, x, y in zip(bounds, bounds[1:], tt.tolist(), dist.tolist())
         ]
 
-    def route_many_arrays(self, origins, destinations, departure_times):
+    def route_many_arrays(self, origins, destinations, departure_times, factors=None):
         """:meth:`route_many` as arrays, without a :class:`Route` per query:
         ``(offsets, links, travel_time, distance)``, query ``i``'s links
-        being ``links[offsets[i]:offsets[i + 1]]`` (int32)."""
+        being ``links[offsets[i]:offsets[i + 1]]`` (int32). ``factors``:
+        each query's distance-cost factor (default 1)."""
         o = np.asarray(origins, dtype=np.int64)
         d = np.asarray(destinations, dtype=np.int64)
         t = np.asarray(departure_times, dtype=np.float64)
+        f = None if factors is None else np.ascontiguousarray(factors, dtype=np.float64)
         offsets, links, tt, dist, found = self._router.route_many(
-            o, d, t, self.algorithm, self.threads
+            o, d, t, self.algorithm, self.threads, f
         )
         if not found.all():
             q = int(np.flatnonzero(~found)[0])
@@ -231,12 +246,15 @@ class RustRouter:
         return offsets, links, tt, dist
 
 
-def default_router(network: Network, mode: str, travel_time: TravelTime) -> Router:
+def default_router(network: Network, mode: str, travel_time: TravelTime,
+                   disutility=None) -> Router:
     """Router factory: :class:`RustRouter` when installed and the travel
-    times are a table, else :class:`DijkstraRouter`. Both give shortest
-    routes; the compiled one uses ALT (A* with landmarks, about twice as fast)
-    whenever no link is faster than free speed, which holds for learned
-    travel times."""
+    times are a table, else :class:`DijkstraRouter`. Both give least-cost
+    routes (travel time, or ``disutility``'s time and distance cost); the
+    compiled one uses ALT (A* with landmarks, about twice as fast) whenever
+    no link is faster than free speed, which holds for learned travel
+    times. ``functools.partial(default_router, disutility=...)`` routes as
+    MATSim does (see :mod:`mobslim.routing.disutility`)."""
     if _rust is not None and isinstance(travel_time, (TravelTimeTable, FreeSpeedTravelTime)):
-        return RustRouter(network, mode, travel_time)
-    return DijkstraRouter(network, mode, travel_time)
+        return RustRouter(network, mode, travel_time, disutility=disutility)
+    return DijkstraRouter(network, mode, travel_time, disutility=disutility)

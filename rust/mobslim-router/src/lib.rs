@@ -15,6 +15,20 @@
 //!   bounds stay valid for every later table. Same least costs as Dijkstra;
 //!   paths may differ where several routes tie.
 //!
+//! Both minimise travel time by default. With a distance cost
+//! (`with_times(.., cost_time, cost_distance)`) they minimise MATSim's
+//! `RandomizingTimeDistanceTravelDisutility` instead: per link,
+//! `cost_time * travel_time + cost_distance * factor * length`, `factor`
+//! being the query's (a per-person random draw in MATSim). The search then
+//! keeps two labels per node, cost (the order) and arrival time (the time
+//! bin of the next link); ALT bounds the cost by
+//! `cost_time * time bound + cost_distance * factor * distance bound`, from
+//! landmarks on free-speed times and on lengths, valid for any factor.
+//! `with_times(.., bound_factor=f)` bounds with factor `f` instead of the
+//! query's, as MATSim's A* does (`f = 1`, from
+//! `getLinkMinimumTravelDisutility`): an overestimate for a query factor
+//! below `f`, so ALT then returns MATSim's not-least-cost routes.
+//!
 //! Travel times are stored as distinct *columns* (one per distinct time bin)
 //! plus a bin -> column map, so the free-flow bins of a day share one column.
 //! `route_many` releases the GIL and spreads work over `threads` threads.
@@ -255,7 +269,10 @@ struct Answer {
 
 /// Per-thread search state, reset lazily with a stamp.
 struct Search {
+    /// the label: arrival time, or cost with a distance cost
     dist: Vec<f64>,
+    /// arrival time, with a distance cost (`dist` is then the cost)
+    time: Vec<f64>,
     via: Vec<u32>,
     stamp: Vec<u32>,
     target: Vec<u32>,
@@ -269,6 +286,7 @@ impl Search {
     fn new(n: usize) -> Search {
         Search {
             dist: vec![f64::INFINITY; n],
+            time: vec![0.0; n],
             via: vec![NO_LINK; n],
             stamp: vec![0; n],
             target: vec![0; n],
@@ -333,11 +351,33 @@ struct Router {
     bin_size: f64,
     is_static: bool,
     landmarks: Option<Arc<Landmarks>>,
+    /// ALT landmarks on link lengths (with a distance cost)
+    distance_landmarks: Option<Arc<Landmarks>>,
+    /// link cost = cost_time * travel time + cost_distance * factor * length
+    cost_time: f64,
+    cost_distance: f64,
+    /// distance factor ALT's bound assumes (`None`: the query's, exact)
+    bound_factor: Option<f64>,
     /// reusable search buffers (one per concurrently running search)
     pool: Mutex<Vec<Search>>,
 }
 
 impl Router {
+    /// Whether `algorithm` is ALT, if this router can run it.
+    fn alt(&self, algorithm: &str) -> PyResult<bool> {
+        match algorithm {
+            "dijkstra" => Ok(false),
+            "alt" if self.landmarks.is_none() => {
+                Err(PyValueError::new_err("algorithm 'alt' needs landmarks > 0"))
+            }
+            "alt" if self.cost_distance > 0.0 && self.distance_landmarks.is_none() => {
+                Err(PyValueError::new_err("algorithm 'alt' with a distance cost needs distance_landmarks"))
+            }
+            "alt" => Ok(true),
+            other => Err(PyValueError::new_err(format!("unknown algorithm {other:?}"))),
+        }
+    }
+
     fn take(&self) -> Search {
         self.pool.lock().unwrap().pop().unwrap_or_else(|| Search::new(self.n))
     }
@@ -436,6 +476,102 @@ impl Router {
         }
     }
 
+    /// [`Router::dijkstra`] on the generalized cost (`bf`: `cost_distance *
+    /// factor`): the heap orders by `(cost, network node)`, and each node also
+    /// keeps its arrival time, whose bin times its out-links.
+    fn dijkstra_cost(&self, s: &mut Search, origin: usize, t0: f64, bf: f64, mut n_targets: usize) {
+        let g = &*self.graph;
+        let a = self.cost_time;
+        s.set(origin, 0.0, NO_LINK);
+        s.time[origin] = t0;
+        s.heap.push(Reverse((F(0.0), g.old_of[origin])));
+        while let Some(Reverse((F(c), u))) = s.heap.pop() {
+            let u = g.new_of[u as usize] as usize;
+            if c > s.dist[u] {
+                continue;
+            }
+            if s.target[u] == s.cur {
+                s.target[u] = 0; // settled
+                n_targets -= 1;
+                if n_targets == 0 {
+                    break;
+                }
+            }
+            let t = s.time[u];
+            let tt = self.column(t);
+            for (l, v) in g.fwd.edges(u) {
+                let x = tt[l as usize];
+                let nc = c + (a * x + bf * g.edge_length[l as usize]);
+                let v = v as usize;
+                if nc < s.get(v) {
+                    s.set(v, nc, l);
+                    s.time[v] = t + x;
+                    s.heap.push(Reverse((F(nc), g.old_of[v])));
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn potential_cost(&self, lm: (&Landmarks, &Landmarks), s: &mut Search, v: usize,
+                      goal: (&Target, &Target), bf: f64) -> f64 {
+        if s.pi_stamp[v] != s.cur {
+            s.pi_stamp[v] = s.cur;
+            let time = lm.0.bound(v, goal.0);
+            s.pi[v] = if time.is_infinite() {
+                f64::INFINITY
+            } else {
+                self.cost_time * time + bf * lm.1.bound(v, goal.1)
+            };
+        }
+        s.pi[v]
+    }
+
+    /// [`Router::astar`] on the generalized cost.
+    /// `bb`: the bound's distance cost per metre (`bf` unless
+    /// `bound_factor` is set).
+    #[allow(clippy::too_many_arguments)]
+    fn astar_cost(&self, s: &mut Search, origin: usize, t0: f64, bf: f64, bb: f64, target: usize) {
+        let g = &*self.graph;
+        let a = self.cost_time;
+        let lm = (self.landmarks.as_deref().unwrap(), self.distance_landmarks.as_deref().unwrap());
+        let goal = (lm.0.target(target), lm.1.target(target));
+        let goal = (&goal.0, &goal.1);
+        s.set(origin, 0.0, NO_LINK);
+        s.time[origin] = t0;
+        let p = self.potential_cost(lm, s, origin, goal, bb);
+        if p.is_infinite() {
+            return;
+        }
+        s.heap.push(Reverse((F(p), g.old_of[origin])));
+        while let Some(Reverse((F(key), u))) = s.heap.pop() {
+            let u = g.new_of[u as usize] as usize;
+            let c = s.dist[u];
+            if key > c + s.pi[u] {
+                continue; // stale
+            }
+            if u == target {
+                break;
+            }
+            let t = s.time[u];
+            let tt = self.column(t);
+            for (l, v) in g.fwd.edges(u) {
+                let x = tt[l as usize];
+                let nc = c + (a * x + bf * g.edge_length[l as usize]);
+                let v = v as usize;
+                if nc < s.get(v) {
+                    let p = self.potential_cost(lm, s, v, goal, bb);
+                    if p.is_infinite() {
+                        continue;
+                    }
+                    s.set(v, nc, l);
+                    s.time[v] = t + x;
+                    s.heap.push(Reverse((F(nc + p), g.old_of[v])));
+                }
+            }
+        }
+    }
+
     fn answer(&self, s: &Search, query: usize, origin: usize, dest: usize, t0: f64) -> Answer {
         if s.get(dest).is_infinite() {
             return Answer { query, path: Vec::new(), travel_time: 0.0, distance: 0.0, found: false };
@@ -454,15 +590,20 @@ impl Router {
             distance += g.edge_length[e as usize];
         }
         let path = edges.iter().map(|&e| g.edge_link[e as usize]).collect();
-        Answer { query, path, travel_time: s.get(dest) - t0, distance, found: true }
+        let arrival = if self.cost_distance > 0.0 { s.time[dest] } else { s.get(dest) };
+        Answer { query, path, travel_time: arrival - t0, distance, found: true }
     }
 
     /// Answer queries `group` (indices into the arrays), which share an
-    /// origin and departure time.
+    /// origin, departure time and factor.
+    #[allow(clippy::too_many_arguments)]
     fn solve_group(&self, s: &mut Search, group: &[usize], o: &[u32], d: &[u32], t: &[f64],
-                   alt: bool, out: &mut Vec<Answer>) {
+                   f: Option<&[f64]>, alt: bool, out: &mut Vec<Answer>) {
         let origin = o[group[0]] as usize;
         let t0 = if self.is_static { 0.0 } else { t[group[0]] };
+        let cost = self.cost_distance > 0.0;
+        let bf = self.cost_distance * f.map_or(1.0, |f| f[group[0]]);
+        let bb = self.bound_factor.map_or(bf, |b| self.cost_distance * b);
         if alt {
             for &q in group {
                 let dest = d[q] as usize;
@@ -471,7 +612,11 @@ impl Router {
                     continue;
                 }
                 s.reset();
-                self.astar(s, origin, t0, dest);
+                if cost {
+                    self.astar_cost(s, origin, t0, bf, bb, dest);
+                } else {
+                    self.astar(s, origin, t0, dest);
+                }
                 out.push(self.answer(s, q, origin, dest, t0));
             }
             return;
@@ -486,7 +631,11 @@ impl Router {
             }
         }
         if n_targets > 0 {
-            self.dijkstra(s, origin, t0, n_targets);
+            if cost {
+                self.dijkstra_cost(s, origin, t0, bf, n_targets);
+            } else {
+                self.dijkstra(s, origin, t0, n_targets);
+            }
         }
         for &q in group {
             let dest = d[q] as usize;
@@ -498,14 +647,19 @@ impl Router {
         }
     }
 
-    fn solve(&self, o: &[u32], d: &[u32], t: &[f64], alt: bool, threads: usize) -> Vec<Answer> {
+    fn solve(&self, o: &[u32], d: &[u32], t: &[f64], f: Option<&[f64]>, alt: bool,
+             threads: usize) -> Vec<Answer> {
         let nq = o.len();
-        // group by (origin, departure) -- or origin only for a static table
+        // group by (origin, departure, factor) -- or without departure for a
+        // static table, and without factor without a distance cost
         let mut order: Vec<usize> = (0..nq).collect();
         let is_static = self.is_static;
+        let f = if self.cost_distance > 0.0 { f } else { None };
+        let fq = |q: usize| f.map_or(1.0, |f| f[q]);
         order.sort_by(|&a, &b| {
             o[a].cmp(&o[b])
                 .then_with(|| if is_static { Ordering::Equal } else { t[a].total_cmp(&t[b]) })
+                .then_with(|| fq(a).total_cmp(&fq(b)))
                 .then(a.cmp(&b))
         });
         let mut groups: Vec<&[usize]> = Vec::new();
@@ -513,6 +667,7 @@ impl Router {
         for i in 1..=nq {
             if i == nq || o[order[i]] != o[order[start]]
                 || (!is_static && t[order[i]].to_bits() != t[order[start]].to_bits())
+                || fq(order[i]).to_bits() != fq(order[start]).to_bits()
             {
                 if start < i {
                     groups.push(&order[start..i]);
@@ -530,7 +685,7 @@ impl Router {
                 if g >= groups.len() {
                     break;
                 }
-                self.solve_group(&mut s, groups[g], o, d, t, alt, &mut out);
+                self.solve_group(&mut s, groups[g], o, d, t, f, alt, &mut out);
             }
             self.give(s);
             out
@@ -689,7 +844,7 @@ impl Router {
     /// links and routes in and out stay the network's).
     #[new]
     #[pyo3(signature = (offsets, links, from_node, to_node, length, columns, bin_col, bin_size,
-                        lower_bound=None, landmarks=0, node_xy=None))]
+                        lower_bound=None, landmarks=0, node_xy=None, distance_landmarks=false))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python<'_>,
@@ -704,6 +859,7 @@ impl Router {
         lower_bound: Option<PyReadonlyArray1<f64>>,
         landmarks: usize,
         node_xy: Option<PyReadonlyArray2<f64>>,
+        distance_landmarks: bool,
     ) -> PyResult<Router> {
         let offsets = offsets.as_slice()?;
         let n = offsets.len().checked_sub(1).ok_or_else(|| PyValueError::new_err("empty offsets"))?;
@@ -736,6 +892,7 @@ impl Router {
             Some(a) => Some(a.as_slice()?.to_vec()),
             None => None,
         };
+        let n_landmarks = landmarks;
         let landmarks = if landmarks > 0 {
             let lower = lower.ok_or_else(|| PyValueError::new_err("landmarks need lower_bound"))?;
             if lower.len() != n_links {
@@ -745,6 +902,16 @@ impl Router {
             let bwd = graph.reverse();
             let g = &graph;
             Some(Arc::new(py.allow_threads(|| Landmarks::build(&g.fwd, &bwd, n, &lower, landmarks))))
+        } else {
+            None
+        };
+        // landmarks on lengths, for the distance part of a generalized cost
+        let distance_landmarks = if n_landmarks > 0 && distance_landmarks {
+            let bwd = graph.reverse();
+            let g = &graph;
+            Some(Arc::new(py.allow_threads(|| {
+                Landmarks::build(&g.fwd, &bwd, n, &g.edge_length, n_landmarks)
+            })))
         } else {
             None
         };
@@ -758,15 +925,31 @@ impl Router {
             bin_col,
             bin_size,
             landmarks,
+            distance_landmarks,
+            cost_time: 1.0,
+            cost_distance: 0.0,
+            bound_factor: None,
             pool: Mutex::new(Vec::new()),
         })
     }
 
     /// The same graph and landmarks with other travel times (cheap: the
     /// landmarks are shared, not recomputed). The lower bound the landmarks
-    /// were built on must still hold for the new times.
+    /// were built on must still hold for the new times. `cost_time` and
+    /// `cost_distance` (both >= 0) set the link cost; a distance cost with ALT
+    /// needs `distance_landmarks`. `bound_factor`: the distance factor ALT's
+    /// bound assumes (default: each query's own, which keeps routes least-cost).
+    #[pyo3(signature = (columns, bin_col, bin_size, cost_time=1.0, cost_distance=0.0,
+                        bound_factor=None))]
     fn with_times(&self, columns: PyReadonlyArray2<f64>, bin_col: PyReadonlyArray1<i64>,
-                  bin_size: f64) -> PyResult<Router> {
+                  bin_size: f64, cost_time: f64, cost_distance: f64,
+                  bound_factor: Option<f64>) -> PyResult<Router> {
+        if !(cost_time >= 0.0 && cost_distance >= 0.0 && cost_time + cost_distance > 0.0) {
+            return Err(PyValueError::new_err("costs must be >= 0, and not both 0"));
+        }
+        if bound_factor.is_some_and(|b| !(b >= 0.0 && b.is_finite())) {
+            return Err(PyValueError::new_err("bound_factor must be finite and >= 0"));
+        }
         let (columns, n_cols, bin_col) = parse_columns(self.n_links, columns, bin_col, bin_size)?;
         let columns = self.graph.edge_columns(&columns, self.n_links, n_cols);
         Ok(Router {
@@ -778,6 +961,10 @@ impl Router {
             bin_col,
             bin_size,
             landmarks: self.landmarks.clone(),
+            distance_landmarks: self.distance_landmarks.clone(),
+            cost_time,
+            cost_distance,
+            bound_factor,
             pool: Mutex::new(Vec::new()),
         })
     }
@@ -796,8 +983,10 @@ impl Router {
     /// Route every query. Returns `(offsets, links, travel_time, distance,
     /// found)`: query `i`'s links are `links[offsets[i]:offsets[i + 1]]`
     /// (int32, so `links.tobytes()` slices straight into packed routes).
-    #[pyo3(signature = (origins, destinations, departure_times, algorithm="dijkstra", threads=1))]
-    #[allow(clippy::type_complexity)]
+    /// `factors`: each query's distance-cost factor (default 1).
+    #[pyo3(signature = (origins, destinations, departure_times, algorithm="dijkstra", threads=1,
+                        factors=None))]
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
     fn route_many<'py>(
         &self,
         py: Python<'py>,
@@ -806,6 +995,7 @@ impl Router {
         departure_times: PyReadonlyArray1<f64>,
         algorithm: &str,
         threads: usize,
+        factors: Option<PyReadonlyArray1<f64>>,
     ) -> PyResult<(
         Bound<'py, PyArray1<i64>>,
         Bound<'py, PyArray1<i32>>,
@@ -813,20 +1003,19 @@ impl Router {
         Bound<'py, PyArray1<f64>>,
         Bound<'py, PyArray1<bool>>,
     )> {
-        let alt = match algorithm {
-            "dijkstra" => false,
-            "alt" if self.landmarks.is_some() => true,
-            "alt" => return Err(PyValueError::new_err("algorithm 'alt' needs landmarks > 0")),
-            other => return Err(PyValueError::new_err(format!("unknown algorithm {other:?}"))),
-        };
+        let alt = self.alt(algorithm)?;
         let new_of = &self.graph.new_of;
         let o: Vec<u32> = to_u32("origins", origins.as_slice()?, self.n)?.iter().map(|&v| new_of[v as usize]).collect();
         let d: Vec<u32> = to_u32("destinations", destinations.as_slice()?, self.n)?.iter().map(|&v| new_of[v as usize]).collect();
         let t = departure_times.as_slice()?.to_vec();
-        if d.len() != o.len() || t.len() != o.len() {
+        let f = match factors {
+            Some(f) => Some(f.as_slice()?.to_vec()),
+            None => None,
+        };
+        if d.len() != o.len() || t.len() != o.len() || f.as_ref().is_some_and(|f| f.len() != o.len()) {
             return Err(PyValueError::new_err("query arrays must have the same length"));
         }
-        let answers = py.allow_threads(|| self.solve(&o, &d, &t, alt, threads));
+        let answers = py.allow_threads(|| self.solve(&o, &d, &t, f.as_deref(), alt, threads));
         let mut offsets = Vec::with_capacity(answers.len() + 1);
         let mut links = Vec::new();
         let mut tt = Vec::with_capacity(answers.len());
@@ -851,24 +1040,19 @@ impl Router {
 
     /// One query: `(links, travel_time, distance)` with the links as packed
     /// native int32 bytes, or `None` if unreachable.
-    #[pyo3(signature = (origin, destination, departure_time, algorithm="dijkstra"))]
+    #[pyo3(signature = (origin, destination, departure_time, algorithm="dijkstra", factor=1.0))]
     fn route<'py>(&self, py: Python<'py>, origin: usize, destination: usize,
-                  departure_time: f64, algorithm: &str)
+                  departure_time: f64, algorithm: &str, factor: f64)
                   -> PyResult<Option<(Bound<'py, PyBytes>, f64, f64)>> {
         if origin >= self.n || destination >= self.n {
             return Err(PyValueError::new_err("node index out of range"));
         }
-        let alt = match algorithm {
-            "dijkstra" => false,
-            "alt" if self.landmarks.is_some() => true,
-            "alt" => return Err(PyValueError::new_err("algorithm 'alt' needs landmarks > 0")),
-            other => return Err(PyValueError::new_err(format!("unknown algorithm {other:?}"))),
-        };
+        let alt = self.alt(algorithm)?;
         let mut s = self.take();
         let mut out = Vec::with_capacity(1);
         let new_of = &self.graph.new_of;
         self.solve_group(&mut s, &[0], &[new_of[origin]], &[new_of[destination]],
-                         &[departure_time], alt, &mut out);
+                         &[departure_time], Some(&[factor]), alt, &mut out);
         self.give(s);
         let a = out.pop().unwrap();
         if !a.found {

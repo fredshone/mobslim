@@ -289,6 +289,16 @@ def test_unknown_strategy_set_is_a_load_error(tmp_path):
     assert "no strategy set 'missing'" in _problems(lambda: MobslimConfig.load(path))
 
 
+def test_routing_bound_factor_is_off_unless_set(tmp_path):
+    def disutility(extra=""):
+        cfg = MobslimConfig.load(_config(tmp_path, extra))
+        scenario = cfg.build_scenario()
+        return cfg.router_factory(scenario, cfg.scorer().params).keywords["disutility"]
+
+    assert disutility().bound_factor is None
+    assert disutility("routing: {bound_factor: 1}").bound_factor == 1.0
+
+
 # --------------------------------------------------------- MATSim equivalence
 
 @pytest.mark.parametrize("name", ["equil-100", "pt-tutorial"])
@@ -300,6 +310,22 @@ def test_matsim_config_and_translation_run_identically(name, tmp_path):
     a = Controller.from_matsim_config(cfg, params=cc).run()
     b = Controller.from_mobslim_config(MobslimConfig.from_dict(raw, tmp_path), params=cc).run()
     assert a.metrics == b.metrics
+    np.testing.assert_array_equal(a.scenario.population.scores, b.scenario.population.scores)
+
+
+def test_time_mutation_around_initial_end_times_translates(tmp_path):
+    cfg = MatsimConfig.load(FIXTURES / "matsim_reference" / "pt-tutorial" / "config.xml")
+    cfg.set("timeAllocationMutator", "mutateAroundInitialEndTimeOnly", "true")
+    raw, unsupported = matsim_to_mobslim(cfg)
+    assert unsupported == []
+    tam = [s for ss in raw["replanning"]["strategy_sets"].values() for s in ss
+           if s["name"] == "time_allocation_mutator"]
+    assert tam and all(s["around_initial_end_time"] for s in tam)
+    cc = ControllerParams(iterations=3, seed=11, output_dir=None)
+    a = Controller.from_matsim_config(cfg, params=cc).run()
+    b = Controller.from_mobslim_config(MobslimConfig.from_dict(raw, tmp_path), params=cc).run()
+    assert a.metrics == b.metrics
+    assert a.scenario.initial_end_times is not None  # kept: a run continued from it keeps them
     np.testing.assert_array_equal(a.scenario.population.scores, b.scenario.population.scores)
 
 

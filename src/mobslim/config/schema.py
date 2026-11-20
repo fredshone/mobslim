@@ -162,7 +162,12 @@ STRATEGIES: dict[str, Section] = {
     "reroute": _strategy(),
     "time_allocation_mutator": _strategy(
         mutation_range=Param("time", 1800.0, "end times shift by U(-range, range)", min=0,
-                             matsim="timeAllocationMutator.mutationRange")),
+                             matsim="timeAllocationMutator.mutationRange"),
+        around_initial_end_time=Param(
+            "bool", False, "shift end times from each person's initial ones, so mutations "
+            "do not add up", matsim="timeAllocationMutator.mutateAroundInitialEndTimeOnly"),
+        latest_end_time=Param("time", 86400.0, "mutated end times are at most this", min=0,
+                              matsim="timeAllocationMutator.latestActivityEndTime")),
     "change_trip_mode": _strategy(
         modes=Param("strlist", REQUIRED, "modes to choose from (at least two)",
                     matsim="changeMode.modes"),
@@ -302,6 +307,9 @@ SCHEMA = Section({
         "modes": Param("strlist", ["car"], "activities are assigned to links that allow one of "
                        "these modes (none allowed by any link: every link)",
                        matsim="XY2Links on the car network"),
+        "rule": Param("str", "nearest_node", "nearest link by its midpoint, or MATSim's: the "
+                      "nearest node, then its nearest link", choices=("nearest_node", "midpoint"),
+                      matsim="XY2Links (NetworkUtils.getNearestLink)"),
         "snap_node_activities": Param("bool", False, "also assign activities placed at a node "
                                       "without coordinates (else they stay on their node)"),
         "avoid": Section({
@@ -317,6 +325,15 @@ SCHEMA = Section({
     }, "Assigning activities to the link with the nearest midpoint before the first "
        "iteration (activities with a link in the plans keep it)."),
     "routing": Section({
+        "network_cost": Param("str", "time_distance", "what network routes minimise: MATSim's "
+                              "travel disutility (time and distance, costed from scoring) or "
+                              "travel time", choices=("time_distance", "time")),
+        "randomness": Param("float", 3.0, "sigma of each person's lognormal distance-cost factor "
+                            "(0: none)", min=0, matsim="routing.routingRandomness"),
+        "bound_factor": Param("float", None, "distance factor A*'s lower bound assumes; 1 is "
+                              "MATSim's, which overestimates for most persons and so gives "
+                              "MATSim's not-least-cost routes (null: each person's own, "
+                              "least-cost)", nullable=True, min=0),
         "transit": Section({
             "search_radius": Param("float", 1000.0, "m around origin/destination for stops", min=0),
             "extension_radius": Param("float", 200.0, "m added beyond the nearest stop", min=0),

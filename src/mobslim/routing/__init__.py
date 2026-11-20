@@ -13,6 +13,7 @@ from mobslim.routing.compiled import (
     rust_router_available,
 )
 from mobslim.routing.dijkstra import DijkstraRouter
+from mobslim.routing.disutility import TravelDisutility
 from mobslim.routing.teleport import (
     DEFAULT_TELEPORTED_MODES,
     TeleportedModeParams,
@@ -42,6 +43,7 @@ __all__ = [
     "TravelTime",
     "TravelTimeCollector",
     "TravelTimeTable",
+    "TravelDisutility",
     "teleport",
     "travel_time_table",
 ]

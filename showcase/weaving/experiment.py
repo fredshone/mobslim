@@ -1,9 +1,11 @@
-"""Weaving on a congested grid: utility against wall-clock time.
+"""Weaving on Open Berlin: utility against wall-clock time.
 
-The scenario is the performance showcase's ``grid-40-congested`` inputs (a
-40x40 grid with jittered link lengths, 6,560 links, 26,240 car commuters, at
-flow and storage capacity :data:`CAPACITY`; ``showcase/output/perf/
-grid-40-congested/input``, made with ``showcase.perf`` when missing or out of date). Each
+The scenario is MATSim Open Berlin v6.4 at 1% (about 52,000 agents; car,
+truck and freight on the roads, and pt) from its *initial* plans: the
+synthetic demand before calibration, unrouted, so each side routes them as
+a real run starts (``showcase/output/perf/open-berlin-1pct-initial/input``,
+made with ``showcase.perf.prepare`` when missing), at flow and storage
+capacity :data:`CAPACITY`. Each
 run gets the same wall-clock time, :data:`TIME_LIMIT` seconds
 (``$WEAVING_TIME_LIMIT``; it stops after the iteration that reaches it, or
 after :data:`ITERATIONS`), with 30% plan innovation (15% reroute, 15% time
@@ -38,20 +40,20 @@ import platform
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from mobslim import HermesSim
 
 ROOT = Path(__file__).resolve().parents[2]
-CASE = "grid-40-congested"  # of showcase.perf.CASES
+CASE = "open-berlin-1pct-initial"  # Open Berlin's initial (uncalibrated, unrouted) 1% plans
 CONFIG = ROOT / "showcase" / "output" / "perf" / CASE / "input" / "config.xml"
 OUT = ROOT / "showcase" / "output" / "weaving"
 RESULTS = ROOT / "showcase" / "results" / "weaving.json"
 ITERATIONS = int(os.environ.get("WEAVING_ITERATIONS", 10_000))  # env: for a quick trial
-TIME_LIMIT = float(os.environ.get("WEAVING_TIME_LIMIT", 60))  # wall seconds per run
+TIME_LIMIT = float(os.environ.get("WEAVING_TIME_LIMIT", 1200))  # wall seconds per run
 INNOVATION = 0.3
-CAPACITY = 0.3  # flow and storage capacity factor (the case's own)
+CAPACITY = 0.01  # flow and storage capacity factor (the case's own: the sample size)
 BUDGET = int(os.environ.get("WEAVING_BUDGET", 8))  # processes; best: the physical cores
 SEED = 4711
 TIMING = ("_s", "_mb")  # metric keys recorded per strand
@@ -100,8 +102,12 @@ MATSIM_STRATEGIES = {"ChangeExpBeta": 1 - INNOVATION, "ReRoute": INNOVATION / 2,
                      "TimeAllocationMutator_ReRoute": INNOVATION / 2}
 
 
-def strategies():
+def strategies(cfg):
+    """:data:`MATSIM_STRATEGIES` in MobSlim, with the time mutation set as
+    ``cfg``'s ``timeAllocationMutator`` sets MATSim's (Open Berlin's mutates
+    around the initial end times)."""
     from mobslim import PlanStrategy, StrategyManager
+    from mobslim.config.matsim import strategy_manager
     from mobslim.replanning import (
         ChangeExpBetaSelector,
         RandomSelector,
@@ -109,12 +115,31 @@ def strategies():
         TimeAllocationMutator,
     )
 
+    tam = next(m for _, s in strategy_manager(cfg)[0].strategies for m in s.modules
+               if isinstance(m, TimeAllocationMutator))  # cfg has MATSIM_STRATEGIES (load_config)
     half = INNOVATION / 2
     return StrategyManager([
         (1 - INNOVATION, PlanStrategy(ChangeExpBetaSelector())),
         (half, PlanStrategy(RandomSelector(), [Reroute()])),
-        (half, PlanStrategy(RandomSelector(), [TimeAllocationMutator(), Reroute()])),
+        (half, PlanStrategy(RandomSelector(), [tam, Reroute()])),
     ])
+
+
+def load_config():
+    """The case's config, with :data:`MATSIM_STRATEGIES` as its replanning
+    when it has none (Open Berlin sets its strategies in code)."""
+    import xml.etree.ElementTree as ET
+
+    from mobslim.config.matsim import MatsimConfig
+
+    cfg = MatsimConfig.load(CONFIG)
+    module = cfg._module("replanning", create=True)
+    if not module.findall("parameterset[@type='strategysettings']"):
+        for name, weight in MATSIM_STRATEGIES.items():
+            ps = ET.SubElement(module, "parameterset", type="strategysettings")
+            ET.SubElement(ps, "param", name="strategyName", value=name)
+            ET.SubElement(ps, "param", name="weight", value=str(weight))
+    return cfg
 
 
 def child(slug: str, out: str) -> None:
@@ -122,23 +147,32 @@ def child(slug: str, out: str) -> None:
     from mobslim import (
         Controller,
         ControllerListener,
-        ControllerParams,
         HermesSimParams,
     )
-    from mobslim.config.matsim import MatsimConfig, mobsim_params
+    from mobslim.config.matsim import (
+        controller_params,
+        mobsim_params,
+        network_router_factory,
+        scoring_params_by_subpopulation,
+    )
     from mobslim.weave import AsyncWeave, Weave
 
     # by its module path, not __main__'s, so worker processes can unpickle it
     from showcase.weaving.experiment import TimedHermesSim
 
     run = next(r for r in RUNS if r.slug == slug)
-    cfg = MatsimConfig.load(CONFIG)
+    cfg = load_config()
     kw, _ = mobsim_params(cfg)
     kw.update(flow_capacity_factor=CAPACITY, storage_capacity_factor=CAPACITY)
     sims = Path(out).with_suffix(".sims.csv")
     sims.unlink(missing_ok=True)
     mobsim = TimedHermesSim(HermesSimParams(**kw, backend="rust"), str(sims))
-    params = ControllerParams(iterations=ITERATIONS, seed=SEED)
+    # the config's own params (as MATSim: e.g. activities to links by XY2Links' rule), writing no files
+    params = replace(controller_params(cfg)[0], iterations=ITERATIONS, seed=SEED, output_dir=None)
+    # A* bounded as MATSim's is (distance factor 1), so routes are MATSim's
+    # not-least-cost ones and congestion compares like for like
+    scoring = scoring_params_by_subpopulation(cfg)[0]
+    router_factory = network_router_factory(cfg, scoring, scoring.modes, bound_factor=1.0)
 
     class TimeUp(Exception):
         pass
@@ -196,7 +230,8 @@ def child(slug: str, out: str) -> None:
                 raise TimeUp  # the controllers close their workers on the way out
 
     record = Record()
-    common = dict(strategies=strategies(), mobsim=mobsim, params=params, listeners=[record])
+    common = dict(strategies=strategies(cfg), mobsim=mobsim, params=params,
+                  router_factory=router_factory, listeners=[record])
     t = time.perf_counter()
     if run.strands == 0:
         controller = Controller.from_matsim_config(cfg, **common)
@@ -273,9 +308,10 @@ def machine() -> dict:
 
 
 def main(only: list[str] = ()) -> None:
-    from showcase.perf import CASES, prepare
+    from showcase.perf import PerfCase, prepare
 
-    prepare(next(c for c in CASES if c.name == CASE))  # made or remade if out of date
+    prepare(PerfCase(CASE, "Open Berlin v6.4, 1%, initial plans", open_berlin="1pct-initial",
+                     transit=True, xmx="20g"))  # made when missing
     OUT.mkdir(parents=True, exist_ok=True)
     results = json.loads(RESULTS.read_text()) if RESULTS.exists() else {"runs": {}}
     results["machine"] = machine()

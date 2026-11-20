@@ -43,6 +43,30 @@ def test_controller_params(tmp_path):
     assert (c.iterations, c.seed, c.learning_rate, c.travel_time_bin_size) == (5, 42, 0.5, 300.0)
 
 
+def test_time_allocation_mutator_settings():
+    """mutateAroundInitialEndTimeOnly and latestActivityEndTime (MATSim's
+    default 24:00) reach the mutator; mutationRangeStep is not honoured."""
+    from mobslim.config.matsim import strategy_manager
+    from mobslim.replanning import TimeAllocationMutator
+
+    def mutator(cfg):
+        manager, unsupported = strategy_manager(cfg)
+        tams = [m for _, s in manager.strategies for m in s.modules
+                if isinstance(m, TimeAllocationMutator)]
+        return tams, unsupported
+
+    cfg = MatsimConfig.load(PT)
+    (tam,), unsupported = mutator(cfg)
+    assert (tam.around_initial_end_time, tam.latest_end_time) == (False, 86400.0)
+    assert unsupported == []
+    cfg.set("timeAllocationMutator", "mutateAroundInitialEndTimeOnly", "true")
+    cfg.set("timeAllocationMutator", "latestActivityEndTime", "30:00:00")
+    cfg.set("timeAllocationMutator", "mutationRangeStep", "60")
+    (tam,), unsupported = mutator(cfg)
+    assert (tam.around_initial_end_time, tam.latest_end_time) == (True, 30 * 3600.0)
+    assert unsupported == ["timeAllocationMutator.mutationRangeStep=60"]
+
+
 def test_hermes_mobsim():
     cfg = MatsimConfig.load(EQUIL).set("controller", "mobsim", "hermes").set("hermes", "flowCapacityFactor", 0.5)
     sim = Controller.from_matsim_config(cfg, strict=True).mobsim
@@ -81,6 +105,40 @@ def test_main_modes_and_vehicle_types(tmp_path):
     assert sc.mode_pce == {"car": 1.0, "truck": 3.5}  # bike: not simulated
     plain = Controller.from_matsim_config(EQUIL, strict=True).scenario
     assert plain.simulated_modes == {"car"} and plain.mode_pce == {}  # MATSim's defaults
+
+
+def test_persons_own_vehicle_types(tmp_path):
+    """A ``vehicleTypes`` person attribute (Open Berlin's commercial traffic):
+    the person drives that type, of its PCE, in the mobsim too; its maximum
+    velocity is reported as not simulated."""
+    import dataclasses
+
+    import numpy as np
+
+    from mobslim.config.matsim import person_vehicle_pce
+    from mobslim.mobsim._common import person_pce
+
+    vehicles = tmp_path / "vehicleTypes.xml"
+    vehicles.write_text(
+        '<vehicleDefinitions xmlns="http://www.matsim.org/files/dtd">'
+        '<vehicleType id="car"><passengerCarEquivalents pce="1.0"/></vehicleType>'
+        '<vehicleType id="van"><maximumVelocity meterPerSecond="22.22"/>'
+        '<passengerCarEquivalents pce="2.0"/></vehicleType>'
+        '</vehicleDefinitions>')
+    cfg = MatsimConfig.load(EQUIL)
+    cfg.set("qsim", "vehiclesSource", "modeVehicleTypesFromVehiclesData")
+    cfg.set("vehicles", "vehiclesFile", str(vehicles))
+    sc = Controller.from_matsim_config(cfg).scenario
+    ids = list(sc.population.ids)
+    pop = sc.population.with_attributes({ids[1]: {"vehicleTypes": '{"car":"van"}'},
+                                         ids[2]: {"vehicleTypes": '{"car":"bus"}'}})
+    own, unsupported = person_vehicle_pce(cfg, pop)
+    assert own["car"][1] == 2.0 and np.isnan(own["car"][[0, 2]]).all()
+    assert unsupported == ["vehicleTypes: unknown vehicle type bus",
+                           "vehicleTypes: maximum velocity of vehicle type van (not simulated on links)"]
+    sim = dataclasses.replace(sc.with_population(pop), person_pce=own)
+    pce = person_pce(sim, pop.selected_batch())
+    assert pce[1] == 2.0 and pce[0] == 1.0 and pce[2] == 1.0
 
 
 def test_unsupported_warns_or_raises(caplog):

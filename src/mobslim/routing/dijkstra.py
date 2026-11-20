@@ -24,7 +24,7 @@ signature can be plugged in via a router factory.
 
 import heapq
 import math
-from typing import Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 
@@ -37,8 +37,15 @@ _EMPTY = Route.packed(b"", 0.0, 0.0)  # origin == destination
 
 
 class DijkstraRouter:
-    def __init__(self, network: Network, mode: str, travel_time: TravelTime):
+    """``disutility`` (a :class:`~mobslim.routing.disutility.TravelDisutility`):
+    minimise its time and distance cost for ``mode`` instead of travel time;
+    the queries' distance factors then come with them (default 1). Its
+    ``bound_factor`` is ALT's, so ignored here: routes stay least-cost."""
+
+    def __init__(self, network: Network, mode: str, travel_time: TravelTime, disutility=None):
         self.mode = mode
+        self.disutility = disutility
+        self.costs = disutility.costs(mode) if disutility is not None else (1.0, 0.0)
         offsets, links = network.out_links(mode)
         to = network.to_node.tolist()
         # adjacency per node as ((link, to_node), ...): one tuple unpack per edge
@@ -77,6 +84,44 @@ class DijkstraRouter:
                     push(heap, (nt, v))
         return best, via
 
+    def _search_cost(self, origin: int, t0: float, bf: float, targets: set) -> tuple[dict, dict]:
+        """:meth:`_search` on the generalized cost (``bf``: distance cost x
+        factor): the heap orders by ``(cost, node)``; returns arrival times
+        and predecessor links."""
+        adj, times_at, length = self._adj, self._times_at, self._length
+        a = self.costs[0]
+        pop, push, inf = heapq.heappop, heapq.heappush, math.inf
+        cost = {origin: 0.0}
+        get = cost.get
+        time = {origin: t0}
+        via: dict[int, int] = {}
+        heap = [(0.0, origin)]
+        while heap:
+            c, u = pop(heap)
+            if c > cost[u]:
+                continue
+            if u in targets:
+                targets.discard(u)
+                if not targets:
+                    break
+            t = time[u]
+            tt = times_at(t)
+            for link, v in adj[u]:
+                x = tt[link]
+                nc = c + (a * x + bf * length[link])
+                if nc < get(v, inf):
+                    cost[v] = nc
+                    time[v] = t + x
+                    via[v] = link
+                    push(heap, (nc, v))
+        return time, via
+
+    def _search_any(self, origin: int, t0: float, factor: float, targets: set):
+        b = self.costs[1]
+        if b > 0:
+            return self._search_cost(origin, t0, b * factor, targets)
+        return self._search(origin, t0, targets)
+
     def _route(self, best: dict, via: dict, origin: int, destination: int, t0: float) -> Route:
         if destination not in best:
             raise NoRouteError(
@@ -95,11 +140,12 @@ class DijkstraRouter:
         data = np.array(path, dtype=_I32).tobytes()
         return Route.packed(data, best[destination] - t0, distance)
 
-    def route(self, origin: int, destination: int, departure_time: float) -> Route:
+    def route(self, origin: int, destination: int, departure_time: float,
+              factor: float = 1.0) -> Route:
         if origin == destination:
             return _EMPTY
         t0 = 0.0 if self.is_static else departure_time
-        best, via = self._search(origin, t0, {destination})
+        best, via = self._search_any(origin, t0, factor, {destination})
         return self._route(best, via, origin, destination, t0)
 
     def route_many(
@@ -107,18 +153,22 @@ class DijkstraRouter:
         origins: Sequence[int],
         destinations: Sequence[int],
         departure_times: Sequence[float],
+        factors: Optional[Sequence[float]] = None,
     ) -> list[Route]:
-        """``[route(o, d, t) for ...]``, with one search per distinct
-        ``(origin, departure_time)`` (per origin on a static model)."""
+        """``[route(o, d, t, f) for ...]``, with one search per distinct
+        ``(origin, departure_time, factor)`` (no departure time on a static
+        model, no factor without a distance cost)."""
         groups: dict[tuple, list[int]] = {}
         static = self.is_static
-        for q, (o, t) in enumerate(zip(origins, departure_times)):
-            groups.setdefault((o, 0.0) if static else (o, t), []).append(q)
+        if factors is None or self.costs[1] <= 0:
+            factors = [1.0] * len(origins)
+        for q, (o, t, f) in enumerate(zip(origins, departure_times, factors)):
+            groups.setdefault((o, 0.0 if static else t, float(f)), []).append(q)
         out: list = [None] * len(origins)
-        for (o, t0), queries in groups.items():
+        for (o, t0, f), queries in groups.items():
             targets = {destinations[q] for q in queries} - {o}
             if targets:
-                best, via = self._search(o, t0, set(targets))
+                best, via = self._search_any(o, t0, f, set(targets))
             for q in queries:
                 d = destinations[q]
                 out[q] = _EMPTY if d == o else self._route(best, via, o, d, t0)

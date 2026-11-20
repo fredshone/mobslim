@@ -11,6 +11,13 @@ a MATSim plans file) keep it, and so do activities placed at a node without
 coordinates (e.g. ``PlanBuilder.act(type, node)``), unless
 ``snap_node_activities``.
 
+Two rules find the nearest link (``ActivityLinkParams.rule``): ``"midpoint"``
+(the default) takes the link whose midpoint is nearest; ``"nearest_node"``
+is MATSim's ``NetworkUtils.getNearestLink``: the nearest node with an
+eligible link, then of that node's in- and out-links the one whose segment
+is nearest (ties: the smallest link id as a string, as MATSim's id order).
+MATSim configs use the latter.
+
 Assignment can prefer some links over others with ordered *tiers*: each
 tier allows only the links matched by none of its ``exclude`` filters, up to
 a ``max_distance``. An activity takes the nearest link of the first tier that
@@ -110,13 +117,17 @@ class ActivityLinkParams:
     ``tiers``: preferred subsets tried in order before the implicit last
     tier (every eligible link, any distance). ``snap_node_activities``: also
     assign activities placed at a node without coordinates (from the node's).
+    ``rule``: ``"midpoint"`` or ``"nearest_node"`` (MATSim's; see the module).
     """
 
     modes: Optional[tuple[str, ...]] = (DEFAULT_MODE,)
     tiers: tuple[SnapTier, ...] = ()
     snap_node_activities: bool = False
+    rule: str = "midpoint"
 
     def __post_init__(self):
+        if self.rule not in SNAP_RULES:
+            raise ValueError(f"ActivityLinkParams.rule must be one of {SNAP_RULES}, not {self.rule!r}.")
         if self.modes is not None:
             object.__setattr__(self, "modes", tuple(self.modes))
         object.__setattr__(self, "tiers", tuple(self.tiers))
@@ -135,6 +146,9 @@ class ActivityLinkParams:
             if m in network.modes:
                 mask |= network.mode_mask(m)
         return mask if mask.any() else np.ones(network.n_links, dtype=bool)
+
+
+SNAP_RULES = ("midpoint", "nearest_node")
 
 
 def link_midpoints(network: Network) -> np.ndarray:
@@ -193,6 +207,7 @@ class LinkSnapper:
             from mobslim.routing.compiled import default_threads
             threads = default_threads()
         self.backend, self.threads = backend, max(1, int(threads))
+        self.rule, self.network = params.rule, network
         mid = link_midpoints(network)
         eligible = params.eligible(network)
         masks = []
@@ -203,11 +218,23 @@ class LinkSnapper:
             masks.append((mask, tier.max_distance))
         masks.append((eligible, math.inf))
         bounds = (*(mid.min(axis=0) - 1), *(mid.max(axis=0) + 1)) if len(mid) else (0, 0, 1, 1)
-        # (link indices, their midpoints, point index over them, max distance)
+        # (link indices, their midpoints, point index over them, max distance); with
+        # rule "nearest_node": (nodes, their incident links (CSR), point index over the nodes, ...)
         self.tiers = []
+        node_bounds = None
+        if params.rule == "nearest_node" and network.n_nodes:
+            nxy = network.node_xy
+            node_bounds = (*(nxy.min(axis=0) - 1), *(nxy.max(axis=0) + 1))
         for mask, max_distance in masks:
             links = np.flatnonzero(mask)
             if not len(links):
+                continue
+            if params.rule == "nearest_node":
+                nodes, offsets, candidates = _incident_links(network, links)
+                pts = np.ascontiguousarray(network.node_xy[nodes], dtype=np.float64)
+                index = (_rust.PointIndex(pts) if backend == "rust"
+                         else _QuadTreeIndex(pts, node_bounds))
+                self.tiers.append((nodes, offsets, candidates, index, max_distance))
                 continue
             pts = np.ascontiguousarray(mid[links], dtype=np.float64)
             index = _rust.PointIndex(pts) if backend == "rust" else _QuadTreeIndex(pts, bounds)
@@ -227,6 +254,16 @@ class LinkSnapper:
             raise ValueError("Cannot assign a link to an activity without finite coordinates.")
         out = np.empty(len(xy), dtype=np.int64)
         pending = np.arange(len(xy))  # points no tier has taken yet
+        if self.rule == "nearest_node":
+            for nodes, offsets, candidates, index, max_distance in self.tiers:
+                if not len(pending):
+                    break
+                q = xy[pending]
+                link, dist = self._nearest_node_link(offsets, candidates, index, q)
+                ok = dist <= max_distance
+                out[pending[ok]] = link[ok]
+                pending = pending[~ok]
+            return out
         for links, pts, index, max_distance in self.tiers:
             if not len(pending):
                 break
@@ -239,6 +276,47 @@ class LinkSnapper:
             out[pending[ok]] = links[k[ok]]
             pending = pending[~ok]
         return out
+
+
+    def _nearest_node_link(self, offsets, candidates, index, q):
+        """MATSim's rule for points ``q``: ``(link, distance to its segment)``."""
+        k = self._nearest(index, q)  # position among the tier's nodes
+        start, n = offsets[k], np.diff(offsets)[k]
+        query = np.repeat(np.arange(len(q)), n)
+        pos = np.repeat(start - np.r_[0, np.cumsum(n)[:-1]], n) + np.arange(n.sum())
+        cand = candidates[pos]
+        net = self.network
+        a, b = net.node_xy[net.from_node[cand]], net.node_xy[net.to_node[cand]]
+        d = _point_segment_distance(q[query], a, b)
+        # the first of the nearest, in the candidates' (id string) order, as MATSim's strict "<"
+        order = np.lexsort((np.arange(len(d)), d, query))
+        first = np.r_[True, query[order][1:] != query[order][:-1]]
+        best = order[first]
+        return cand[best], d[best]
+
+
+def _incident_links(network: Network, links: np.ndarray):
+    """``(nodes, offsets, candidates)``: the nodes of ``links``, and each node's
+    in- and out-links among them (``candidates[offsets[i]:offsets[i + 1]]``),
+    by link id as a string (MATSim's ``getIncidentLinks`` order)."""
+    ends = np.concatenate([network.to_node[links], network.from_node[links]])
+    owner = np.concatenate([links, links])
+    pair = np.unique(np.stack([ends, owner], axis=1), axis=0)  # a loop link counts once
+    ids = np.array([str(network.link_ids.id(int(k))) for k in pair[:, 1]])
+    pair = pair[np.lexsort((ids, pair[:, 0]))]
+    nodes, start = np.unique(pair[:, 0], return_index=True)
+    return nodes, np.r_[start, len(pair)].astype(np.int64), pair[:, 1].astype(np.int64)
+
+
+def _point_segment_distance(p, a, b):
+    """Distance from points ``p`` to segments ``a``-``b`` (MATSim's
+    ``CoordUtils.distancePointLinesegment``)."""
+    ab = b - a
+    length2 = (ab * ab).sum(axis=1)
+    safe = np.where(length2 > 0, length2, 1.0)
+    t = np.clip(np.where(length2 > 0, ((p - a) * ab).sum(axis=1) / safe, 0.0), 0.0, 1.0)
+    c = a + t[:, None] * ab
+    return np.hypot(p[:, 0] - c[:, 0], p[:, 1] - c[:, 1])
 
 
 def link_snapper(network: Network, params: ActivityLinkParams = ActivityLinkParams()

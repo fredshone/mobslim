@@ -3,9 +3,12 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.matsim.api.core.v01.population.Person;
 import org.matsim.api.core.v01.population.Plan;
+import org.matsim.api.core.v01.Scenario;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.ConfigGroup;
 import org.matsim.core.config.ConfigUtils;
@@ -17,11 +20,12 @@ import org.matsim.core.controler.OutputDirectoryHierarchy;
 import org.matsim.core.controler.events.AfterMobsimEvent;
 import org.matsim.core.controler.events.BeforeMobsimEvent;
 import org.matsim.core.controler.events.IterationEndsEvent;
-import org.matsim.core.controler.events.StartupEvent;
+import org.matsim.core.controler.events.IterationStartsEvent;
 import org.matsim.core.controler.listener.AfterMobsimListener;
 import org.matsim.core.controler.listener.BeforeMobsimListener;
 import org.matsim.core.controler.listener.IterationEndsListener;
-import org.matsim.core.controler.listener.StartupListener;
+import org.matsim.core.controler.listener.IterationStartsListener;
+import org.matsim.core.population.PopulationUtils;
 import org.matsim.core.scenario.ScenarioUtils;
 
 /**
@@ -34,9 +38,9 @@ import org.matsim.core.scenario.ScenarioUtils;
  * </pre>
  *
  * Runs the config's iterations with the given strategies (in place of the
- * config's) and no output files. After each iteration it appends to
- * {@code --record}: the wall time since startup, the mobsim's start and end
- * (seconds since startup), and the mean score of the executed (selected)
+ * config's, for every subpopulation) and no output files. After each iteration it appends to
+ * {@code --record}: the wall time since the first iteration started (after the
+ * input plans are routed), the mobsim's start and end (seconds since then), and the mean score of the executed (selected)
  * plans and of each person's best plan. It exits after the first iteration
  * that ends past {@code --time-limit} seconds.
  */
@@ -73,14 +77,27 @@ public final class ReplanRun {
 		config.controller().setCreateGraphsInterval(0);
 		config.controller().setDumpDataAtEnd(false);
 		config.controller().setCleanItersAtEnd(ControllerConfigGroup.CleanIterations.delete);
+		Scenario scenario = ScenarioUtils.loadScenario(config);
 		if (!strategies.isEmpty()) {
+			// the same strategies for every subpopulation (MATSim needs them per subpopulation)
+			Set<String> subpopulations = new TreeSet<>();
+			for (Person p : scenario.getPopulation().getPersons().values()) {
+				String sub = PopulationUtils.getSubpopulation(p);
+				if (sub != null) subpopulations.add(sub);
+			}
+			List<String> targets = new ArrayList<>();
+			targets.add(null);
+			targets.addAll(subpopulations);
 			config.replanning().clearStrategySettings();
-			for (String s : strategies) {
-				int eq = s.indexOf('=');
-				StrategySettings st = new StrategySettings();
-				st.setStrategyName(s.substring(0, eq));
-				st.setWeight(Double.parseDouble(s.substring(eq + 1)));
-				config.replanning().addStrategySettings(st);
+			for (String sub : targets) {
+				for (String s : strategies) {
+					int eq = s.indexOf('=');
+					StrategySettings st = new StrategySettings();
+					st.setStrategyName(s.substring(0, eq));
+					st.setWeight(Double.parseDouble(s.substring(eq + 1)));
+					st.setSubpopulation(sub);
+					config.replanning().addStrategySettings(st);
+				}
 			}
 		}
 
@@ -89,11 +106,20 @@ public final class ReplanRun {
 		final FileWriter w = new FileWriter(record);
 		w.write("iteration,wall_s,mobsim_start_s,mobsim_end_s,score_executed,score_best\n");
 		w.flush();
-		Controler controler = new Controler(ScenarioUtils.loadScenario(config));
+		Controler controler = new Controler(scenario);
 		controler.addOverridingModule(new AbstractModule() {
 			@Override
 			public void install() {
-				addControlerListenerBinding().toInstance((StartupListener) e -> t[0] = System.nanoTime());
+				// the clock starts at iteration 0, after PrepareForSim has routed the input plans
+				// (as mobslim's starts after Controller.prepare)
+				addControlerListenerBinding().toInstance(new IterationStartsListener() {
+					@Override public void notifyIterationStarts(IterationStartsEvent e) {
+						if (e.getIteration() == e.getServices().getConfig().controller().getFirstIteration()) {
+							t[0] = System.nanoTime();
+						}
+					}
+					@Override public double priority() { return 1e9; } // first
+				});
 				addControlerListenerBinding().toInstance(new BeforeMobsimListener() {
 					@Override public void notifyBeforeMobsim(BeforeMobsimEvent e) { t[1] = System.nanoTime(); }
 					@Override public double priority() { return -1e9; } // last

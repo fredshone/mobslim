@@ -10,7 +10,8 @@ committed.
 
 :func:`prepare` writes a case's inputs: each person's selected plan from
 the calibrated plans (routed, so both MATSim and MobSlim simulate the same
-routes), and a MATSim config for plain MATSim. Open Berlin's own run adds,
+routes), or for a sample ending in :data:`INITIAL` from the initial plans
+(unrouted: each side routes them), and a MATSim config for plain MATSim. Open Berlin's own run adds,
 in Java, the scoring parameters of its 1,100 or so activity types
 (``home_86400``: typical duration 86,400 s) and its replanning; the config
 here carries the scoring parameters itself, and the showcase runs no
@@ -49,6 +50,13 @@ SHARED = {  # file -> URL, for every sample
     "config.xml": GITHUB + f"berlin-{VERSION}.config.xml",
 }
 SAMPLES = {"1pct": 0.01, "3pct": 0.03, "10pct": 0.1}
+INITIAL = "-initial"  # a sample's suffix for its initial plans ("1pct-initial"): before calibration
+
+
+def _size(sample: str) -> str:
+    """``"1pct"`` of ``"1pct"`` and ``"1pct-initial"``."""
+    return sample.removesuffix(INITIAL)
+
 # Open Berlin modules that plain MATSim does not know or the showcase does not use
 DROP_MODULES = ("simwrapper", "replanningAnnealer", "counts", "informedModeChoice",
                 "advancedScoring")
@@ -75,11 +83,14 @@ def _fetch(url: str, path: Path) -> Path:
 
 
 def download(out: Path, sample: str) -> Path:
-    """The shared inputs and ``sample``'s calibrated plans, downloaded once."""
+    """The shared inputs and ``sample``'s plans, downloaded once: the
+    calibrated plans, or with :data:`INITIAL` the initial ones (one unrouted
+    plan per agent, with the synthetic demand's times and modes)."""
     d = download_dir(out)
     for name, url in SHARED.items():
         _fetch(url, d / name)
-    _fetch(SVN + f"berlin-{VERSION}-{sample}.plans.xml.gz", d / f"plans-{sample}.xml.gz")
+    kind = "plans-initial" if sample.endswith(INITIAL) else "plans"
+    _fetch(SVN + f"berlin-{VERSION}-{_size(sample)}.{kind}.xml.gz", d / f"plans-{sample}.xml.gz")
     return d
 
 
@@ -168,5 +179,5 @@ def prepare(out: Path, sample: str, d: Path) -> Path:
     plans = d / "plans.xml.gz"
     types = selected_plans(files / f"plans-{sample}.xml.gz", plans)
     cfg = d / "config.xml"
-    write_config(files / "config.xml", cfg, SAMPLES[sample], plans, files, types)
+    write_config(files / "config.xml", cfg, SAMPLES[_size(sample)], plans, files, types)
     return cfg

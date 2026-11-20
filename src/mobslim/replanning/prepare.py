@@ -85,7 +85,11 @@ def _route_held_plans(pop, ctx: ReplanningContext, persons=None):
     batch = pop.plans.take(live)
     xy = batch.resolved_act_xy(ctx.network)
     located = batch if xy is batch.act_xy else replace(batch, act_xy=xy)
-    routed = route_batch(located, ctx, persons)
+    # a random travel disutility draws per person: each plan as the first person holding it
+    held = pop.plan_ids >= 0
+    rows, first = np.unique(pop.plan_ids[held], return_index=True)
+    holders = np.nonzero(held)[0][first]  # aligned with live (both sorted rows)
+    routed = route_batch(located, ctx, persons, factor_persons=holders)
     if routed is batch:  # nothing to do: keep the store (compacted to the held plans)
         return pop.map_plan_store(lambda plans: plans)
     return pop.with_live_batch(live, routed)

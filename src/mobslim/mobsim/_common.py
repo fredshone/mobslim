@@ -109,18 +109,26 @@ def route_teleports(scenario: Scenario, plans: PlanBatch) -> tuple[np.ndarray, n
 
 
 def person_pce(scenario: Scenario, plans: PlanBatch) -> np.ndarray:
-    """Passenger car equivalents of each plan's vehicle: those of the mode of
-    its legs on the network (``scenario.modes.pce``, default 1). Raises
-    :class:`SimulationError` for a plan whose network legs are of modes of
-    different PCEs (one vehicle per person)."""
+    """Passenger car equivalents of each plan's vehicle (plan ``i``: person
+    ``i``): those of the mode of its legs on the network
+    (``scenario.modes.pce``, default 1), or the person's own vehicle's
+    (``scenario.person_pce``). Raises :class:`SimulationError` for a plan
+    whose network legs are of modes of different PCEs (one vehicle per
+    person)."""
     pce = np.ones(plans.n_plans)
     of_mode = scenario.modes.pce
-    if not plans.n_legs or not any(of_mode.get(m, 1.0) != 1.0 for m in plans.modes):
+    own = {m: c for m, c in scenario.person_pce.items() if m in plans.modes}
+    if not plans.n_legs or not (own or any(of_mode.get(m, 1.0) != 1.0 for m in plans.modes)):
         return pce
     is_net = plans.network_legs(scenario.modes.network_modes)
     mode_pce = np.array([of_mode.get(m, 1.0) for m in plans.modes])
     leg_pce = mode_pce[plans.leg_mode]
     plan = plans.plan_of_leg()
+    for mode, col in own.items():
+        legs = np.flatnonzero(plans.leg_mode == plans.modes.index(mode))
+        theirs = np.asarray(col, dtype=float)[plan[legs]]
+        known = ~np.isnan(theirs)
+        leg_pce[legs[known]] = theirs[known]
     hi, lo = np.ones(plans.n_plans), np.ones(plans.n_plans)
     legs = np.flatnonzero(is_net)
     if len(legs):

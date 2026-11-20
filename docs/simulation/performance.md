@@ -1,6 +1,6 @@
 # Performance
 
-Simulations are fast and memory light. The following experiments compare MobSlim and MATSim at the *grid-40*, *grid-40-congested*, *grid-80*, *grid-80-congested*, *grid-160* and *grid-160-congested* scenarios, and on MATSim's Open Berlin at
+Simulations are fast and memory light. The following experiments compare MobSlim and MATSim on three congested grids (*grid8km*, *grid16km* and *grid32km*) and on MATSim's Open Berlin at
 1% (*open-berlin-1pct*) and 10% (*open-berlin-10pct*), on the same plans and routes, on the following machine:
 
 ```{include} ../_generated/perf_machine.md
@@ -13,16 +13,16 @@ Simulations are fast and memory light. The following experiments compare MobSlim
 
 ## Speed
 
-* **MobSlim's HermesSim is 4.9–11x faster than MATSim Hermes**; PSim and DSim
-  on 16 threads are 2.1–14x faster.
+* **MobSlim's HermesSim is 4.9–8.9x faster than MATSim Hermes**; PSim and DSim
+  on 16 threads are 2.1–12x faster.
 * **On the largest scenarios, PSim on 16 threads is the fastest**: 12x faster
-  than MATSim Hermes on Open Berlin at 10% (7.63 s against 91.8 s), and
-  8.7–14x on the grid-160 scenarios.
+  than MATSim Hermes on Open Berlin at 10% (7.63 s against 91.8 s), and 8.7x
+  on grid32km (8.48 s against 73.7 s).
 * **Open Berlin at 1% gains least** (HermesSim 4.9x, 1.94 s against 9.54 s):
   with 52,263 agents on 283,885 links, the mobsim's fixed costs per link and
   per stop weigh more than on the grids.
 * **MobSlim's QSim and AgentSim are faster than MATSim's QSim on every
-  scenario they both ran,** but 1.9–5.0x slower than MATSim Hermes.
+  scenario they both ran,** but 2.5–5.0x slower than MATSim Hermes.
 
 ```{image} ../_static/showcase/perf_time_light.svg
 :class: only-light
@@ -35,12 +35,12 @@ Simulations are fast and memory light. The following experiments compare MobSlim
 
 ## Max memory
 
-* **Every MobSlim mobsim needs 52–94% less memory than MATSim Hermes**: 71–94%
+* **Every MobSlim mobsim needs 52–93% less memory than MATSim Hermes**: 71–93%
   on the grids, 85–87% on Open Berlin at 10%, and 52–65% at 1%, where the
   network and transit schedule, not the agents, take most of it.
 * **On Open Berlin at 10%, HermesSim, PSim and DSim peak at 6.26–7.26 GB**,
-  against 49.27 GB for MATSim Hermes; on grid-160 at 2.57–3.18 GB, against
-  40.68 GB.
+  against 49.27 GB for MATSim Hermes; on grid32km at 2.50–3.28 GB, against
+  38.12 GB.
 
 ```{image} ../_static/showcase/perf_memory_light.svg
 :class: only-light
@@ -53,140 +53,76 @@ Simulations are fast and memory light. The following experiments compare MobSlim
 
 ## Scenarios
 
-### grid-40
+### grid8km
 
-A 40×40 grid (6,560 links, 600 veh/h) with 26,240 car commuters leaving home
-between 06:00 and 08:00: moderate congestion. The grid is slightly irregular:
-each node is moved up to 20 m from its grid point, so links are about 160 to
-240 m long rather than all 200 m, and routes are not ties between many paths
-of equal length. At the busiest minute, 07:17, 2,151 cars are on the road and
-only 52 of them are queued.
+A grid 8 km a side: 40×40 cells (6,560 links, 600 veh/h) with 26,240 car
+commuters leaving home between 06:00 and 08:00, at flow and storage capacity
+×0.3, as if running a 30% sample at full demand: queues and spillback. The
+grid is slightly irregular: each node is moved up to 20 m from its grid point,
+so links are about 160 to 240 m long rather than all 200 m, and routes are not
+ties between many paths of equal length. At the busiest minute, 08:00, 10,658
+cars are on the road and 9,211 of them are queued.
 
-```{image} ../_static/showcase/net_grid-40_light.png
+```{image} ../_static/showcase/net_grid8km_light.png
 :class: only-light
 :width: 75%
 :align: center
-:alt: The 40×40 grid at its busiest minute, with almost every car moving
+:alt: The 8 km grid at its busiest minute, with queues
 ```
-```{image} ../_static/showcase/net_grid-40_dark.png
+```{image} ../_static/showcase/net_grid8km_dark.png
 :class: only-dark
 :width: 75%
 :align: center
-:alt: The 40×40 grid at its busiest minute, with almost every car moving
+:alt: The 8 km grid at its busiest minute, with queues
 ```
 
-```{include} ../_generated/perf_grid-40.md
+```{include} ../_generated/perf_grid8km.md
 ```
 
-### grid-40-congested
+### grid16km
 
-The same at flow and storage capacity ×0.3, as if running a 30% sample at
-full demand: queues and spillback. At the busiest minute, 08:00, 10,658 cars
-are on the road and 9,211 of them are queued.
+grid8km at four times the area: 16 km a side, 80×80 cells (25,920 links),
+with 104,960 car commuters, about the same number per link. Trips are twice
+as long, so there is about 8 times the work. At the busiest minute, 08:00,
+73,905 cars are on the road and 67,237 of them are queued.
 
-```{image} ../_static/showcase/net_grid-40-congested_light.png
+```{image} ../_static/showcase/net_grid16km_light.png
 :class: only-light
 :width: 75%
 :align: center
-:alt: The congested 40×40 grid at its busiest minute, with queues
+:alt: The 16 km grid at its busiest minute, with queues
 ```
-```{image} ../_static/showcase/net_grid-40-congested_dark.png
+```{image} ../_static/showcase/net_grid16km_dark.png
 :class: only-dark
 :width: 75%
 :align: center
-:alt: The congested 40×40 grid at its busiest minute, with queues
+:alt: The 16 km grid at its busiest minute, with queues
 ```
 
-```{include} ../_generated/perf_grid-40-congested.md
+```{include} ../_generated/perf_grid16km.md
 ```
 
-### grid-80
+### grid32km
 
-The grid-40 scenario at four times the size: an 80×80 grid (25,920 links)
-with 104,960 car commuters, about the same number per link. Trips are twice as
-long, so there is about 8 times the work. At the busiest minute, 08:00, 44,658
-cars are on the road and 34,080 of them are queued.
-
-```{image} ../_static/showcase/net_grid-80_light.png
-:class: only-light
-:width: 75%
-:align: center
-:alt: The 80×80 grid at its busiest minute
-```
-```{image} ../_static/showcase/net_grid-80_dark.png
-:class: only-dark
-:width: 75%
-:align: center
-:alt: The 80×80 grid at its busiest minute
-```
-
-```{include} ../_generated/perf_grid-80.md
-```
-
-### grid-80-congested
-
-grid-80 at flow and storage capacity ×0.3, as grid-40-congested is to
-grid-40. At the busiest minute, 08:00, 73,905 cars are on the road and 67,237
-of them are queued.
-
-```{image} ../_static/showcase/net_grid-80-congested_light.png
-:class: only-light
-:width: 75%
-:align: center
-:alt: The congested 80×80 grid at its busiest minute, with queues
-```
-```{image} ../_static/showcase/net_grid-80-congested_dark.png
-:class: only-dark
-:width: 75%
-:align: center
-:alt: The congested 80×80 grid at its busiest minute, with queues
-```
-
-```{include} ../_generated/perf_grid-80-congested.md
-```
-
-### grid-160
-
-grid-80 at four times the size again: a 160×160 grid (103,040 links) with
-419,840 car commuters, about 8 times the work of grid-80. MATSim gets a 40 GB
-heap here (`-Xmx40g`). At the busiest minute, 08:00, 297,581 cars are on the
-road and 247,679 of them are queued.
-
-```{image} ../_static/showcase/net_grid-160_light.png
-:class: only-light
-:width: 75%
-:align: center
-:alt: The 160×160 grid at its busiest minute
-```
-```{image} ../_static/showcase/net_grid-160_dark.png
-:class: only-dark
-:width: 75%
-:align: center
-:alt: The 160×160 grid at its busiest minute
-```
-
-```{include} ../_generated/perf_grid-160.md
-```
-
-### grid-160-congested
-
-grid-160 at flow and storage capacity ×0.3. At the busiest minute, 08:00,
+grid16km at four times the area again: 32 km a side, 160×160 cells (103,040
+links), with 419,840 car commuters, about 8 times the work of grid16km.
+MATSim gets a 40 GB heap here (`-Xmx40g`). At the busiest minute, 08:00,
 365,439 cars are on the road and 337,234 of them are queued.
 
-```{image} ../_static/showcase/net_grid-160-congested_light.png
+```{image} ../_static/showcase/net_grid32km_light.png
 :class: only-light
 :width: 75%
 :align: center
-:alt: The congested 160×160 grid at its busiest minute, with queues
+:alt: The 32 km grid at its busiest minute, with queues
 ```
-```{image} ../_static/showcase/net_grid-160-congested_dark.png
+```{image} ../_static/showcase/net_grid32km_dark.png
 :class: only-dark
 :width: 75%
 :align: center
-:alt: The congested 160×160 grid at its busiest minute, with queues
+:alt: The 32 km grid at its busiest minute, with queues
 ```
 
-```{include} ../_generated/perf_grid-160-congested.md
+```{include} ../_generated/perf_grid32km.md
 ```
 
 ### open-berlin-1pct
@@ -246,8 +182,8 @@ Hermes and MobSlim's HermesSim, PSim and DSim). At the busiest minute, 17:01,
 * **The time is the mobsim alone,** not loading, routing or replanning. For
   each simulation it is the fastest of 3 runs, or of 3 iterations for MATSim,
   so the JVM is warmed up. MobSlim's slowest runs are not repeated: QSim and
-  AgentSim on both grid-160 scenarios, and DSim on 1 thread on
-  grid-160-congested and Open Berlin at 10%, ran once. MATSim feeds its events to its standard handlers
+  AgentSim on grid32km, and DSim on 1 thread on grid32km and Open Berlin
+  at 10%, ran once. MATSim feeds its events to its standard handlers
   (travel times, scoring) while it runs. MobSlim runs as in an iteration
   that is not an output iteration (see *What an iteration needs* in
   [the design](../design.md#32-trajectories-and-events-trajectories-events)):
@@ -258,7 +194,7 @@ Hermes and MobSlim's HermesSim, PSim and DSim). At the busiest minute, 17:01,
   and **that time is included** in MobSlim's figures.
 * **Memory is the whole process's peak resident memory** (Python or the JVM,
   plus the loaded scenario, plus the mobsim). The JVM was allowed a 10 GB heap
-  (`-Xmx10g`; 40 GB for grid-160, 20 GB for Open Berlin at 1% and 100 GB at
+  (`-Xmx10g`; 40 GB for grid32km, 20 GB for Open Berlin at 1% and 100 GB at
   10%), and Java grows its heap lazily, so MATSim usually needs less than it
   takes.
 * **Open Berlin runs its calibrated selected plans,** one per agent, with
@@ -291,17 +227,17 @@ Hermes and MobSlim's HermesSim, PSim and DSim). At the busiest minute, 17:01,
   runner does not count them.
 * **MATSim's DSim comes from a weekly build** (`2027.0-2026w45`), run with the
   QSim's traffic model.
-* **grid-320 (a 320×320 grid, 410,880 links, 1,679,360 car commuters, and
-  its congested variant) is defined but not run by default** (`-k 320`): a day
-  of it takes MATSim's QSim and DSim, and MobSlim's QSim and AgentSim, hours,
-  so only MATSim Hermes (with `-Xmx100g`) and MobSlim's HermesSim, PSim and
-  DSim run on it.
+* **grid64km (64 km a side, 320×320 cells, 410,880 links, 1,679,360 car
+  commuters) is defined but not run by default** (`-k 64km`): a day of it
+  takes MATSim's QSim and DSim, and MobSlim's QSim and AgentSim, hours, so
+  only MATSim Hermes (with `-Xmx100g`) and MobSlim's HermesSim, PSim and DSim
+  run on it.
 * **The multi-threaded runs use all 16 logical CPUs,** on 8 physical cores.
   On the smaller scenarios they gain little over one thread, and sometimes lose;
   on Open Berlin at 1%, PSim on 16 threads is only 1.3x faster than on one
-  (3.43 s against 4.60 s). On the grid-160 scenarios and Open Berlin at 10%,
+  (3.43 s against 4.60 s). On grid32km and Open Berlin at 10%,
   MobSlim's PSim and DSim are 3.4–4.8x faster on 16 threads than on one, and
-  MATSim's DSim 5.1–5.4x on grid-160.
+  MATSim's DSim 5.3x on grid32km.
 * **Timings depend on the machine.** Run on mains power, with nothing else
   heavy running.
 

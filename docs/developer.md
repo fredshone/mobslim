@@ -228,6 +228,7 @@ src/mobslim/
 │   ├── base.py       Router, TravelTime, RouterFactory protocols
 │   ├── dijkstra.py   time-dependent DijkstraRouter (Python reference, route_many)
 │   ├── compiled.py   RustRouter (Dijkstra or ALT, parallel route_many), default_router
+│   ├── disutility.py TravelDisutility: MATSim's time + distance cost, per-person random factors
 │   ├── traveltime.py FreeSpeedTravelTime, TravelTimeTable, TravelTimeCollector,
 │   │                 travel_time_table
 │   └── teleport.py   TeleportedModeParams, teleport()
@@ -376,6 +377,11 @@ RustRouter(net, "car", table)                    # same routes, parallel route_m
 RustRouter(net, "car", table, algorithm="alt")   # A* with landmarks: same times, faster
 Controller(scenario, router_factory=partial(RustRouter, algorithm="alt", threads=4))
 # default everywhere: default_router (RustRouter if built, else DijkstraRouter)
+
+from mobslim.routing import TravelDisutility             # route as MATSim: time + distance
+cost = TravelDisutility.from_scoring(scoring_params, ["car"], randomness=3.0)
+Controller(scenario, router_factory=partial(default_router, disutility=cost))
+# bound_factor=1.0: bound A* as MATSim does, for MATSim's not-least-cost routes (off by default)
 
 table = result.travel_time                       # learned, (n_links, n_bins), 15-min bins
 table.link_travel_time(link, 8 * 3600)

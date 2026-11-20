@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from mobslim import Activity, Leg, Person, Plan, Population, read_population_xml
@@ -150,6 +151,38 @@ def test_read_population_scores_and_selection(equil_scenario, tmp_path):
     )
     person = read_population_xml(xml, equil_scenario.network).by_id("x")
     assert person.scores == (1.5, None) and person.selected == 1
+
+
+def test_read_initial_end_times(equil_scenario, tmp_path):
+    """MATSim's initialEndTime activity attributes (mutateAroundInitialEndTimeOnly),
+    stage activities skipped; activities without one keep their end time."""
+    from mobslim.formats.matsim_plans import read_initial_end_times
+
+    def act(type_, end=None, initial=None):
+        attrs = (f'<attributes><attribute name="initialEndTime" class="java.lang.Double">'
+                 f'{initial}</attribute></attributes>' if initial is not None else "")
+        end = f' end_time="{end}"' if end else ""
+        return f'<activity type="{type_}" link="1"{end}>{attrs}</activity>'
+
+    def person(pid, *elements):
+        return f'<person id="{pid}"><plan selected="yes">{"".join(elements)}</plan></person>'
+
+    xml = tmp_path / "plans.xml"
+    xml.write_text(
+        '<?xml version="1.0" ?><population>'
+        + person("x", act("h", "06:00:00", 20000.0), '<leg mode="walk"/>',
+                 act("walk interaction"), '<leg mode="walk"/>',
+                 act("w", "15:00:00"), '<leg mode="walk"/>', act("h"))
+        + person("y", act("h", "07:00:00"), '<leg mode="walk"/>', act("h"))
+        + "</population>")
+    pop = read_population_xml(xml, equil_scenario.network)
+    initial = read_initial_end_times(xml, pop)
+    np.testing.assert_array_equal(initial.offsets, [0, 3, 5])
+    np.testing.assert_array_equal(initial.end_time, [20000.0, 15 * 3600, np.nan, 7 * 3600, np.nan])
+    xml.write_text('<?xml version="1.0" ?><population>'
+                   + person("y", act("h", "07:00:00"), '<leg mode="walk"/>', act("h"))
+                   + "</population>")
+    assert read_initial_end_times(xml, read_population_xml(xml, equil_scenario.network)) is None
 
 
 def test_read_population_keep_routes(equil_scenario, tmp_path):

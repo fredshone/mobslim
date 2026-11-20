@@ -8,6 +8,7 @@ Routing is deterministic, so batched and per-plan routes must be equal.
 import math
 from bisect import bisect_right
 from dataclasses import replace
+from random import Random
 
 import numpy as np
 import pytest
@@ -159,6 +160,39 @@ def test_time_allocation_mutator_batch(equil):
     expected = [tam.mutate(p, ctx, ScalarDraws(u[offsets[k]:offsets[k + 1] - 1]))
                 for k, p in enumerate(plans)]
     assert batches_equal(out, PlanBatch.from_plans(expected))
+
+
+def test_time_allocation_mutator_around_initial_end_times_batch(equil):
+    """Around the initial end times (MATSim's mutateAroundInitialEndTimeOnly):
+    end times shift from the initial ones, durations from the plan's, and a
+    plan shaped unlike the initial one from its own; capped at latest_end_time."""
+    from mobslim.replanning.context import InitialEndTimes
+
+    scenario, ctx = equil
+    ctx = replace(ctx, initial_end_times=InitialEndTimes.of(scenario.population))
+    plans = scenario.population.selected_plans()
+    moved = [p.with_elements([replace(e, end_time=e.end_time + 3600)
+                              if isinstance(e, Activity) and e.end_time is not None else e
+                              for e in p.elements]) for p in plans]
+    moved[3] = moved[3].with_elements(  # a duration-only first activity
+        [replace(moved[3].elements[0], end_time=None, duration=100.0), *moved[3].elements[1:]])
+    moved[5] = Plan(moved[5].elements[:1])  # not shaped as the initial plan
+    batch = PlanBatch.from_plans(moved)
+    u = np.random.default_rng(1).random(batch.n_acts)
+    tam = TimeAllocationMutator(mutation_range=900, around_initial_end_time=True,
+                                latest_end_time=6.2 * 3600)
+    out = tam.mutate_batch(batch, np.arange(len(moved)), ctx, ArrayDraws(u))
+    offsets = batch.act_offsets.tolist()
+    expected = [tam.mutate(p, ctx.for_person(k), ScalarDraws(u[offsets[k]:offsets[k + 1] - 1]))
+                for k, p in enumerate(moved)]
+    assert batches_equal(out, PlanBatch.from_plans(expected))
+    uncapped = TimeAllocationMutator(mutation_range=900, around_initial_end_time=True)
+    first = plans[0].elements[0].end_time
+    for seed in range(20):  # from the initial end time, never from the plan's (an hour later)
+        new = uncapped.mutate(moved[0], ctx.for_person(0), Random(seed))
+        assert abs(new.elements[0].end_time - first) <= 900
+    assert max(e.end_time for p in expected for e in p.activities[:-1]
+               if e.end_time is not None) <= 6.2 * 3600
 
 
 def test_change_trip_mode_batch(equil):

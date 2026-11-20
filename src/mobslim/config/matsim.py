@@ -26,6 +26,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+
 from mobslim.timeutils import parse_time
 
 
@@ -415,6 +417,14 @@ def strategy_manager(cfg: MatsimConfig):
     beta = float(cfg.get("scoring", "brainExpBeta", "1.0"))
     tam = cfg.get("timeAllocationMutator", "mutationRange", "1800.0")
     tam_range = float(parse_time(tam)) if ":" in tam else float(tam)  # seconds
+    around_initial = cfg.get("timeAllocationMutator", "mutateAroundInitialEndTimeOnly",
+                             "false").strip().lower() == "true"
+    latest = cfg.get("timeAllocationMutator", "latestActivityEndTime", "24:00:00")
+    latest_end = float(parse_time(latest)) if ":" in latest else float(latest)
+
+    def mutator():
+        return TimeAllocationMutator(tam_range, around_initial_end_time=around_initial,
+                                     latest_end_time=latest_end)
     modes = (cfg.get("changeMode", "modes") or "car,pt").split(",")
     ignore_car = cfg.get("changeMode", "ignoreCarAvailability", "true") != "false"
 
@@ -428,8 +438,8 @@ def strategy_manager(cfg: MatsimConfig):
         "SelectExpBeta": lambda: PlanStrategy(ExpBetaSelector(beta)),
         "SelectRandom": lambda: PlanStrategy(RandomSelector()),
         "ReRoute": lambda: PlanStrategy(RandomSelector(), [Reroute()]),
-        "TimeAllocationMutator": lambda: innovate(TimeAllocationMutator(tam_range)),
-        "TimeAllocationMutator_ReRoute": lambda: innovate(TimeAllocationMutator(tam_range)),
+        "TimeAllocationMutator": lambda: innovate(mutator()),
+        "TimeAllocationMutator_ReRoute": lambda: innovate(mutator()),
         "ChangeTripMode": lambda: innovate(ChangeTripMode(modes, ignore_car)),
         "ChangeLegMode": lambda: innovate(ChangeTripMode(modes, ignore_car)),
     }
@@ -450,6 +460,9 @@ def strategy_manager(cfg: MatsimConfig):
         chosen.append((weight, builders[name]()))
     if cfg.get("timeAllocationMutator", "mutationAffectsDuration", "true") != "true":
         unsupported.append("timeAllocationMutator.mutationAffectsDuration=false")
+    step = cfg.get("timeAllocationMutator", "mutationRangeStep")
+    if step not in (None, "") and float(step) != 1.0:  # mobslim shifts by any amount
+        unsupported.append(f"timeAllocationMutator.mutationRangeStep={step}")
     for k in ("planSelectorForRemoval",):
         if top.get(k) not in (None, "WorstPlanSelector"):
             unsupported.append(f"replanning.{k}={top[k]}")
@@ -519,6 +532,41 @@ def mode_pce(cfg: MatsimConfig) -> tuple[dict, list[str]]:
 
     types = read_vehicle_types_xml(cfg.input_path("vehicles", "vehiclesFile"))
     return {m: types[m].get("pce", 1.0) for m in simulated_modes(cfg) if m in types}, []
+
+
+def person_vehicle_pce(cfg: MatsimConfig, population) -> tuple[dict, list[str]]:
+    """``(mode -> PCE per person index (NaN: the mode's), unsupported)``: the
+    vehicle types persons name for themselves in a ``vehicleTypes`` attribute
+    (``{"truck": "light8t"}``), which MATSim's ``modeVehicleTypesFromVehiclesData``
+    gives them instead of the mode's type. Their maximum velocities are not
+    simulated (reported as unsupported)."""
+    import json
+
+    if (cfg.get("qsim", "vehiclesSource", "defaultVehicle") != "modeVehicleTypesFromVehiclesData"
+            or "vehicleTypes" not in population.attributes):
+        return {}, []
+    from mobslim.formats.matsim_transit import read_vehicle_types_xml
+
+    types = read_vehicle_types_xml(cfg.input_path("vehicles", "vehiclesFile"))
+    simulated = simulated_modes(cfg)
+    out: dict[str, np.ndarray] = {}
+    unknown, fast = set(), set()
+    for i, value in enumerate(population.attributes.column("vehicleTypes").tolist()):
+        if value is None:
+            continue
+        for mode, type_id in (json.loads(value) if isinstance(value, str) else dict(value)).items():
+            if mode not in simulated:
+                continue
+            if type_id not in types:
+                unknown.add(type_id)
+                continue
+            out.setdefault(mode, np.full(len(population), np.nan))[i] = types[type_id].get("pce", 1.0)
+            if types[type_id].get("max_speed") is not None:
+                fast.add(type_id)
+    unsupported = [f"vehicleTypes: unknown vehicle type {t}" for t in sorted(unknown)]
+    unsupported += [f"vehicleTypes: maximum velocity of vehicle type {t} (not simulated on links)"
+                    for t in sorted(fast)]
+    return out, unsupported
 
 
 def transit_walk(cfg: MatsimConfig):
@@ -600,8 +648,11 @@ def read_scenario(cfg: MatsimConfig):
                                              walk=transit_walk(cfg)))
     pce, unsupported_pce = mode_pce(cfg)
     unsupported += unsupported_pce
+    person_pce, unsupported_pce = person_vehicle_pce(cfg, population)
+    unsupported += unsupported_pce
     return Scenario(network, population, teleported_modes=modes, transit=transit,
-                    simulated_modes=simulated_modes(cfg), mode_pce=pce), unsupported
+                    simulated_modes=simulated_modes(cfg), mode_pce=pce,
+                    person_pce=person_pce), unsupported
 
 
 def deterministic_modes(cfg: "MatsimConfig") -> tuple:
@@ -639,7 +690,45 @@ def controller_params(cfg: MatsimConfig):
         kwargs["travel_time_bin_size"] = float(parse_time(v)) if ":" in v else float(v)
     # MATSim's bins are uniform
     kwargs["travel_time_off_peak_bin_size"] = kwargs.get("travel_time_bin_size", 900.0)
+    # activities to links as MATSim's XY2Links: nearest node, then its nearest car link
+    from mobslim.activity_links import ActivityLinkParams
+    kwargs["activity_links"] = ActivityLinkParams(rule="nearest_node")
     return ControllerParams(**kwargs), unsupported
+
+
+def network_router_factory(cfg: MatsimConfig, params, modes, bound_factor=None):
+    """MATSim's least-cost network routing: :func:`~mobslim.routing.default_router`
+    minimising a :class:`~mobslim.routing.disutility.TravelDisutility` of
+    time and distance, from the scoring parameters without a subpopulation
+    (``params``, as MATSim takes them) for ``modes`` (the network's), with
+    ``routing.routingRandomness`` (MATSim's default: 3) and the global seed.
+    ``bound_factor=1`` bounds A* as MATSim does, giving its not-least-cost
+    routes (off by default; see :mod:`mobslim.routing.disutility`)."""
+    from functools import partial
+
+    from mobslim.routing.compiled import default_router
+    from mobslim.routing.disutility import TravelDisutility
+
+    randomness = float(cfg.get("routing", "routingRandomness", "3.0"))
+    seed = int(cfg.get("global", "randomSeed", "4711"))
+    disutility = TravelDisutility.from_scoring(params, sorted(modes), randomness, seed, bound_factor)
+    return partial(default_router, disutility=disutility)
+
+
+def with_initial_end_times(scenario, plans_path, strategies):
+    """``scenario`` with the plans file's ``initialEndTime`` activity
+    attributes as its initial end times, if ``strategies`` mutate around
+    them and the file has any (see ``read_initial_end_times``)."""
+    from dataclasses import replace
+
+    from mobslim.formats.matsim_plans import read_initial_end_times
+    from mobslim.replanning.strategy import mutates_around_initial_end_times
+
+    if (plans_path is None or not str(plans_path).endswith((".xml", ".xml.gz"))
+            or not mutates_around_initial_end_times(strategies)):
+        return scenario
+    initial = read_initial_end_times(plans_path, scenario.population)
+    return scenario if initial is None else replace(scenario, initial_end_times=initial)
 
 
 def controller_kwargs(cfg: MatsimConfig) -> tuple[dict, list[str]]:
@@ -653,8 +742,10 @@ def controller_kwargs(cfg: MatsimConfig) -> tuple[dict, list[str]]:
     sim, u_mobsim = mobsim(cfg)
     params, by_subpop, u_scoring = scoring_params_by_subpopulation(cfg)
     manager, u_replanning = strategy_manager(cfg)
+    scenario = with_initial_end_times(scenario, cfg.input_path("plans", "inputPlansFile"), manager)
     loop, u_controller = controller_params(cfg)
     scorer = CharyparNagelScorer(params, subpopulations=by_subpop)
     kwargs = dict(scenario=scenario, mobsim=sim, scorer=scorer,
-                  strategies=manager, params=loop)
+                  strategies=manager, params=loop,
+                  router_factory=network_router_factory(cfg, params, scenario.network.modes))
     return kwargs, u_scenario + u_mobsim + u_scoring + u_replanning + u_controller

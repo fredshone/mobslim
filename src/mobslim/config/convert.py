@@ -114,10 +114,17 @@ def _replanning(cfg: MatsimConfig, unsupported: list) -> tuple[dict, bool]:
     beta = float(cfg.get("scoring", "brainExpBeta", "1.0"))
     tam = cfg.get("timeAllocationMutator", "mutationRange", "1800.0")
     tam_range = float(parse_time(tam)) if ":" in tam else float(tam)
+    around_initial = cfg.get("timeAllocationMutator", "mutateAroundInitialEndTimeOnly",
+                             "false").strip().lower() == "true"
+    latest = cfg.get("timeAllocationMutator", "latestActivityEndTime", "24:00:00")
+    latest_end = float(parse_time(latest)) if ":" in latest else float(latest)
     modes = (cfg.get("changeMode", "modes") or "car,pt").split(",")
     ignore_car = cfg.get("changeMode", "ignoreCarAvailability", "true") != "false"
     if cfg.get("timeAllocationMutator", "mutationAffectsDuration", "true") != "true":
         unsupported.append("timeAllocationMutator.mutationAffectsDuration=false")
+    step = cfg.get("timeAllocationMutator", "mutationRangeStep")
+    if step not in (None, "") and float(step) != 1.0:
+        unsupported.append(f"timeAllocationMutator.mutationRangeStep={step}")
     sets: dict[str, list] = {}
     for ps in (module.findall("parameterset") if module is not None else ()):
         if ps.get("type") != "strategysettings":
@@ -134,6 +141,8 @@ def _replanning(cfg: MatsimConfig, unsupported: list) -> tuple[dict, bool]:
             entry["beta"] = beta
         elif entry["name"] == "time_allocation_mutator":
             entry["mutation_range"] = tam_range
+            entry["around_initial_end_time"] = around_initial
+            entry["latest_end_time"] = latest_end
         elif entry["name"] == "change_trip_mode":
             entry["modes"] = modes
             entry["ignore_car_availability"] = ignore_car
@@ -217,6 +226,8 @@ def matsim_to_mobslim(cfg: MatsimConfig, attribute_names=None) -> tuple[dict, li
     out["travel_time"] = {"bin_size": controller.travel_time_bin_size,
                           "off_peak_bin_size": controller.travel_time_bin_size}
 
+    out["routing"] = {"network_cost": "time_distance",
+                      "randomness": float(cfg.get("routing", "routingRandomness", "3.0"))}
     out["scoring"] = _scoring(cfg, unsupported)
     out["replanning"], respects_car = _replanning(cfg, unsupported)
 

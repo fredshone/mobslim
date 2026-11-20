@@ -27,6 +27,7 @@ from mobslim.planstore import csr_gather
 from mobslim.population import Activity, Leg, Plan, Route, TransitPassengerRoute
 from mobslim.replanning.context import ReplanningContext
 from mobslim.routing.base import route_many_to_links, route_many_to_links_arrays
+from mobslim.routing.disutility import router_factors
 
 
 @runtime_checkable
@@ -202,6 +203,7 @@ def route_plans(plans: Sequence[Plan], ctx: ReplanningContext,
                     [int(v) for v in o_nodes], [a.link for a in origins],
                     [int(v) for v in d_nodes], [a.link for a in dests],
                     [s[3] for s in states],
+                    _factors(router, [s[5] for s in states], ctx.iteration),
                 )
             for s, route in zip(states, routes):
                 elements, i = s[1], s[2]
@@ -213,6 +215,15 @@ def route_plans(plans: Sequence[Plan], ctx: ReplanningContext,
         if changed:
             out[k] = out[k].with_elements(elements)
     return out
+
+
+def _factors(router, persons, iteration: int):
+    """:func:`router_factors` for persons that may be ``None`` (factor 1)."""
+    if all(p is None for p in persons):
+        return None
+    known = np.array([p is not None for p in persons])
+    f = router_factors(router, np.array([p if p is not None else 0 for p in persons]), iteration)
+    return None if f is None else np.where(known, f, 1.0)
 
 
 def _advance(state: list, modes) -> bool:
@@ -245,22 +256,46 @@ def _advance(state: list, modes) -> bool:
 
 
 class TimeAllocationMutator:
-    """Shift each activity's end time (or duration) by ``U(-range, +range)``.
+    """Shift each activity's end time (or, without one, its duration) by
+    ``U(-range, +range)`` (MATSim's ``TimeAllocationMutator``).
 
-    The last activity is untouched. Times are clamped at 0.
+    The last activity is untouched. Times are clamped at 0, and end times
+    at ``latest_end_time`` (MATSim's ``latestActivityEndTime``, 24:00 there;
+    ``inf`` here unless set). With ``around_initial_end_time`` (MATSim's
+    ``mutateAroundInitialEndTimeOnly``), end times are shifted from each
+    person's initial end times (the context's ``initial_end_times``, kept
+    by the controllers), not from the plan's, so mutations do not add up;
+    durations are always shifted from the plan's. A person whose plan has a
+    different number of activities than their initial one, or a context
+    without initial end times, is shifted from the plan's.
     """
 
-    def __init__(self, mutation_range: float = 1800.0):
+    def __init__(self, mutation_range: float = 1800.0, around_initial_end_time: bool = False,
+                 latest_end_time: float = math.inf):
         self.mutation_range = mutation_range
+        self.around_initial_end_time = around_initial_end_time
+        self.latest_end_time = latest_end_time
+
+    def _initial(self, ctx: ReplanningContext):
+        return ctx.initial_end_times if self.around_initial_end_time else None
 
     def mutate(self, plan: Plan, ctx: ReplanningContext, rng: Random) -> Plan:
         r = self.mutation_range
         elements = list(plan.elements)
+        initial = self._initial(ctx)
+        base = None
+        if initial is not None and ctx.person_index is not None:
+            lo, hi = initial.offsets[ctx.person_index], initial.offsets[ctx.person_index + 1]
+            if hi - lo == (len(elements) + 1) // 2:
+                base = initial.end_time[lo:hi]
         for i in range(0, len(elements) - 1, 2):
             act: Activity = elements[i]
             shift = rng.uniform(-r, r)
             if act.end_time is not None:
-                elements[i] = replace(act, end_time=max(0.0, act.end_time + shift))
+                end = act.end_time
+                if base is not None and not math.isnan(base[i // 2]):
+                    end = float(base[i // 2])
+                elements[i] = replace(act, end_time=min(max(0.0, end + shift), self.latest_end_time))
             elif act.duration is not None:
                 elements[i] = replace(act, duration=max(0.0, act.duration + shift))
         return plan.with_elements(elements)
@@ -271,9 +306,22 @@ class TimeAllocationMutator:
         last = np.zeros(batch.n_acts, dtype=bool)
         last[batch.act_offsets[1:] - 1] = True
         end, dur = batch.act_end_time, batch.act_duration
+        initial = self._initial(ctx)
+        if initial is not None:
+            persons = np.asarray(persons, dtype=np.int64)
+            n_acts = np.diff(batch.act_offsets)
+            lo = initial.offsets[persons]
+            same = initial.offsets[persons + 1] - lo == n_acts  # plans shaped as the initial one
+            plan_of = np.repeat(np.arange(len(n_acts)), n_acts)
+            k = np.arange(batch.n_acts) - np.repeat(batch.act_offsets[:-1], n_acts)
+            at = np.where(same[plan_of], lo[plan_of] + k, 0)
+            base = np.where(same[plan_of], initial.end_time[at] if len(initial.end_time) else np.nan,
+                            np.nan)
+            end = np.where(np.isnan(base) | np.isnan(end), end, base)
         has_end = ~last & ~np.isnan(end)
         has_dur = ~last & np.isnan(end) & ~np.isnan(dur)
-        new_end = np.where(has_end, np.maximum(0.0, end + shift), end)
+        new_end = np.where(has_end, np.minimum(np.maximum(0.0, end + shift), self.latest_end_time),
+                           batch.act_end_time)
         new_dur = np.where(has_dur, np.maximum(0.0, dur + shift), dur)
         return replace(batch, act_end_time=new_end, act_duration=new_dur)
 
@@ -479,11 +527,14 @@ def clear_routes_batch(batch: PlanBatch, ctx: ReplanningContext, keep_network: b
     return _set_routes(batch, clear) if clear.any() else batch
 
 
-def route_batch(batch: PlanBatch, ctx: ReplanningContext, persons=None) -> PlanBatch:
+def route_batch(batch: PlanBatch, ctx: ReplanningContext, persons=None,
+                factor_persons=None) -> PlanBatch:
     """Vectorised :func:`route_plans`: route every routed-mode leg without a
     route of the right type and drop teleported legs' routes, for all plans
     of ``batch`` (``persons``: each plan's person index, for per-person
-    transit weights and teleport speeds).
+    transit weights and teleport speeds, and the distance-cost factors of a
+    random travel disutility; ``factor_persons``: the latter's persons, if
+    they differ).
 
     Every plan's clock is walked as :func:`route_plans` walks it (with the
     same arithmetic, so departure times are equal), leg position by leg
@@ -505,6 +556,7 @@ def route_batch(batch: PlanBatch, ctx: ReplanningContext, persons=None) -> PlanB
     tw = ctx.transit_weights
     use_weights = tw is not None and tw.any and persons is not None
     persons = None if persons is None else np.asarray(persons, dtype=np.int64)
+    factor_persons = persons if factor_persons is None else np.asarray(factor_persons, dtype=np.int64)
     xy = batch.resolved_act_xy(net)
     n_legs = np.diff(batch.leg_offsets)
     act_off, leg_off = batch.act_offsets, batch.leg_offsets
@@ -540,9 +592,11 @@ def route_batch(batch: PlanBatch, ctx: ReplanningContext, persons=None) -> PlanB
             if not modes.is_transit_mode(mode):
                 o_nodes, d_nodes = _on_mode_network(modes, mode, batch.act_node[o],
                                                     batch.act_node[dst])
+                factors = (None if factor_persons is None
+                           else router_factors(router, factor_persons[p[ks]], ctx.iteration))
                 arrays = route_many_to_links_arrays(
                     router, net, mode, o_nodes, batch.act_link[o],
-                    d_nodes, batch.act_link[dst], t[ks])
+                    d_nodes, batch.act_link[dst], t[ks], factors)
                 if arrays is not None:
                     net_routes.append((legs[ks], *arrays))
                     t[ks] = t[ks] + arrays[2]
@@ -564,7 +618,9 @@ def route_batch(batch: PlanBatch, ctx: ReplanningContext, persons=None) -> PlanB
                     router, net, mode,
                     np.asarray(o_nodes).tolist(), [None if v < 0 else v for v in links[o].tolist()],
                     np.asarray(d_nodes).tolist(), [None if v < 0 else v for v in links[dst].tolist()],
-                    t[ks].tolist())
+                    t[ks].tolist(),
+                    None if factor_persons is None
+                    else router_factors(router, factor_persons[p[ks]], ctx.iteration))
             for k, route in zip(ks.tolist(), routes):
                 new[int(legs[k])] = route
                 t[k] = t[k] + route.travel_time

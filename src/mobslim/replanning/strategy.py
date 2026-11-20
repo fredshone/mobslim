@@ -182,3 +182,17 @@ class PersonStrategyManager:
 def person_rng(seed: int, iteration: int, person_index: int) -> Random:
     """Deterministic per-person RNG, independent of execution order or process."""
     return Random(f"{seed}:{iteration}:{person_index}")
+
+
+def innovation_modules(strategies):
+    """Every plan innovation module of a :class:`StrategyManager` or
+    :class:`PersonStrategyManager`."""
+    for manager in getattr(strategies, "managers", None) or (strategies,):
+        for _, strategy in getattr(manager, "strategies", ()):
+            yield from getattr(strategy, "modules", ())
+
+
+def mutates_around_initial_end_times(strategies) -> bool:
+    """Whether some module needs each person's initial end times
+    (``TimeAllocationMutator(around_initial_end_time=True)``)."""
+    return any(getattr(m, "around_initial_end_time", False) for m in innovation_modules(strategies))

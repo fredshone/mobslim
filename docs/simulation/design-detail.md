@@ -134,3 +134,26 @@ links of 10.5 s each, leaving at 100 s:
 * **Against MATSim on pt-tutorial** (vehicles in the traffic): on MATSim's
   clock every mobsim's mean link-time error is under 0.02 s, and its
   stop-arrival error 0.76 s. On their own clocks it is 0.8 s and 2 s.
+* **Against MATSim on Open Berlin's initial plans at 1%** (unrouted, so
+  heavily congested; iteration 0): on MATSim's own routes, HermesSim has
+  1,922 agents still travelling at 36:00 and car trips of 103.9 minutes,
+  against 1,944 and 104.1 for MATSim's QSim. Three things had to agree:
+  * **Each person's own vehicle.** Open Berlin's commercial traffic names
+    its vehicle types (`vehicleTypes`: `light8t`, 2 PCE, and so on); mobslim
+    reads them from MATSim configs. Charging every truck the mode's 3.5 PCE
+    gave 2,106 and 110 minutes: at 1% one truck holds a link's flow for
+    minutes. The types' maximum speeds are not simulated.
+  * **MATSim's Hermes is not its QSim here.** It gives 1,548 and 93 minutes.
+    Hermes charges a vehicle entering a link at most the link's storage, but
+    gives back its full size when it leaves: at 1% a car is 100 storage units
+    and a 100 m link stores 13, so short links gain room with every car and
+    soon never spill back.
+  * **Routes.** MATSim's A* bounds its time and distance cost with a
+    distance factor of 1, while most persons' random factors are far below 1
+    (sigma 3: median 0.011), so its bound overestimates and it returns
+    routes up to 15% slower than the least-cost ones (in about 17,600 of
+    51,000 car legs, both slower and longer). mobslim's exact routes use the
+    fast, high-capacity roads more, which at 1% jam: 2,419 agents still
+    travelling, against 1,922 on MATSim's routes. With MATSim's bound
+    (`routing.bound_factor: 1`, off by default) mobslim's routes match
+    MATSim's in free-speed hours, and 2,158 agents are still travelling.

@@ -697,7 +697,7 @@ class MobslimConfig:
             tiers = (SnapTier((LinkFilter(av["attribute"], tuple(av["values"]), av["min_value"]),),
                               av["unless_beyond"]),)
         return ActivityLinkParams(modes=tuple(a["modes"]), tiers=tiers,
-                                  snap_node_activities=a["snap_node_activities"])
+                                  snap_node_activities=a["snap_node_activities"], rule=a["rule"])
 
     def transit_router_factory(self, scenario, params):
         from mobslim.replanning.context import (
@@ -711,14 +711,35 @@ class MobslimConfig:
         mode = scenario.transit.params.passenger_modes[0]
         return TransitRouterFactory.from_scoring(params, mode, **r)
 
+    def router_factory(self, scenario, params):
+        """The network router factory: least travel time, or MATSim's travel
+        disutility of time and distance (``routing.network_cost``)."""
+        from functools import partial
+
+        from mobslim.routing.compiled import default_router
+        from mobslim.routing.disutility import TravelDisutility
+
+        r = self.values["routing"]
+        if r["network_cost"] == "time":
+            return default_router
+        disutility = TravelDisutility.from_scoring(params, sorted(scenario.network.modes),
+                                                   r["randomness"], self.values["run"]["seed"],
+                                                   r["bound_factor"])
+        return partial(default_router, disutility=disutility)
+
     def controller_kwargs(self, scenario=None) -> dict:
         """Keyword arguments for :class:`~mobslim.controller.Controller`
         (``scenario`` defaults to :meth:`build_scenario`)."""
+        from mobslim.config.matsim import with_initial_end_times
+
         if scenario is None:
             scenario = self.build_scenario()
         scorer = self.scorer()
+        strategies = self.strategies(scenario.population.attributes)
+        scenario = with_initial_end_times(scenario, self.values["inputs"]["plans"], strategies)
         return dict(scenario=scenario, mobsim=self.mobsim(), scorer=scorer,
-                    strategies=self.strategies(scenario.population.attributes),
+                    strategies=strategies,
+                    router_factory=self.router_factory(scenario, scorer.params),
                     transit_router_factory=self.transit_router_factory(scenario, scorer.params),
                     params=self.controller_params(), listeners=[OutputConfigWriter(self)])
 
@@ -781,7 +802,9 @@ def _strategy(s: dict):
     if name == "reroute":
         return PlanStrategy(RandomSelector(), [Reroute()])
     if name == "time_allocation_mutator":
-        return PlanStrategy(RandomSelector(), [TimeAllocationMutator(s["mutation_range"]), Reroute()])
+        return PlanStrategy(RandomSelector(), [TimeAllocationMutator(
+            s["mutation_range"], around_initial_end_time=s["around_initial_end_time"],
+            latest_end_time=s["latest_end_time"]), Reroute()])
     if name == "change_trip_mode":
         return PlanStrategy(RandomSelector(), [
             ChangeTripMode(s["modes"], s["ignore_car_availability"],

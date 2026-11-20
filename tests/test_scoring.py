@@ -60,9 +60,39 @@ def test_overnight_wrap_combines_first_and_last():
 
 
 def test_stuck_penalty():
-    plan = ExperiencedPlan((ExperiencedActivity("home", 0, None, None),), stuck=True)
+    plan = ExperiencedPlan((ExperiencedActivity("home", 0, None, 50),), stuck=True)
     s = scorer()
-    assert s.score(plan) == pytest.approx(s.activity_utility("home", 24 * H) - 100)
+    # as MATSim: the activity from midnight to the departure, then the penalty
+    assert s.score(plan) == pytest.approx(s.activity_utility("home", 50) - 100)
+
+
+def test_left_last_activity_is_performed_and_first_has_no_evening_as_in_matsim():
+    """Stuck on the way home: no activity is open at the end of the day, so
+    (as MATSim) work is scored as performed and home only until departure."""
+    out = ExperiencedLeg("car", 8 * H, 9 * H, 1000.0, ())
+    back = ExperiencedLeg("car", 17 * H, None, 0.0, ())
+    plan = ExperiencedPlan((ExperiencedActivity("home", 0, None, 8 * H), out,
+                            ExperiencedActivity("work", 1, 9 * H, 17 * H), back), stuck=True)
+    s = scorer()
+    expected = (s.activity_score("home", 0, 8 * H) + s.activity_score("work", 9 * H, 17 * H)
+                + s.leg_utility(out) + s.leg_utility(back) - 100)
+    assert s.score(plan) == pytest.approx(expected)
+
+
+def test_staying_home_all_day_scores_zero_as_in_matsim():
+    """MATSim gives a person without activity events (one activity, never
+    left) no score; mobslim scores them 0, per plan and vectorised."""
+    from mobslim import Plan, Population
+
+    plan = ExperiencedPlan((ExperiencedActivity("home", 0, None, None),))
+    assert scorer().score(plan) == 0.0
+    net = chain_network([100, 100], freespeed=10)
+    pop = Population.from_plans({0: Plan.builder().act("home", 0, end_time=50).leg("car")
+                                 .act("work", 2).build(),
+                                 1: Plan.builder().act("home", 0).build()})
+    tr = QSim(QSimParams()).run(routed(Scenario(net, pop)), EventsManager())
+    scores = scorer().score_trajectories(tr)
+    assert scores[1] == 0.0 and scores[0] != 0.0
 
 
 def test_unknown_activity_type_without_default_raises():

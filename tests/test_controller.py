@@ -111,3 +111,36 @@ def test_apply_scores_learning_rate(equil_scenario):
     assert once[0].selected_score == 10.0
     assert twice[0].selected_score == 15.0
     assert pop[0].selected_score is None  # pure
+
+
+@pytest.mark.parametrize("loop", ["controller", "weave"])
+def test_time_mutation_around_initial_end_times_does_not_drift(equil_scenario, loop):
+    """MATSim's mutateAroundInitialEndTimeOnly: however often a plan is
+    mutated, its end times stay within the range of the initial ones (also
+    in strands in worker processes); without it they drift."""
+    from mobslim import PlanStrategy
+    from mobslim.replanning import (
+        ChangeExpBetaSelector,
+        RandomSelector,
+        Reroute,
+        TimeAllocationMutator,
+    )
+    from mobslim.weave import ProcessLoom, Weave
+
+    initial = {p.id: p.selected_plan.activities[0].end_time for p in equil_scenario.population}
+
+    def spread(around):
+        tam = TimeAllocationMutator(600, around_initial_end_time=around)
+        strategies = StrategyManager([(0.5, PlanStrategy(ChangeExpBetaSelector())),
+                                      (0.5, PlanStrategy(RandomSelector(), [tam, Reroute()]))])
+        params = ControllerParams(iterations=10, seed=2)
+        if loop == "controller":
+            run = Controller(equil_scenario, strategies=strategies, params=params)
+        else:
+            run = Weave(equil_scenario, strands=2, innovation_rate=0.5, strategies=strategies,
+                        loom=ProcessLoom(1, start_method="fork"), params=params)
+        pop = run.run().scenario.population
+        return max(abs(plan.activities[0].end_time - initial[p.id]) for p in pop for plan in p.plans)
+
+    assert spread(True) <= 600
+    assert spread(False) > 600

@@ -202,6 +202,36 @@ def test_backends_match_brute_force_with_tiers(backend):
     np.testing.assert_array_equal(snapper.snap(xy), _brute_force(net, xy, params))
 
 
+def _matsim_nearest_link(net, xy, mask):
+    """MATSim's NetworkUtils.getNearestLink, by brute force: the nearest node
+    with a ``mask`` link, then its in- or out-link with the nearest segment
+    (ties: the smallest link id as a string)."""
+    nodes = np.unique(np.r_[net.from_node[mask], net.to_node[mask]])
+    out = []
+    for x, y in xy:
+        n = nodes[np.argmin(np.hypot(*(net.node_xy[nodes] - (x, y)).T))]
+        cand = [k for k in np.flatnonzero(mask) if n in (net.from_node[k], net.to_node[k])]
+        a, b = net.node_xy[net.from_node[cand]], net.node_xy[net.to_node[cand]]
+        ab = b - a
+        t = np.clip(((np.array([x, y]) - a) * ab).sum(axis=1) / (ab * ab).sum(axis=1), 0, 1)
+        d = np.hypot(*(a + t[:, None] * ab - (x, y)).T)
+        out.append(min(zip(d, [str(net.link_ids.id(int(k))) for k in cand], cand))[2])
+    return np.array(out)
+
+
+@pytest.mark.parametrize("backend", ["quadtree", pytest.param("rust", marks=needs_rust)])
+def test_nearest_node_rule_is_matsims(backend):
+    net = grid_network(12, spacing=100.0)  # two-way links: the two directions always tie
+    xy = np.random.default_rng(5).uniform(-200, 1400, (400, 2))
+    params = ActivityLinkParams(rule="nearest_node")
+    got = LinkSnapper(net, params, backend=backend).snap(xy)
+    np.testing.assert_array_equal(got, _matsim_nearest_link(net, xy, params.eligible(net)))
+    # it differs from the nearest midpoint
+    assert (got != LinkSnapper(net, backend=backend).snap(xy)).any()
+    with pytest.raises(ValueError, match="rule"):
+        ActivityLinkParams(rule="nearest")
+
+
 def test_snap_rejects_non_finite_points():
     with pytest.raises(ValueError, match="finite"):
         link_snapper(grid_network(2)).snap([[np.nan, 0.0]])
@@ -282,9 +312,11 @@ def test_config_activity_links(tmp_path):
                     "unless_beyond: 500}\n")
     params = MobslimConfig.load(path).controller_params().activity_links
     assert params == ActivityLinkParams(
-        tiers=(SnapTier((LinkFilter("osm:way:highway", ("motorway", "trunk")),), 500.0),))
+        tiers=(SnapTier((LinkFilter("osm:way:highway", ("motorway", "trunk")),), 500.0),),
+        rule="nearest_node")
     path.write_text("inputs: {network: n.xml, plans: p.xml}\n")
-    assert MobslimConfig.load(path).controller_params().activity_links == ActivityLinkParams()
+    assert (MobslimConfig.load(path).controller_params().activity_links
+            == ActivityLinkParams(rule="nearest_node"))  # MATSim's, as config defaults are
     path.write_text("inputs: {network: n.xml, plans: p.xml}\n"
                     "activity_links: {avoid: {attribute: type}}\n")
     with pytest.raises(ValueError, match="needs values or min_value"):

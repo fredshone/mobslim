@@ -23,9 +23,9 @@ ROOT = Path(__file__).resolve().parents[2]
 GEN = ROOT / "docs" / "_generated"
 STATIC = ROOT / "docs" / "_static" / "showcase"
 SMOOTH = 5  # iterations in the rolling mean
-CADENCE = 10.0  # s of wall-clock time in the mobsim-runs panel
-SHOWN = 60.0  # s of wall-clock time in the utility panel and the table (of TIME_LIMIT)
-TABLE_STEP = 15.0  # s between the table's utility columns
+CADENCE = 120.0  # s of wall-clock time in the mobsim-runs panel
+SHOWN = 1200.0  # s of wall-clock time in the utility panel and the table (of TIME_LIMIT)
+TABLE_STEP = 300.0  # s between the table's utility columns
 
 # categorical slots 1-8 of the reference palette, fixed order, per mode: the
 # Controller first, then one per strand count, the same in every chart
@@ -214,7 +214,7 @@ def chart(results: dict, experiment: str, mode: str, path: Path) -> None:
         xs, ys = _series(run)
         ys = _rolling(ys)
         ax.plot(xs, ys, color=color, ls=ls, lw=2, label=name, solid_capstyle="round")
-        shown.append(ys[xs <= end])
+        shown.append((slug, ys[xs <= end]))
     ax.set_xlabel("wall-clock time (s)", color=th["muted"])
     ax.set_ylabel(f"utility performed\n({SMOOTH}-iteration mean)", color=th["muted"])
     ax.grid(axis="y", color=th["grid"], lw=0.8)
@@ -226,8 +226,18 @@ def chart(results: dict, experiment: str, mode: str, path: Path) -> None:
         a.tick_params(colors=th["muted"], length=0)
         a.set_facecolor("none")
     ax.set_xlim(0, end)
-    lo, hi = float(min(y.min() for y in shown)), float(max(y.max() for y in shown))
+    # fitted to MobSlim's runs: the reference, when far off them (MATSim
+    # scores Open Berlin lower), is noted instead
+    ours = [y for slug, y in shown if slug != REFERENCE]
+    lo, hi = float(min(y.min() for y in ours)), float(max(y.max() for y in ours))
     ax.set_ylim(lo - 0.05 * (hi - lo), hi + 0.05 * (hi - lo))
+    ref = next((y for slug, y in shown if slug == REFERENCE and len(y)), None)
+    if ref is not None and (ref.max() < lo or ref.min() > hi):
+        side = "below" if ref.max() < lo else "above"
+        ax.text(0.01, 0.02 if side == "below" else 0.98,
+                f"MATSim Hermes: {ref.min():.1f} to {ref.max():.1f}, {side} the chart",
+                transform=ax.transAxes, va="bottom" if side == "below" else "top",
+                color=th["muted"], fontsize=8)
     leg = ax.legend(loc="lower right", frameon=False, labelcolor=th["text"], fontsize=8.5)
     for h in leg.legend_handles:
         h.set_linewidth(2)

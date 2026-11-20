@@ -21,14 +21,21 @@ files are described in the
   weaving: several simulations per iteration, so more people innovate.
   * [Overview](optimisation/overview.md): the `Controller` and `Weave` loops.
   * [Examples](optimisation/examples.md): both, from Python and from a config.
-  * [Performance](optimisation/performance.md): weaving on a congested grid, in wall-clock time.
+  * [Performance](optimisation/performance.md): weaving on Open Berlin at 1%, in wall-clock time.
   * [Details](optimisation/details.md): what to know when using weaving.
+
+* **[Scoring](scoring/index.md)**: what an agent's day is worth.
+  * [Correctness](scoring/correctness.md): MobSlim's scores against MATSim's,
+    on the same days.
+  * [Configuration](scoring/configuration.md): in a MATSim config, a MobSlim
+    config, or Python.
 
 ```{toctree}
 :maxdepth: 2
 
 simulation/index
 optimisation/index
+scoring/index
 developer
 design
 api

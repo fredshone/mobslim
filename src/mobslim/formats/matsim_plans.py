@@ -177,6 +177,47 @@ def is_stage_activity(act_type: str) -> bool:
     return act_type.endswith(" interaction")
 
 
+def read_initial_end_times(path, population: Population):
+    """MATSim's ``initialEndTime`` activity attributes (written by its
+    ``TimeAllocationMutator`` with ``mutateAroundInitialEndTimeOnly``) of
+    each person's selected plan in ``path``, as a
+    :class:`~mobslim.replanning.context.InitialEndTimes` for ``population``
+    (read from the same file): the attribute where an activity has one, else
+    the activity's end time in ``population``, as MATSim takes it. ``None``
+    if no activity has one. Stage activities are skipped, as in mobslim's
+    plans; a person whose activities do not line up keeps their own."""
+    from mobslim.replanning.context import InitialEndTimes
+
+    base = InitialEndTimes.of(population)
+    end_time = base.end_time.copy()
+    found = False
+    with _open_xml(path) as f:
+        for _, el in ET.iterparse(f, events=("end",)):
+            if el.tag != "person":
+                continue
+            plan = next((p for p in el.findall("plan") if p.get("selected") == "yes"),
+                        el.find("plan"))
+            values = []
+            for act in (plan.findall("activity") if plan is not None else ()):
+                if is_stage_activity(act.get("type", "")):
+                    continue
+                attrs = act.find("attributes")
+                v = attrs.find("attribute[@name='initialEndTime']") if attrs is not None else None
+                values.append(float(v.text) if v is not None and v.text else math.nan)
+            try:
+                i = population.ids.index(el.get("id"))
+            except (KeyError, ValueError):
+                el.clear()
+                continue
+            lo, hi = int(base.offsets[i]), int(base.offsets[i + 1])
+            given = np.array(values, dtype=float)
+            if hi - lo == len(given) and (~np.isnan(given)).any():
+                end_time[lo:hi] = np.where(np.isnan(given), end_time[lo:hi], given)
+                found = True
+            el.clear()
+    return InitialEndTimes(base.offsets, end_time) if found else None
+
+
 # walk modes MATSim uses for the access, egress and transfer legs of a trip
 _TRIP_WALKS = ("walk", "non_network_walk", "transit_walk", "access_walk", "egress_walk")
 

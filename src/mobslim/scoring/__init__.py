@@ -15,6 +15,9 @@ scoring function:
 * Overnight wrap: if the first and last activity have the same type, they
   are scored as one activity from ``last.start`` to ``first.end + day``;
   otherwise from ``0`` to ``first.end`` and from ``last.start`` to ``day``.
+  A lone activity (the person left it and never arrived anywhere) is scored
+  from ``0`` to its end; one that never ended (the person stayed home all
+  day) scores 0, as in MATSim, where such a person has no activity events.
 * Legs earn ``constant + marginal_utility_of_traveling * hours +
   (marginal_utility_of_distance + monetary_distance_rate *
   marginal_utility_of_money) * meters`` per mode, plus each used mode's

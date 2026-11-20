@@ -35,7 +35,7 @@ scorer's ``transit_weights`` is used if it has one
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Iterable, Optional, Sequence, Union
 
@@ -53,13 +53,17 @@ from mobslim.metrics import iteration_metrics
 from mobslim.mobsim.base import Mobsim, run_mobsim
 from mobslim.mobsim.qsim import QSim
 from mobslim.replanning.context import (
+    InitialEndTimes,
     ReplanningContext,
     TransitRouterFactory,
     default_transit_router,
 )
 from mobslim.replanning.prepare import route_scenario
 from mobslim.replanning.runners import ReplanningRunner
-from mobslim.replanning.strategy import StrategyManager
+from mobslim.replanning.strategy import (
+    StrategyManager,
+    mutates_around_initial_end_times,
+)
 from mobslim.replanning.vectorised import VectorRunner
 from mobslim.routing.base import RouterFactory
 from mobslim.routing.compiled import default_router
@@ -303,10 +307,15 @@ class Controller:
 
     def prepare(self, scenario: Scenario) -> Scenario:
         """Validate modes, assign activities to links (``params.activity_links``)
-        and route any un-routed network (free speed) and pt legs."""
-        return route_scenario(scenario, self.free_speed_travel_time(), self.router_factory,
-                              self.transit_router_factory, self.person_transit_weights(scenario),
-                              self.params.activity_links)
+        and route any un-routed network (free speed) and pt legs. Keeps each
+        person's initial end times if a strategy mutates around them
+        (``TimeAllocationMutator(around_initial_end_time=True)``)."""
+        scenario = route_scenario(scenario, self.free_speed_travel_time(), self.router_factory,
+                                  self.transit_router_factory, self.person_transit_weights(scenario),
+                                  self.params.activity_links)
+        if scenario.initial_end_times is None and mutates_around_initial_end_times(self.strategies):
+            scenario = replace(scenario, initial_end_times=InitialEndTimes.of(scenario.population))
+        return scenario
 
     def run(self) -> RunResult:
         """Run every iteration and return the final scenario, the last

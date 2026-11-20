@@ -39,6 +39,11 @@ class Scenario:
     simulated_modes: Optional[frozenset] = None
     # network mode -> passenger car equivalents of its vehicles (default 1)
     mode_pce: Mapping[str, float] = field(default_factory=dict)
+    # network mode -> PCE of each person's own vehicle, per person index (NaN: the mode's)
+    person_pce: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    # each person's initial activity end times (a replanning.context.InitialEndTimes),
+    # set by the controllers when a strategy mutates around them; None: not kept
+    initial_end_times: Optional[Any] = field(default=None, repr=False)
 
     @cached_property
     def modes(self) -> Modes:

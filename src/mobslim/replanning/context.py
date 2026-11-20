@@ -22,11 +22,31 @@ person's pt legs with them.
 from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
+import numpy as np
+
 from mobslim.attributes import PersonAttributes
 from mobslim.modes import Modes
 from mobslim.network import Network
 from mobslim.routing.base import Router, RouterFactory, TravelTime
 from mobslim.routing.compiled import default_router
+
+
+@dataclass(frozen=True)
+class InitialEndTimes:
+    """Each person's activity end times in their initial plan (NaN: none),
+    in person order: ``end_time[offsets[i]:offsets[i + 1]]`` for person
+    ``i``. What MATSim's ``initialEndTime`` activity attribute holds, for
+    ``TimeAllocationMutator(around_initial_end_time=True)``."""
+
+    offsets: Any  # int64 (n_persons + 1,)
+    end_time: Any  # float64 (n_acts,)
+
+    @classmethod
+    def of(cls, population) -> "InitialEndTimes":
+        """From each person's selected plan."""
+        batch = population.selected_batch()
+        return cls(np.asarray(batch.act_offsets, dtype=np.int64).copy(),
+                   np.asarray(batch.act_end_time, dtype=float).copy())
 
 
 @dataclass(frozen=True)
@@ -86,6 +106,8 @@ class ReplanningContext:
     person_index: Optional[int] = None
     # per-person transit weights (PersonRaptorWeights); None: the router's own
     transit_weights: Optional[object] = field(default=None, repr=False)
+    # each person's initial end times (Scenario.initial_end_times); None: not kept
+    initial_end_times: Optional[InitialEndTimes] = field(default=None, repr=False)
     _routers: dict = field(default_factory=dict, repr=False)
 
     def __getstate__(self):
@@ -103,7 +125,8 @@ class ReplanningContext:
                       transit_router_factory=default_transit_router,
                       transit_weights=None) -> "ReplanningContext":
         return cls(scenario.modes, travel_time, iteration, router_factory, transit_router_factory,
-                   attributes=scenario.population.attributes, transit_weights=transit_weights)
+                   attributes=scenario.population.attributes, transit_weights=transit_weights,
+                   initial_end_times=scenario.initial_end_times)
 
     def for_person(self, index: int) -> "ReplanningContext":
         """This context bound to the person with person index ``index``

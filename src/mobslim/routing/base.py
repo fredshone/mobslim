@@ -18,7 +18,7 @@ its activity's link (``Activity.link``), as MATSim's routes do, with any
 router: it routes to the link's from-node and appends the link.
 """
 
-from typing import Protocol, Sequence, runtime_checkable
+from typing import Optional, Protocol, Sequence, runtime_checkable
 
 import numpy as np
 
@@ -60,9 +60,17 @@ def route_many(
     origins: Sequence[int],
     destinations: Sequence[int],
     departure_times: Sequence[float],
+    factors: Optional[Sequence[float]] = None,
 ) -> list[Route]:
-    """Route a batch of queries with ``router.route_many`` if it has one."""
+    """Route a batch of queries with ``router.route_many`` if it has one.
+    ``factors``: each query's distance-cost factor, for routers with a
+    random distance cost (:mod:`mobslim.routing.disutility`); ``None``: none."""
     many = getattr(router, "route_many", None)
+    if factors is not None:
+        if many is not None:
+            return many(origins, destinations, departure_times, factors)
+        return [router.route(o, d, t, f)
+                for o, d, t, f in zip(origins, destinations, departure_times, factors)]
     if many is not None:
         return many(origins, destinations, departure_times)
     return [router.route(o, d, t) for o, d, t in zip(origins, destinations, departure_times)]
@@ -97,6 +105,7 @@ def route_many_to_links(
     destinations: Sequence[int],
     destination_links: Sequence,
     departure_times: Sequence[float],
+    factors: Optional[Sequence[float]] = None,
 ) -> list[Route]:
     """Like :func:`route_many`, but a leg whose destination activity is on a
     link (``destination_links[q]`` not ``None``) ends on that link, as in
@@ -111,7 +120,7 @@ def route_many_to_links(
     arrivals = [arrival_link(network, mode, o, ol, d, dl)
                 for o, ol, d, dl in zip(origins, origin_links, destinations, destination_links)]
     targets = [d if a is None else int(from_node[a]) for d, a in zip(destinations, arrivals)]
-    routes = route_many(router, origins, targets, departure_times)
+    routes = route_many(router, origins, targets, departure_times, factors)
     if not any(a is not None for a in arrivals):
         return routes
     fstt, length = network.free_speed_travel_times(), network.length
@@ -128,7 +137,8 @@ def route_many_to_links(
 
 def route_many_to_links_arrays(router, network: Network, mode: str, origins: np.ndarray,
                                origin_links: np.ndarray, destinations: np.ndarray,
-                               destination_links: np.ndarray, departure_times: np.ndarray):
+                               destination_links: np.ndarray, departure_times: np.ndarray,
+                               factors: Optional[np.ndarray] = None):
     """:func:`route_many_to_links` as arrays, for routers with
     ``route_many_arrays`` (else ``None``). Activity links are ``-1`` where
     there is none. Returns ``(lengths, links, travel_time, distance)``:
@@ -144,7 +154,8 @@ def route_many_to_links_arrays(router, network: Network, mode: str, origins: np.
     arrival = dl[has]
     targets = d.copy()
     targets[has] = network.from_node[arrival]
-    offsets, links, tt, dist = many(o, targets, departure_times)
+    offsets, links, tt, dist = (many(o, targets, departure_times) if factors is None
+                                else many(o, targets, departure_times, factors))
     lengths = np.diff(offsets)
     if len(arrival):
         links = np.insert(links, offsets[1:][has], arrival.astype(_I32))

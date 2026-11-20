@@ -6,7 +6,7 @@ iteration so more of the population innovates each iteration.
 
 * **[Overview](overview.md)**: the `Controller` loop and the `Weave` loop.
 * **[Examples](examples.md)**: both, from Python and from a config.
-* **[Performance](performance.md)**: weaving on a congested grid, against wall-clock time.
+* **[Performance](performance.md)**: weaving on Open Berlin at 1%, against wall-clock time.
 * **[Details](details.md)**: what to know when using weaving.
 
 ```{toctree}

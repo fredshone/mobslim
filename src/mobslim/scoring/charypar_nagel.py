@@ -98,19 +98,26 @@ def _check_known(rows: np.ndarray, codes: np.ndarray, act_types: Sequence[str]) 
 
 def _activity_intervals(acts: Sequence[ExperiencedActivity], day: float):
     """``(type, arrival, departure)`` of each scored activity, as MATSim:
-    middle activities as performed; first and last wrapped overnight into
-    one ``[last.start, first.end + day]`` if their types match, else
-    ``[0, first.end]`` and ``[last.start, day]``. A lone activity lasts the day."""
+    activities with an arrival and a departure as performed; the first and
+    the last, if the person is still there at the end of the day, wrapped
+    overnight into one ``[last.start, first.end + day]`` if their types
+    match, else ``[0, first.end]`` and ``[last.start, day]``. A person who
+    left their last activity and never arrived at the next (stuck, or still
+    travelling) has no last activity: the first is ``[0, first.end]``. A
+    person who never left their first activity (stayed there all day) is
+    not scored, as MATSim scores a person without activity events 0."""
     if not acts:
         return
-    if len(acts) == 1:
-        yield acts[0].type, 0.0, day
-        return
     first, last = acts[0], acts[-1]
-    for a in acts[1:-1]:
+    if first.end is None and len(acts) == 1:
+        return
+    for a in acts[1:]:
         if a.start is not None and a.end is not None:
             yield a.type, a.start, a.end
     first_end = first.end if first.end is not None else day
+    if len(acts) == 1 or last.end is not None:  # no activity open at the end of the day
+        yield first.type, 0.0, first_end
+        return
     last_start = last.start if last.start is not None else day
     if first.type == last.type:
         yield first.type, last_start, first_end + day
@@ -444,10 +451,19 @@ class CharyparNagelScorer:
         day = np.broadcast_to(pp.scalar("day_length", slice(None)), (n,))
 
         idx = np.arange(b.n_acts)
-        mid = np.flatnonzero(reached & (idx > first[act_plan]) & (idx < last[act_plan])
+        # every activity after the first with an arrival and a departure, as
+        # performed (the last, too, if the person left it: see _activity_intervals)
+        mid = np.flatnonzero(reached & (idx > first[act_plan])
                              & ~np.isnan(tr.act_start) & ~np.isnan(tr.act_end))
-        single = np.flatnonzero(n_reached == 1)
-        multi = np.flatnonzero(n_reached > 1)
+        # the first alone, [0, end]: a person with no activity open at the end
+        # of the day (left the last one reached); one who never left the first
+        # (stayed all day) is not scored, as in MATSim
+        ended = np.zeros(n, dtype=bool)
+        ended[has_acts] = ~np.isnan(tr.act_end[first[has_acts]])
+        open_last = np.zeros(n, dtype=bool)
+        open_last[has_acts] = np.isnan(tr.act_end[last[has_acts]])
+        single = np.flatnonzero(ended & ((n_reached == 1) | ~open_last))
+        multi = np.flatnonzero((n_reached > 1) & open_last)
         f, la = first[multi], last[multi]
         first_end = tr.act_end[f]
         first_end = np.where(np.isnan(first_end), day[multi], first_end)
@@ -463,7 +479,7 @@ class CharyparNagelScorer:
                                 types[la[diff]]])
         arrival = np.concatenate([tr.act_start[mid], np.zeros(k_single), last_start[same],
                                   np.zeros(k_split), last_start[diff]])
-        departure = np.concatenate([tr.act_end[mid], day[single], first_end[same] + day[wrap],
+        departure = np.concatenate([tr.act_end[mid], tr.act_end[first[single]], first_end[same] + day[wrap],
                                     first_end[diff], day[split]])
 
         rows = self._act_table(pp, b.act_types)[pp.set_index[owner], codes]

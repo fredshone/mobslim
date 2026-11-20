@@ -33,6 +33,7 @@ from mobslim.routing import (
     route_many,
     rust_router_available,
 )
+from mobslim.routing.disutility import TravelDisutility
 from tests.conftest import routed
 
 needs_rust = pytest.mark.skipif(not rust_router_available(),
@@ -400,3 +401,117 @@ def test_route_scenario_with_either_router(equil_scenario, router):
     expected = route_scenario(equil_scenario, router_factory=DijkstraRouter)
     got = route_scenario(equil_scenario, router_factory=FACTORIES[router])
     assert list(got.population) == list(expected.population)
+
+
+# ------------------------------------------- time and distance (MATSim's disutility)
+
+COST = TravelDisutility({"car": 6.0 / 3600}, {"car": 0.004})
+
+
+def _factors(n, seed=3):
+    """Distance factors with repeats (queries that may share a search)."""
+    return np.random.default_rng(seed).choice([0.05, 1.0, 1.0, 7.0], size=n)
+
+
+@needs_rust
+@pytest.mark.parametrize("static", [True, False])
+@pytest.mark.parametrize("threads", [1, 4])
+def test_rust_matches_python_with_a_distance_cost(static, threads):
+    net = irregular_grid()
+    table = TravelTimeTable.free_speed(net) if static else congested(net)
+    qs = queries(net)
+    o, d, t = zip(*qs)
+    f = _factors(len(qs))
+    py = DijkstraRouter(net, "car", table, disutility=COST)
+    expected = [py.route(*q, factor=x) for q, x in zip(qs, f)]
+    assert py.route_many(o, d, t, f) == expected
+    rust = RustRouter(net, "car", table, algorithm="dijkstra", threads=threads, disutility=COST)
+    assert rust.route_many(o, d, t, f) == expected
+    assert [rust.route(*q, factor=x) for q, x in zip(qs, f)] == expected
+
+
+@needs_rust
+@pytest.mark.parametrize("static", [True, False])
+def test_alt_finds_the_same_least_costs_with_a_distance_cost(static):
+    net = irregular_grid(15)
+    table = TravelTimeTable.free_speed(net) if static else congested(net, factor=1.5)
+    qs = queries(net, shared=False)
+    f = _factors(len(qs))
+    (a, b) = COST.costs("car")
+    dijkstra = DijkstraRouter(net, "car", table, disutility=COST)
+    alt = RustRouter(net, "car", table, algorithm="alt", landmarks=8, disutility=COST)
+    for q, x, r in zip(qs, f, alt.route_many(*zip(*qs), f)):
+        best = dijkstra.route(*q, factor=x)
+        assert a * r.travel_time + b * x * r.distance == pytest.approx(
+            a * best.travel_time + b * x * best.distance, rel=1e-9, abs=1e-9)
+
+
+@needs_rust
+def test_matsims_bound_factor_gives_dearer_routes_only_when_it_overestimates():
+    net = irregular_grid(15)
+    table = congested(net, factor=1.5)
+    qs = queries(net, shared=False)
+    o, d, t = zip(*qs)
+    (a, b) = COST.costs("car")
+    matsim = dataclasses.replace(COST, bound_factor=1.0)
+
+    def costs(disutility, f, algorithm="alt"):
+        r = RustRouter(net, "car", table, algorithm=algorithm, landmarks=8, disutility=disutility)
+        return np.array([a * x.travel_time + b * y * x.distance
+                         for x, y in zip(r.route_many(o, d, t, f), f)])
+
+    low = np.full(len(qs), 0.05)  # below 1: the bound overestimates
+    exact = costs(COST, low)
+    assert np.all(costs(matsim, low) >= exact - 1e-9)
+    assert np.any(costs(matsim, low) > exact + 1e-6)
+    high = np.full(len(qs), 7.0)  # above 1: still a lower bound, still least-cost
+    assert costs(matsim, high) == pytest.approx(costs(COST, high), rel=1e-9, abs=1e-9)
+    # Dijkstra has no bound: unaffected
+    assert costs(matsim, low, "dijkstra") == pytest.approx(exact, rel=1e-9, abs=1e-9)
+
+
+@pytest.mark.parametrize("router", ROUTERS)
+def test_a_distance_cost_takes_shorter_slower_routes(router):
+    net = irregular_grid(15)
+    qs = queries(net, shared=False)
+    by_time = FACTORIES[router](net, "car", TravelTimeTable.free_speed(net)).route_many(*zip(*qs))
+    by_cost = FACTORIES[router](net, "car", TravelTimeTable.free_speed(net),
+                                disutility=COST).route_many(*zip(*qs))
+    assert sum(r.distance for r in by_cost) < sum(r.distance for r in by_time)
+    assert sum(r.travel_time for r in by_cost) > sum(r.travel_time for r in by_time)
+
+
+def test_travel_disutility_from_scoring_and_its_factors():
+    from mobslim import ModeParams, ScoringParams
+
+    params = ScoringParams(performing=6.0, marginal_utility_of_money=2.0,
+                           modes={"car": ModeParams(marginal_utility_of_traveling=-1.0,
+                                                    monetary_distance_rate=-2e-4)})
+    d = TravelDisutility.from_scoring(params, ["car", "walk"], randomness=3.0, seed=5)
+    assert d.costs("car") == pytest.approx((7.0 / 3600, 4e-4))
+    assert d.costs("bike") == (1.0, 0.0)  # not listed: travel time
+    f = d.factors(np.arange(200_000), 1)
+    # lognormal, normalised to mean 1 as MATSim does: log f ~ N(-sigma^2 / 2, sigma)
+    assert np.log(f).mean() == pytest.approx(-4.5, abs=0.03)
+    assert np.log(f).std() == pytest.approx(3.0, abs=0.03)
+    np.testing.assert_array_equal(f[:10], d.factors(np.arange(10), 1))  # per person, deterministic
+    assert not np.array_equal(f[:10], d.factors(np.arange(10), 2))  # redrawn each iteration
+    assert dataclasses.replace(d, randomness=0.0).factors(np.arange(10), 1) is None
+
+
+@pytest.mark.parametrize("router", ROUTERS)
+def test_batch_routing_draws_each_persons_factor_as_routing_plan_by_plan(equil_ctx, router):
+    from mobslim import PlanBatch
+    from mobslim.replanning.modules import route_batch
+    from tests.test_planstore import batches_equal
+
+    scenario, table = equil_ctx
+    cost = TravelDisutility({"car": 6.0 / 3600}, {"car": 1e-3}, randomness=2.0, seed=1)
+    ctx = ReplanningContext.from_scenario(scenario, table, 3,
+                                          partial(FACTORIES[router], disutility=cost))
+    plans = [Reroute().mutate(p, ctx.batched(), None)
+             for p in scenario.population.selected_plans()]
+    persons = np.arange(len(plans))
+    batched = route_batch(PlanBatch.from_plans(plans), ctx, persons)
+    assert batches_equal(batched, PlanBatch.from_plans(route_plans(plans, ctx,
+                                                                   persons=list(persons))))
