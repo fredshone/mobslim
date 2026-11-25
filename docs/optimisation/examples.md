@@ -83,6 +83,11 @@ plans pruned meanwhile, which are dropped. Each merge pools the last
 `strands` strands' travel times, so `travel_time_smoothing` applies per
 merge rather than per iteration.
 
+Each strand draws its innovators from everyone, taking those already
+innovating in another strand in flight last. As in `Weave`, coverage is
+`strands × innovation_rate` and may exceed 1, so a person can be innovating
+in several strands at once.
+
 ## Tune who innovates, and when
 
 ```python

@@ -81,13 +81,19 @@ def test_allocation_counts_and_balance(k, rate):
     assert counts.sum() == int(np.floor(coverage)) * 200 + round((coverage % 1) * 200)
 
 
-def test_allocation_skips_persons_in_flight():
+def test_allocation_takes_persons_in_flight_last():
     ledger = _ledger(50)
-    ledger.in_flight[:10] = True
-    cohorts = WeightedStalenessScheduler().allocate(ledger, 2, 1.0, 1, np.random.default_rng(0))
-    everyone = np.concatenate(cohorts)
-    assert not np.isin(np.arange(10), everyone).any()
-    assert np.bincount(everyone, minlength=50)[10:].tolist() == [2] * 40
+    ledger.in_flight[:10] = 1
+    ledger.in_flight[:5] = 2
+    rng = np.random.default_rng(0)
+    (cohort,) = WeightedStalenessScheduler().allocate(ledger, 1, 0.5, 1, rng)
+    assert len(cohort) == 25 and cohort.min() >= 10  # none in flight while others remain
+    (cohort,) = WeightedStalenessScheduler().allocate(ledger, 1, 0.9, 1, rng)
+    assert set(range(5, 50)) == set(cohort.tolist())  # 45: then the fewest strands in flight
+    # whole copies go to everyone, in flight or not
+    counts = np.bincount(np.concatenate(
+        WeightedStalenessScheduler().allocate(ledger, 2, 1.0, 1, rng)), minlength=50)
+    assert counts.tolist() == [2] * 50
 
 
 def test_staleness_priority_leaves_nobody_out():
@@ -417,6 +423,16 @@ def test_async_weave_is_deterministic_and_covers(equil_scenario):
     assert [len(s) for s in a.strand_metrics] == [1, 3, 3, 3, 3]
     assert a.metrics[-1]["score_executed"] > a.metrics[0]["score_executed"]
     assert all(len(p.plans) <= 5 for p in a.scenario.population)
+
+
+def test_async_weave_covers_more_than_everyone(equil_scenario):
+    # strands * rate > 1: every slot still gets its share (no slot left without innovators)
+    w = AsyncWeave(equil_scenario, strands=4, innovation_rate=0.5, loom=SerialLoom(),
+                   params=ControllerParams(iterations=4, seed=3))
+    result = w.run()
+    n = len(equil_scenario.population)
+    assert [m["coverage"] for m in result.metrics[1:]] == pytest.approx([2.0] * 3)
+    assert all(m["innovators"] == round(0.5 * n) for ms in result.strand_metrics[1:] for m in ms)
 
 
 def test_async_process_loom_matches_serial(equil_scenario):

@@ -158,7 +158,7 @@ class AsyncWeave(Weave):
                     dropped += len(result.observations) - len(obs)
                     merged = merge(ledger, obs, self.reducer, max_plans, removal,
                                    weave_rng(cfg.seed, it, "prune", j), selected_strand=j)
-                    ledger.in_flight[slot.cohort] = False
+                    ledger.in_flight[slot.cohort] -= 1
                     innovations += len(slot.cohort)
                     slots[j] = None
                     if merged.live is not None:  # compacted: renumber the strands in flight
@@ -225,14 +225,13 @@ class AsyncWeave(Weave):
         seed = self.params.seed
         rctx = ReplanningContext.from_scenario(scenario, travel_time, it, self.router_factory,
                                                self.transit_router_factory, transit_weights)
-        # a share ``rate`` of everyone, drawn from those not in flight elsewhere
-        eligible = int(np.count_nonzero(~ledger.in_flight))
-        share = min(1.0, rate * len(ledger) / eligible) if eligible else 0.0
-        cohort = (self.scheduler.allocate(ledger, 1, share, it, weave_rng(seed, it, "allocate", j))[0]
-                  if share > 0 else np.zeros(0, dtype=np.int64))
+        # a share ``rate`` of everyone, those in flight in other slots last
+        # (as a Weave round, a person may innovate in several strands at once)
+        cohort = (self.scheduler.allocate(ledger, 1, rate, it, weave_rng(seed, it, "allocate", j))[0]
+                  if rate > 0 else np.zeros(0, dtype=np.int64))
         job = self._strand_job(ledger, rctx, runner, it, j, cohort)
         ledger.last_innovated[cohort] = it
-        ledger.in_flight[cohort] = True
+        ledger.in_flight[cohort] += 1
         rows = np.asarray(job.rows, dtype=np.int64)
         if getattr(self.loom, "workers", 0):  # workers load only what they use
             job = slim_jobs([job])[0]

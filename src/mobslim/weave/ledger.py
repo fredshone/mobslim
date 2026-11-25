@@ -6,7 +6,7 @@ selected plan) plus what weaving needs on top:
 ==================  ===========================  ==============================================
 ``score_n``         ``int32[n_persons, slots]``  samples behind each stored score
 ``last_innovated``  ``int64[n_persons]``         iteration of the last innovation (-1: never)
-``in_flight``       ``bool[n_persons]``          innovating in a launched, unmerged strand
+``in_flight``       ``int32[n_persons]``         launched, unmerged strands innovating them
 ``version``         ``int``                      merges so far (an observation's ``basis``)
 ==================  ===========================  ==============================================
 
@@ -40,7 +40,7 @@ class Ledger:
         n = len(population)
         score_n = np.where(np.isnan(population.scores), 0, 1).astype(np.int32)
         return cls(population, score_n, np.full(n, -1, dtype=np.int64),
-                   np.zeros(n, dtype=bool), 0, best_plan_rows(population))
+                   np.zeros(n, dtype=np.int32), 0, best_plan_rows(population))
 
     def __len__(self) -> int:
         return len(self.population)

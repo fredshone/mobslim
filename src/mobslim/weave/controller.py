@@ -257,7 +257,7 @@ class Weave(Controller):
                 obs = self._add_new_plans(ledger, results)
                 merged = merge(ledger, obs, self.reducer, max_plans, removal,
                                weave_rng(cfg.seed, it, "prune"), selected_strand=0)
-                ledger.in_flight[:] = False
+                ledger.in_flight[:] = 0
                 t_merged = time.perf_counter()
                 scenario = state.scenario = scenario.with_population(ledger.population)
                 self._notify("on_scoring", state)
@@ -331,7 +331,7 @@ class Weave(Controller):
                 for j, cohort in enumerate(cohorts)]
         everyone = np.concatenate(cohorts) if cohorts else np.zeros(0, dtype=np.int64)
         ledger.last_innovated[everyone] = it
-        ledger.in_flight[everyone] = True
+        np.add.at(ledger.in_flight, everyone, 1)
         if len(jobs) > 1 and getattr(self.loom, "workers", 0):  # workers load only what they use
             jobs = slim_jobs(jobs)
         return jobs, len(everyone)

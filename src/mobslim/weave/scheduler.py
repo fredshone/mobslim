@@ -11,7 +11,10 @@ without replacement (Efraimidis-Spirakis keys ``u ** (1 / w)``) with weight
 ``w = (1 + staleness) ** alpha``, where staleness is the number of iterations
 since the person last innovated. ``alpha = 0`` is uniform random;
 ``alpha -> inf`` strict oldest-first; ``alpha`` around 1-2 is random across
-iterations but leaves nobody out for long.
+iterations but leaves nobody out for long. Persons already innovating in a
+strand in flight (:class:`~mobslim.weave.AsyncWeave`'s other slots) come
+after everyone else for the extra innovations, fewest strands first, but are
+not left out: otherwise ``r * K > 1`` would leave later strands with nobody.
 
 **Spreading.** The chosen persons are shuffled and expanded into their
 copies (copies adjacent), and slot ``i`` is dealt to strand ``i mod K``:
@@ -51,7 +54,7 @@ class WeightedStalenessScheduler:
 
     ``priority(ledger, iteration) -> float[n_persons]`` defaults to
     :func:`staleness`; another priority (score variance, recent gain, ...)
-    replaces only that function. Persons ``in_flight`` are skipped.
+    replaces only that function. Persons ``in_flight`` come last.
     """
 
     def __init__(self, alpha: float = 1.0,
@@ -71,20 +74,23 @@ class WeightedStalenessScheduler:
             raise ValueError("n_strands must be >= 1.")
         if not 0 <= rate <= 1:
             raise ValueError("rate must be in [0, 1].")
-        eligible = np.flatnonzero(~ledger.in_flight)
-        n = len(eligible)
+        n = len(ledger)
         coverage = rate * n_strands
         whole = math.floor(coverage + 1e-12)
         extra = int(round((coverage - whole) * n))
         copies = np.full(n, whole, dtype=np.int64)
         if extra:
-            w = self.weights(ledger, iteration)[eligible]
+            w = self.weights(ledger, iteration)
             u = rng.random(n)
             with np.errstate(divide="ignore"):
                 keys = np.log(u) / w  # log of u ** (1 / w): larger is chosen first
-            chosen = np.argpartition(-keys, extra - 1)[:extra]
+            busy = ledger.in_flight
+            if busy.any():  # those in flight elsewhere last, fewest strands first
+                chosen = np.lexsort((-keys, busy))[:extra]
+            else:
+                chosen = np.argpartition(-keys, extra - 1)[:extra]
             copies[chosen] += 1
-        return deal(eligible, copies, n_strands, rng)
+        return deal(np.arange(n), copies, n_strands, rng)
 
 
 def deal(persons: np.ndarray, copies: np.ndarray, n_strands: int,
